@@ -6,6 +6,65 @@ with [whisper](https://github.com/openai/whisper).
 
 Works on macOS, Windows, and Linux.
 
+## Why
+
+This project was born out of Sony's Sound Organizer 2 seeing almost no
+meaningful update in a very long time — in 2026 it still does little beyond
+basic import and sync. voice-note-organizer is built with digital
+record-keeping in mind: using open-source tools like [Bun](https://bun.sh)
+and [Whisper](https://github.com/openai/whisper), you can quickly import,
+transcribe, and visualize your recordings.
+
+## Installation
+
+### 1. Prerequisites
+
+- **Node.js 18+** (or [Bun](https://bun.sh)) to run the CLI.
+- **Python 3.8+ with `pip`** — needed to install Whisper (transcription).
+- **ffmpeg** on your `PATH` — Whisper uses it to read audio, and `vno cleanup`
+  uses `ffprobe` (shipped with ffmpeg) to measure durations.
+
+### 2. Get the project and install dependencies
+
+```bash
+git clone https://github.com/<you>/voice-note-organizer.git
+cd voice-note-organizer
+
+npm install          # or: bun install
+```
+
+Optionally link it so `vno` is available everywhere:
+
+```bash
+npm link             # then you can run `vno` from any folder
+```
+
+Without linking, run it in place with `node bin/vno.js <command>`,
+`bun run <command>`, or the npm scripts (`npm run import`, etc.).
+
+### 3. Install ffmpeg
+
+- **macOS:** `brew install ffmpeg`
+- **Windows:** `winget install ffmpeg` (or `choco install ffmpeg`)
+- **Linux (Debian/Ubuntu):** `sudo apt install ffmpeg`
+
+Verify with `ffmpeg -version` and `ffprobe -version`.
+
+### 4. Install Whisper
+
+```bash
+pip install -U openai-whisper
+```
+
+(Use `pip3` if `pip` points at Python 2.) Verify with `whisper --help`.
+If Whisper isn't on your `PATH` when you run `vno transcribe`, the tool
+offers to run this `pip install` for you — but ffmpeg still has to be
+installed separately (step 3).
+
+> **Windows note:** `pip` installs `whisper.exe` into your Python `Scripts`
+> directory (e.g. `C:\PythonXX\Scripts`). If `whisper` isn't found after
+> install, add that folder to your `PATH` and restart your shell.
+
 ## Usage
 
 ```bash
@@ -37,17 +96,20 @@ vno
   remembered choice and subfolder — no re-prompting. When it finishes it also
   regenerates `index.html` (see `vno visualize`).
 - `vno transcribe` — lists audio files in the target folder that don't have
-  a transcript yet, lets you pick which to transcribe (checkbox list), and
-  runs `whisper` on each one. Before the checkbox it offers a **filter box**:
-  type any text to narrow the list to files whose name or recorded date
-  contains it (or press Enter to see everything); pass `-s/--filter <text>` to
-  skip the prompt and filter directly. Each row shows the file's **recorded
-  date** (read from the recorder's filename, e.g. `250810_1328` ->
-  `2025-08-10 13:28`, falling back to the file's modified time) and its
-  **duration**. Press **Esc** at any prompt to quit without transcribing.
-  Two files are written next to the audio file: a timed `.vtt` (WebVTT, used
-  by `vno visualize` for follow-along highlighting) and a plain `.txt` derived
-  from it (e.g. `note.m4a` -> `note.vtt` + `note.txt`). Use `-f/--file <name>`
+  a transcript yet, lets you pick which to transcribe, and runs `whisper` on
+  each one. The picker **filters live as you type**: just start typing to
+  narrow the list to rows whose text (name, recorded date or duration)
+  contains what you typed, Backspace to edit, and the count updates as you go.
+  Use ↑/↓ to move (no wraparound), **Space** to toggle a row, **Ctrl+A** to
+  toggle all currently-visible rows, and **Enter** to transcribe everything
+  that's both checked and visible. Pass `-s/--filter <text>` to pre-seed the
+  filter. Each row shows the file's **recorded date** (read from the
+  recorder's filename, e.g. `250810_1328` -> `2025-08-10 13:28`, falling back
+  to the file's modified time) and its **duration**. Press **Esc** at any
+  point — including mid-selection — to quit without transcribing.
+  One file is written next to the audio file: a timed `.vtt` (WebVTT — plain,
+  human-readable text plus the timing that drives `vno visualize`'s
+  follow-along highlighting), e.g. `note.m4a` -> `note.vtt`. Use `-f/--file <name>`
   to transcribe one specific file without the picker — pass a full path, a
   path relative to the target, or just the filename (with or without
   extension, or even a unique substring) and it's searched for and
@@ -57,11 +119,14 @@ vno
   `pip install -U openai-whisper` (note: whisper also requires `ffmpeg` on
   your PATH).
 - `vno visualize` — generates a self-contained `index.html` in the target
-  folder that lists every note with an in-page audio player. When a note has a
-  timed `.vtt` transcript, the transcript follows along as it plays
-  (highlighting and scrolling to the current line, and clicking any line jumps
-  the audio there); notes with only a plain `.txt` show the text without
-  highlighting. There's a filter box to search by name or transcript text. The
+  folder: a two-pane organizer. The left pane is a file list (newest recording
+  first) where each row shows the file name, its recorded date and time,
+  duration, and size, plus a 📝 icon when a transcript is available (○ when
+  not). Click a row and the right pane loads that note's audio player and
+  transcript. When the note has a timed `.vtt` transcript, it follows along as
+  it plays (highlighting and scrolling to the current line, and clicking any
+  line jumps the audio there); a legacy plain `.txt` (from older runs) is shown
+  without highlighting. A filter box searches by name or transcript text. The
   page references the audio by relative path (so it stays small) and needs no
   server or internet — just open it in a browser. `-o/--open` opens it for you.
   This runs automatically at the end of every `vno import`.
@@ -71,7 +136,7 @@ vno
   for confirmation (default: no) before deleting them along with any matching
   transcript. Use `-t/--threshold <seconds>` to change the cutoff, or
   `--dry-run` to just list what would be deleted without removing anything.
-  It also removes matching `.vtt`/`.srt` transcripts alongside the `.txt`.
+  It removes matching `.vtt`/`.srt`/`.txt` transcript sidecars too.
   This is the one command in `vno` that deletes files —
   `import`/`transcribe`/`visualize` never do (aside from `import` moving
   previously-nested files up into the flat layout).

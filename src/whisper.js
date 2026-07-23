@@ -1,10 +1,8 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import fs from "fs-extra";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import path from "node:path";
-import { parseCues, cuesToPlainText } from "./vtt.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,8 +10,12 @@ export async function isWhisperInstalled() {
   try {
     await execFileAsync("whisper", ["--help"], { windowsHide: true });
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // whisper is present but `--help` exited non-zero: on some Python 3.12 /
+    // argparse combos whisper's CLI throws a traceback on --help even though
+    // real transcription works. Only "command not found" (ENOENT) means it
+    // isn't installed; any other failure means it ran, so treat it as present.
+    return err?.code !== "ENOENT";
   }
 }
 
@@ -62,10 +64,9 @@ export async function ensureWhisperInstalled() {
 
 /**
  * Runs whisper on a single audio file, writing a timed transcript (.vtt) next
- * to the source file. We ask whisper for VTT (rather than plain txt) because
- * the timing is what powers the follow-along highlight in `vno visualize`,
- * then derive the plain `.txt` from it so the rest of the tool (the
- * "already transcribed?" check, cleanup) keeps working unchanged.
+ * to the source file. VTT is plain, human-readable text plus the timing that
+ * powers the follow-along highlight in `vno visualize`, so it's the only
+ * transcript we keep — the rest of the tool keys off the `.vtt`.
  */
 export function transcribeFile(filePath, { model = "turbo" } = {}) {
   return new Promise((resolve, reject) => {
@@ -89,31 +90,14 @@ export function transcribeFile(filePath, { model = "turbo" } = {}) {
       stderr += d.toString();
     });
     child.on("error", reject);
-    child.on("close", async (code) => {
+    child.on("close", (code) => {
       if (code !== 0) {
         reject(new Error(stderr || `whisper exited with code ${code}`));
         return;
       }
-      try {
-        await writePlainTextFromVtt(filePath);
-        resolve();
-      } catch (err) {
-        reject(err);
-      }
+      resolve();
     });
   });
-}
-
-const stripExt = (p) => p.slice(0, -path.extname(p).length);
-
-/** Reads the .vtt whisper just produced and writes a plain .txt next to it. */
-async function writePlainTextFromVtt(audioPath) {
-  const base = stripExt(audioPath);
-  const vttPath = `${base}.vtt`;
-  const txtPath = `${base}.txt`;
-  if (!(await fs.pathExists(vttPath))) return;
-  const cues = parseCues(await fs.readFile(vttPath, "utf8"));
-  await fs.writeFile(txtPath, cuesToPlainText(cues), "utf8");
 }
 
 function runCommand(cmd, args) {

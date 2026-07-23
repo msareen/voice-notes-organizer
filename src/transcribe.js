@@ -7,9 +7,10 @@ import { findAudioFiles } from "./sync.js";
 import { ensureWhisperInstalled, transcribeFile } from "./whisper.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "./media.js";
 import { prompt, CANCELLED } from "./prompt.js";
+import "./searchableCheckbox.js";
 
 function transcriptPathFor(audioPath) {
-  return audioPath.slice(0, -path.extname(audioPath).length) + ".txt";
+  return audioPath.slice(0, -path.extname(audioPath).length) + ".vtt";
 }
 
 /**
@@ -84,13 +85,6 @@ async function describeFiles(files, target) {
   return rows;
 }
 
-/** Case-insensitive substring match over the label and formatted date. */
-function applyFilter(rows, text) {
-  const q = text.trim().toLowerCase();
-  if (!q) return rows;
-  return rows.filter((r) => r.label.toLowerCase().includes(q) || r.dateStr.toLowerCase().includes(q));
-}
-
 export async function runTranscribe({ model, file, filter } = {}) {
   const config = await loadConfig();
 
@@ -125,34 +119,11 @@ export async function runTranscribe({ model, file, filter } = {}) {
       return;
     }
 
-    // Recorded dates are cheap (filename/mtime); compute them up front so the
-    // filter can also match on date without probing every file's duration.
-    let rows = await describeFiles(pending, config.target);
+    // Recorded dates are cheap (filename/mtime); duration needs an ffprobe call
+    // per file. The picker filters live as you type, so we can't narrow first —
+    // probe every pending file up front behind a spinner.
+    const rows = await describeFiles(pending, config.target);
 
-    // Filter step: use --filter if given, else offer an interactive filter box.
-    let filterText = filter;
-    if (filterText === undefined) {
-      const answer = await prompt([
-        {
-          type: "input",
-          name: "filter",
-          message: `Filter ${rows.length} file(s) by name or date (Enter for all, Esc to quit):`,
-        },
-      ]);
-      if (answer === CANCELLED) {
-        console.log(chalk.dim("Cancelled."));
-        return;
-      }
-      filterText = answer.filter;
-    }
-
-    rows = applyFilter(rows, filterText || "");
-    if (rows.length === 0) {
-      console.log(chalk.yellow(`No files match "${(filterText || "").trim()}".`));
-      return;
-    }
-
-    // Now that the list is narrowed, probe durations for just these files.
     const spinner = ora(`Reading duration of ${rows.length} file(s)...`).start();
     for (const row of rows) {
       row.durStr = formatDuration(await getDurationSeconds(row.file));
@@ -170,12 +141,13 @@ export async function runTranscribe({ model, file, filter } = {}) {
 
     const answer = await prompt([
       {
-        type: "checkbox",
+        type: "searchable-checkbox",
         name: "selected",
-        message: "Select files to transcribe (Esc to quit)",
+        message: "Select files to transcribe",
         choices,
         pageSize: 15,
         loop: false,
+        initialFilter: filter || "",
       },
     ]);
     if (answer === CANCELLED) {

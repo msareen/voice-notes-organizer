@@ -67,7 +67,7 @@ export async function ensureWhisperInstalled() {
  * then derive the plain `.txt` from it so the rest of the tool (the
  * "already transcribed?" check, cleanup) keeps working unchanged.
  */
-export function transcribeFile(filePath, { model = "base" } = {}) {
+export function transcribeFile(filePath, { model = "turbo" } = {}) {
   return new Promise((resolve, reject) => {
     const outputDir = path.dirname(filePath);
     const args = [

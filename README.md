@@ -26,6 +26,8 @@ vno
   lets you browse the volume's folders with the arrow keys and pin a specific
   subfolder as the sync root — useful for devices (e.g. many voice recorders)
   that bury audio several folders deep (`PRIVATE\SONY\VOICE\FOLDER01\...`).
+  Press **Esc** at any prompt to cancel the import (anything already copied is
+  kept).
   **Imported files land flat**: every recording is dropped directly into a
   single per-device folder (`voice-notes/<device>/`) rather than mirroring the
   device's deep folder tree — name collisions between subfolders are
@@ -36,15 +38,24 @@ vno
   regenerates `index.html` (see `vno visualize`).
 - `vno transcribe` — lists audio files in the target folder that don't have
   a transcript yet, lets you pick which to transcribe (checkbox list), and
-  runs `whisper` on each one. Two files are written next to the audio file:
-  a timed `.vtt` (WebVTT, used by `vno visualize` for follow-along
-  highlighting) and a plain `.txt` derived from it (e.g. `note.m4a` ->
-  `note.vtt` + `note.txt`). Use `-f/--file <name>` to transcribe one specific
-  file without the picker — pass a full path, a path relative to the target,
-  or just the filename (with or without extension, or even a unique substring)
-  and it's searched for and transcribed. If `whisper` isn't installed, it
-  offers to install it via `pip install -U openai-whisper` (note: whisper also
-  requires `ffmpeg` on your PATH).
+  runs `whisper` on each one. Before the checkbox it offers a **filter box**:
+  type any text to narrow the list to files whose name or recorded date
+  contains it (or press Enter to see everything); pass `-s/--filter <text>` to
+  skip the prompt and filter directly. Each row shows the file's **recorded
+  date** (read from the recorder's filename, e.g. `250810_1328` ->
+  `2025-08-10 13:28`, falling back to the file's modified time) and its
+  **duration**. Press **Esc** at any prompt to quit without transcribing.
+  Two files are written next to the audio file: a timed `.vtt` (WebVTT, used
+  by `vno visualize` for follow-along highlighting) and a plain `.txt` derived
+  from it (e.g. `note.m4a` -> `note.vtt` + `note.txt`). Use `-f/--file <name>`
+  to transcribe one specific file without the picker — pass a full path, a
+  path relative to the target, or just the filename (with or without
+  extension, or even a unique substring) and it's searched for and
+  transcribed. It then asks which Whisper model to use (defaulting to the
+  fast, accurate `turbo` model); pass `-m/--model <name>` to choose up front.
+  If `whisper` isn't installed, it offers to install it via
+  `pip install -U openai-whisper` (note: whisper also requires `ffmpeg` on
+  your PATH).
 - `vno visualize` — generates a self-contained `index.html` in the target
   folder that lists every note with an in-page audio player. When a note has a
   timed `.vtt` transcript, the transcript follows along as it plays

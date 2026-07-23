@@ -1,11 +1,11 @@
 import path from "node:path";
 import fs from "fs-extra";
 import chalk from "chalk";
-import inquirer from "inquirer";
 import { loadConfig, saveConfig } from "./config.js";
 import { detectVolumes } from "./volumes.js";
 import { syncVolume } from "./sync.js";
 import { runVisualize } from "./visualize.js";
+import { promptStrict, PromptCancelled } from "./prompt.js";
 
 export async function runImport() {
   const config = await loadConfig();
@@ -42,6 +42,34 @@ export async function runImport() {
 
   let changed = false;
 
+  try {
+    changed = await importVolumes(volumes, config);
+  } catch (err) {
+    if (err instanceof PromptCancelled) {
+      console.log(chalk.dim("\nImport cancelled."));
+    } else {
+      throw err;
+    }
+  }
+
+  if (changed) await saveConfig(config);
+
+  // Refresh the browsable player so it always reflects the latest import.
+  await runVisualize({ quiet: true });
+
+  return config;
+}
+
+/**
+ * Walks the detected volumes, prompting where needed and syncing the ones the
+ * user (or a remembered choice) opts into. Returns whether config changed, so
+ * the caller can persist it. Any Esc during a prompt throws PromptCancelled,
+ * which the caller turns into a clean "Import cancelled" while still saving
+ * whatever synced before the cancel.
+ */
+async function importVolumes(volumes, config) {
+  let changed = false;
+
   for (const volume of volumes) {
     const known = config.knownMounts[volume.id];
 
@@ -56,7 +84,7 @@ export async function runImport() {
     let subdir = known && known.sourceSubdir;
 
     if (!volume.isManualSource && !known) {
-      const answer = await inquirer.prompt([
+      const answer = await promptStrict([
         {
           type: "list",
           name: "importNow",
@@ -78,7 +106,7 @@ export async function runImport() {
         subdir = await promptForSubdir(volume);
       }
 
-      const rememberAnswer = await inquirer.prompt([
+      const rememberAnswer = await promptStrict([
         {
           type: "list",
           name: "remember",
@@ -122,12 +150,7 @@ export async function runImport() {
     }
   }
 
-  if (changed) await saveConfig(config);
-
-  // Refresh the browsable player so it always reflects the latest import.
-  await runVisualize({ quiet: true });
-
-  return config;
+  return changed;
 }
 
 /**
@@ -137,7 +160,7 @@ export async function runImport() {
  * root instead of always mirroring from the volume's top level.
  */
 async function promptForSubdir(volume) {
-  const { scope } = await inquirer.prompt([
+  const { scope } = await promptStrict([
     {
       type: "list",
       name: "scope",
@@ -187,7 +210,7 @@ async function browseForSubdir(volume) {
     choices.push({ name: "Type a path manually instead", value: { action: "manual" } });
     choices.push({ name: "Cancel - sync whole volume", value: { action: "cancel" } });
 
-    const { choice } = await inquirer.prompt([
+    const { choice } = await promptStrict([
       {
         type: "list",
         name: "choice",
@@ -213,7 +236,7 @@ async function browseForSubdir(volume) {
     }
     if (choice.action === "manual") {
       while (true) {
-        const { subdir } = await inquirer.prompt([
+        const { subdir } = await promptStrict([
           {
             type: "input",
             name: "subdir",

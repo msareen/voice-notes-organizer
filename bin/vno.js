@@ -26,13 +26,17 @@ program
 program
   .command("transcribe")
   .description("Transcribe imported voice notes using whisper")
-  .option("-m, --model <model>", "whisper model to use (tiny, base, small, medium, large)")
+  .option("-m, --model <model>", "whisper model to use (turbo, tiny, base, small, medium, large)")
   .option(
     "-f, --file <name>",
     "transcribe a specific file (name, relative path, or absolute path) instead of picking from a list"
   )
+  .option(
+    "-s, --filter <text>",
+    "pre-filter the picker list to files whose name or recorded date contains this text"
+  )
   .action(async (opts) => {
-    await runTranscribe({ model: opts.model, file: opts.file });
+    await runTranscribe({ model: opts.model, file: opts.file, filter: opts.filter });
   });
 
 program

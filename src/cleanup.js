@@ -6,26 +6,9 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig } from "./config.js";
 import { findAudioFiles } from "./sync.js";
+import { getDurationSeconds } from "./media.js";
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Reads duration in seconds via ffprobe (bundled with ffmpeg, which whisper
- * already requires on PATH). Returns null if it can't be determined.
- */
-async function getDurationSeconds(filePath) {
-  try {
-    const { stdout } = await execFileAsync(
-      "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
-      { windowsHide: true }
-    );
-    const value = parseFloat(stdout.trim());
-    return Number.isFinite(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
 
 // Transcript sidecars written next to an audio file (whisper .vtt, the
 // derived .txt, plus .srt for completeness) that should go with it on delete.

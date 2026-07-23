@@ -1,10 +1,12 @@
 import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
-import inquirer from "inquirer";
+import ora from "ora";
 import { loadConfig } from "./config.js";
 import { findAudioFiles } from "./sync.js";
 import { ensureWhisperInstalled, transcribeFile } from "./whisper.js";
+import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "./media.js";
+import { prompt, CANCELLED } from "./prompt.js";
 
 function transcriptPathFor(audioPath) {
   return audioPath.slice(0, -path.extname(audioPath).length) + ".txt";
@@ -56,7 +58,34 @@ async function resolveNamedFile(name, allAudio, target) {
   return null;
 }
 
-export async function runTranscribe({ model, file } = {}) {
+/**
+ * Builds display metadata (relative label + recorded date) for each file. Date
+ * comes from the filename when the recorder encodes it there, else file mtime.
+ * Duration is filled in later (only for files that survive filtering) since it
+ * needs an ffprobe call per file.
+ */
+async function describeFiles(files, target) {
+  const rows = [];
+  for (const file of files) {
+    const date = await recordedDate(file);
+    rows.push({
+      file,
+      label: path.relative(target, file),
+      date,
+      dateStr: formatDate(date),
+    });
+  }
+  return rows;
+}
+
+/** Case-insensitive substring match over the label and formatted date. */
+function applyFilter(rows, text) {
+  const q = text.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) => r.label.toLowerCase().includes(q) || r.dateStr.toLowerCase().includes(q));
+}
+
+export async function runTranscribe({ model, file, filter } = {}) {
   const config = await loadConfig();
 
   if (!(await fs.pathExists(config.target))) {
@@ -90,21 +119,62 @@ export async function runTranscribe({ model, file } = {}) {
       return;
     }
 
-    console.log(chalk.bold(`${pending.length} file(s) need transcription:`));
+    // Recorded dates are cheap (filename/mtime); compute them up front so the
+    // filter can also match on date without probing every file's duration.
+    let rows = await describeFiles(pending, config.target);
 
-    const answer = await inquirer.prompt([
+    // Filter step: use --filter if given, else offer an interactive filter box.
+    let filterText = filter;
+    if (filterText === undefined) {
+      const answer = await prompt([
+        {
+          type: "input",
+          name: "filter",
+          message: `Filter ${rows.length} file(s) by name or date (Enter for all, Esc to quit):`,
+        },
+      ]);
+      if (answer === CANCELLED) {
+        console.log(chalk.dim("Cancelled."));
+        return;
+      }
+      filterText = answer.filter;
+    }
+
+    rows = applyFilter(rows, filterText || "");
+    if (rows.length === 0) {
+      console.log(chalk.yellow(`No files match "${(filterText || "").trim()}".`));
+      return;
+    }
+
+    // Now that the list is narrowed, probe durations for just these files.
+    const spinner = ora(`Reading duration of ${rows.length} file(s)...`).start();
+    for (const row of rows) {
+      row.durStr = formatDuration(await getDurationSeconds(row.file));
+    }
+    spinner.stop();
+
+    const labelWidth = Math.min(50, Math.max(...rows.map((r) => r.label.length)));
+    const choices = rows.map((r) => ({
+      name: `${r.label.padEnd(labelWidth)}  ${chalk.dim(r.dateStr.padEnd(16))}  ${chalk.dim(r.durStr.padStart(7))}`,
+      value: r.file,
+      checked: true,
+    }));
+
+    console.log(chalk.bold(`${rows.length} file(s) to transcribe:`));
+
+    const answer = await prompt([
       {
         type: "checkbox",
         name: "selected",
-        message: "Select files to transcribe",
-        choices: pending.map((f) => ({
-          name: path.relative(config.target, f),
-          value: f,
-          checked: true,
-        })),
+        message: "Select files to transcribe (Esc to quit)",
+        choices,
         pageSize: 15,
       },
     ]);
+    if (answer === CANCELLED) {
+      console.log(chalk.dim("Cancelled."));
+      return;
+    }
     selected = answer.selected;
 
     if (selected.length === 0) {
@@ -118,26 +188,30 @@ export async function runTranscribe({ model, file } = {}) {
 
   let chosenModel = model;
   if (!chosenModel) {
-    const answer = await inquirer.prompt([
+    const answer = await prompt([
       {
         type: "list",
         name: "model",
-        message: "Whisper model to use",
-        choices: ["tiny", "base", "small", "medium", "large"],
-        default: "base",
+        message: "Whisper model to use (Esc to quit)",
+        choices: ["turbo", "tiny", "base", "small", "medium", "large"],
+        default: "turbo",
       },
     ]);
+    if (answer === CANCELLED) {
+      console.log(chalk.dim("Cancelled."));
+      return;
+    }
     chosenModel = answer.model;
   }
 
   let done = 0;
-  for (const file of selected) {
-    console.log(chalk.cyan(`\n[${++done}/${selected.length}] Transcribing ${path.basename(file)}...`));
+  for (const f of selected) {
+    console.log(chalk.cyan(`\n[${++done}/${selected.length}] Transcribing ${path.basename(f)}...`));
     try {
-      await transcribeFile(file, { model: chosenModel });
-      console.log(chalk.green(`Saved -> ${transcriptPathFor(file)}`));
+      await transcribeFile(f, { model: chosenModel });
+      console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
     } catch (err) {
-      console.log(chalk.red(`Failed to transcribe ${path.basename(file)}: ${err.message}`));
+      console.log(chalk.red(`Failed to transcribe ${path.basename(f)}: ${err.message}`));
     }
   }
 

@@ -1,0 +1,262 @@
+import path from "node:path";
+import fs from "fs-extra";
+import chalk from "chalk";
+import inquirer from "inquirer";
+import { loadConfig, saveConfig } from "./config.js";
+import { detectVolumes } from "./volumes.js";
+import { syncVolume } from "./sync.js";
+import { runVisualize } from "./visualize.js";
+
+export async function runImport() {
+  const config = await loadConfig();
+  const volumes = await detectVolumes();
+
+  for (const sourcePath of config.sources || []) {
+    if (await fs.pathExists(sourcePath)) {
+      // Manually configured in config.json - trusted by definition, so it
+      // always syncs without the new-volume prompt.
+      volumes.push({
+        name: path.basename(sourcePath) || "source",
+        mountPath: sourcePath,
+        id: `source:${sourcePath.toLowerCase()}`,
+        isManualSource: true,
+      });
+    } else {
+      console.log(chalk.yellow(`Configured source folder does not exist: ${sourcePath}`));
+    }
+  }
+
+  if (volumes.length === 0) {
+    console.log(chalk.dim("No external/removable volumes detected."));
+    return config;
+  }
+
+  assignDestNames(volumes);
+
+  console.log(chalk.bold(`Found ${volumes.length} volume(s):`));
+  for (const v of volumes) {
+    const size = formatSize(v.sizeBytes);
+    console.log(`  - ${v.name} ${chalk.dim(`(${v.mountPath}${size ? ", " + size : ""})`)}`);
+  }
+  console.log();
+
+  let changed = false;
+
+  for (const volume of volumes) {
+    const known = config.knownMounts[volume.id];
+
+    if (volume.isManualSource) {
+      console.log(chalk.dim(`Syncing configured source "${volume.name}".`));
+    } else if (known && known.autoImport === false) {
+      console.log(chalk.dim(`Skipping "${volume.name}" (remembered: do not import).`));
+      continue;
+    }
+
+    let proceed = volume.isManualSource || Boolean(known && known.autoImport);
+    let subdir = known && known.sourceSubdir;
+
+    if (!volume.isManualSource && !known) {
+      const answer = await inquirer.prompt([
+        {
+          type: "list",
+          name: "importNow",
+          message: `New volume "${volume.name}" detected at ${volume.mountPath}${
+            volume.sizeBytes ? ` (${formatSize(volume.sizeBytes)})` : ""
+          }. Import voice notes to local storage?`,
+          choices: [
+            { name: "No, skip this volume", value: false },
+            { name: "Yes, import now", value: true },
+          ],
+          // Default to No: hitting Enter without reading should never kick
+          // off a copy from an unfamiliar/large volume.
+          default: false,
+        },
+      ]);
+      proceed = answer.importNow;
+
+      if (proceed) {
+        subdir = await promptForSubdir(volume);
+      }
+
+      const rememberAnswer = await inquirer.prompt([
+        {
+          type: "list",
+          name: "remember",
+          message: "Remember this choice for next time?",
+          choices: [
+            { name: "Yes, don't ask again for this volume", value: true },
+            { name: "No, ask me again next time", value: false },
+          ],
+          default: true,
+        },
+      ]);
+
+      if (rememberAnswer.remember) {
+        config.knownMounts[volume.id] = {
+          name: volume.name,
+          autoImport: proceed,
+          sourceSubdir: subdir || null,
+          lastSynced: null,
+        };
+        changed = true;
+      }
+    } else if (!volume.isManualSource) {
+      // known && autoImport === true, but let's re-confirm nothing broke it
+      console.log(chalk.dim(`Auto-importing remembered volume "${volume.name}".`));
+    }
+
+    if (!proceed) continue;
+
+    const effectiveVolume = subdir
+      ? { ...volume, mountPath: path.join(volume.mountPath, subdir) }
+      : volume;
+
+    const result = await syncVolume(effectiveVolume, config.target);
+    if (!volume.isManualSource) {
+      config.knownMounts[volume.id] = {
+        ...(config.knownMounts[volume.id] || { name: volume.name, autoImport: true, sourceSubdir: subdir || null }),
+        lastSynced: new Date().toISOString(),
+        lastResult: { copied: result.copied, skipped: result.skipped, total: result.total },
+      };
+      changed = true;
+    }
+  }
+
+  if (changed) await saveConfig(config);
+
+  // Refresh the browsable player so it always reflects the latest import.
+  await runVisualize({ quiet: true });
+
+  return config;
+}
+
+/**
+ * Some devices (e.g. many voice recorders) bury audio several folders deep
+ * (PRIVATE\SONY\VOICE\FOLDER01\...), which makes the mirrored local path
+ * awkward. Let the user pin a subfolder of the volume as the effective sync
+ * root instead of always mirroring from the volume's top level.
+ */
+async function promptForSubdir(volume) {
+  const { scope } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "scope",
+      message: "Sync from the whole volume, or a specific subfolder within it?",
+      choices: [
+        { name: "Whole volume", value: "whole" },
+        { name: "Specific subfolder", value: "subfolder" },
+      ],
+      default: "whole",
+    },
+  ]);
+
+  if (scope === "whole") return null;
+
+  return browseForSubdir(volume);
+}
+
+/**
+ * Arrow-key folder browser rooted at volume.mountPath, so the user doesn't
+ * have to type out a path by hand. Returns the chosen path relative to
+ * volume.mountPath, or null for "whole volume".
+ */
+async function browseForSubdir(volume) {
+  let current = volume.mountPath;
+
+  while (true) {
+    let entries = [];
+    try {
+      entries = (await fs.readdir(current, { withFileTypes: true }))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      // unreadable directory - fall through with no subfolders listed
+    }
+
+    const rel = path.relative(volume.mountPath, current);
+    const choices = [
+      { name: `Use this folder${rel ? ` (${rel})` : " (volume root)"}`, value: { action: "use" } },
+    ];
+    if (current !== volume.mountPath) {
+      choices.push({ name: "..  (go up)", value: { action: "up" } });
+    }
+    for (const name of entries) {
+      choices.push({ name: `${name}/`, value: { action: "down", name } });
+    }
+    choices.push({ name: "Type a path manually instead", value: { action: "manual" } });
+    choices.push({ name: "Cancel - sync whole volume", value: { action: "cancel" } });
+
+    const { choice } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "choice",
+        message: `Browsing ${current}`,
+        choices,
+        pageSize: 15,
+      },
+    ]);
+
+    if (choice.action === "use") {
+      return rel || null;
+    }
+    if (choice.action === "cancel") {
+      return null;
+    }
+    if (choice.action === "up") {
+      current = path.dirname(current);
+      continue;
+    }
+    if (choice.action === "down") {
+      current = path.join(current, choice.name);
+      continue;
+    }
+    if (choice.action === "manual") {
+      while (true) {
+        const { subdir } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "subdir",
+            message: `Subfolder path relative to ${volume.mountPath} (e.g. PRIVATE/SONY/VOICE):`,
+          },
+        ]);
+        const trimmed = subdir.trim();
+        if (!trimmed) return null;
+        const candidate = path.join(volume.mountPath, trimmed);
+        if (await fs.pathExists(candidate)) return trimmed;
+        console.log(chalk.yellow(`"${candidate}" doesn't exist - try again, or leave blank to use the whole volume.`));
+      }
+    }
+  }
+}
+
+/**
+ * Two different volumes/sources can share a folder name (e.g. two drives
+ * both labeled "Recordings"), which would otherwise make their files land
+ * in the same destination folder and mix together. Give later duplicates a
+ * disambiguated `destName` derived from their mount path.
+ */
+function assignDestNames(volumes) {
+  const seen = new Map();
+  for (const volume of volumes) {
+    const key = volume.name.toLowerCase();
+    const count = seen.get(key) || 0;
+    seen.set(key, count + 1);
+    if (count > 0) {
+      const parent = path.basename(path.dirname(volume.mountPath.replace(/[\\/]+$/, "")));
+      volume.destName = parent ? `${volume.name} (${parent})` : `${volume.name} (${count + 1})`;
+    }
+  }
+}
+
+function formatSize(bytes) {
+  if (!bytes || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}

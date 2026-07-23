@@ -1,0 +1,32 @@
+{
+  "name": "voice-notes-organizer",
+  "version": "0.1.0",
+  "description": "Detects removable volumes, imports voice notes to local storage, and transcribes them with whisper.",
+  "type": "module",
+  "bin": {
+    "vno": "bin/vno.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/vno.js",
+    "import": "node bin/vno.js import",
+    "transcribe": "node bin/vno.js transcribe",
+    "cleanup": "node bin/vno.js cleanup",
+    "visualize": "node bin/vno.js visualize",
+    "config": "node bin/vno.js config"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "fs-extra": "^11.2.0",
+    "inquirer": "^9.3.6",
+    "ora": "^8.1.0"
+  },
+  "license": "MIT"
+}

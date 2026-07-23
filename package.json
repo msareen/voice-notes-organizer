@@ -1,6 +1,6 @@
 {
-  "name": "voice-notes-organizer",
-  "version": "0.1.0",
+  "name": "@msareen/voice-notes-organizer",
+  "version": "0.2.0",
   "description": "Detects removable volumes, imports voice notes to local storage, and transcribes them with whisper.",
   "type": "module",
   "bin": {

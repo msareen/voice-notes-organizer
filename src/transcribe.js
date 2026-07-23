@@ -75,6 +75,12 @@ async function describeFiles(files, target) {
       dateStr: formatDate(date),
     });
   }
+  // Newest first. Files whose date couldn't be determined sort to the bottom.
+  rows.sort((a, b) => {
+    const ta = a.date instanceof Date ? a.date.getTime() : -Infinity;
+    const tb = b.date instanceof Date ? b.date.getTime() : -Infinity;
+    return tb - ta;
+  });
   return rows;
 }
 
@@ -169,6 +175,7 @@ export async function runTranscribe({ model, file, filter } = {}) {
         message: "Select files to transcribe (Esc to quit)",
         choices,
         pageSize: 15,
+        loop: false,
       },
     ]);
     if (answer === CANCELLED) {
@@ -195,6 +202,7 @@ export async function runTranscribe({ model, file, filter } = {}) {
         message: "Whisper model to use (Esc to quit)",
         choices: ["turbo", "tiny", "base", "small", "medium", "large"],
         default: "turbo",
+        loop: false,
       },
     ]);
     if (answer === CANCELLED) {

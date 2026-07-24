@@ -28,7 +28,7 @@ program
   .description(
     "Detects removable volumes, imports voice notes to local storage, and transcribes them with whisper."
   )
-  .version("0.2.0");
+  .version("0.3.0");
 
 program
   .command("import", { isDefault: true })

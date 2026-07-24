@@ -5,7 +5,9 @@ import { loadConfig, saveConfig } from "./config.js";
 import { detectVolumes } from "./volumes.js";
 import { syncVolume } from "./sync.js";
 import { runVisualize } from "./visualize.js";
-import { promptStrict, PromptCancelled } from "./prompt.js";
+import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.js";
+import { ensureWhisperInstalled } from "./whisper.js";
+import { transcribeMany } from "./transcribe.js";
 
 export async function runImport() {
   const config = await loadConfig();
@@ -41,9 +43,12 @@ export async function runImport() {
   console.log();
 
   let changed = false;
+  let imported = [];
 
   try {
-    changed = await importVolumes(volumes, config);
+    const result = await importVolumes(volumes, config);
+    changed = result.changed;
+    imported = result.imported;
   } catch (err) {
     if (err instanceof PromptCancelled) {
       console.log(chalk.dim("\nImport cancelled."));
@@ -52,12 +57,73 @@ export async function runImport() {
     }
   }
 
+  // Freshly imported notes can be auto-translated to English as they land.
+  if (imported.length > 0 && (await maybeAutoTranslate(imported, config))) {
+    changed = true;
+  }
+
   if (changed) await saveConfig(config);
 
-  // Refresh the browsable player so it always reflects the latest import.
+  // Refresh the browsable player so it always reflects the latest import
+  // (and any transcripts just produced).
   await runVisualize({ quiet: true });
 
   return config;
+}
+
+/**
+ * Runs whisper's translate task over the notes imported this session, so audio
+ * in any language lands as an English transcript. Honors the remembered
+ * `autoTranslate` setting; if it hasn't been decided yet, asks once and
+ * remembers the answer. Returns whether config changed (a new remembered
+ * choice), so the caller can persist it.
+ */
+async function maybeAutoTranslate(imported, config) {
+  let translate = config.autoTranslate;
+  let changed = false;
+
+  if (translate === null || translate === undefined) {
+    const answer = await prompt([
+      {
+        type: "list",
+        name: "choice",
+        message: `Auto-translate the ${imported.length} newly imported note(s) to English with whisper?`,
+        choices: [
+          { name: "Yes — translate imports as they come in", value: true },
+          { name: "No — just import, I'll transcribe later", value: false },
+        ],
+        default: true,
+      },
+    ]);
+    if (answer === CANCELLED) {
+      // Leave the setting undecided so it's asked again next time.
+      return false;
+    }
+    translate = answer.choice;
+    config.autoTranslate = translate;
+    changed = true;
+    console.log(
+      chalk.dim(
+        translate
+          ? "Remembered: imports will auto-translate. Change this any time with `vno setting`."
+          : "Remembered: imports won't auto-translate. Change this any time with `vno setting`."
+      )
+    );
+  }
+
+  if (!translate) return changed;
+
+  if (!(await ensureWhisperInstalled())) {
+    console.log(chalk.yellow("Skipping auto-translate — whisper isn't available."));
+    return changed;
+  }
+
+  const model = config.defaultModel || "turbo";
+  console.log(chalk.bold(`\nAuto-translating ${imported.length} imported note(s) with the "${model}" model...`));
+  const done = await transcribeMany(imported, { model, translate: true });
+  console.log(chalk.bold(`\nDone. Translated ${done}/${imported.length} imported note(s).`));
+
+  return changed;
 }
 
 /**
@@ -66,9 +132,14 @@ export async function runImport() {
  * the caller can persist it. Any Esc during a prompt throws PromptCancelled,
  * which the caller turns into a clean "Import cancelled" while still saving
  * whatever synced before the cancel.
+ *
+ * Returns { changed, imported } where `imported` is the flat list of newly
+ * copied destination paths across all volumes, so the caller can offer to
+ * translate exactly the notes that just landed.
  */
 async function importVolumes(volumes, config) {
   let changed = false;
+  const imported = [];
 
   for (const volume of volumes) {
     const known = config.knownMounts[volume.id];
@@ -140,6 +211,7 @@ async function importVolumes(volumes, config) {
       : volume;
 
     const result = await syncVolume(effectiveVolume, config.target);
+    imported.push(...result.copiedFiles);
     if (!volume.isManualSource) {
       config.knownMounts[volume.id] = {
         ...(config.knownMounts[volume.id] || { name: volume.name, autoImport: true, sourceSubdir: subdir || null }),
@@ -150,7 +222,7 @@ async function importVolumes(volumes, config) {
     }
   }
 
-  return changed;
+  return { changed, imported };
 }
 
 /**

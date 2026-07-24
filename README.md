@@ -93,9 +93,15 @@ vno
   disambiguated with a `_2`, `_3`, … suffix. If you'd previously imported with
   the old nested layout, the next import flattens it in place automatically.
   Known volumes are auto-imported (or skipped) silently next time, using the
-  remembered choice and subfolder — no re-prompting. When it finishes it also
-  regenerates `index.html` (see `vno visualize`).
-- `vno transcribe` — lists audio files in the target folder that don't have
+  remembered choice and subfolder — no re-prompting.
+  **Auto-translate:** after importing new notes, `vno` offers (once) to
+  auto-translate them to English with whisper's translate task as they come in.
+  Your answer is remembered, so every subsequent import applies the same choice
+  without asking — every note that lands that session (and in future sessions)
+  is translated automatically. Toggle or reset this any time with
+  `vno setting`. When it finishes it always regenerates `index.html` (see
+  `vno visualize`), so the player reflects the latest import and transcripts.
+- `vno transcribe` (alias `vno t` / `vno --t`) — lists audio files in the target folder that don't have
   a transcript yet, lets you pick which to transcribe, and runs `whisper` on
   each one. The picker **filters live as you type**: just start typing to
   narrow the list to rows whose text (name, recorded date or duration)
@@ -114,11 +120,14 @@ vno
   path relative to the target, or just the filename (with or without
   extension, or even a unique substring) and it's searched for and
   transcribed. It then asks which Whisper model to use (defaulting to the
-  fast, accurate `turbo` model); pass `-m/--model <name>` to choose up front.
+  fast, accurate `turbo` model, or whatever you set as the default in
+  `vno setting`); pass `-m/--model <name>` to choose up front. Pass
+  `--translate` to produce an English translation (whisper's translate task)
+  instead of a verbatim transcript.
   If `whisper` isn't installed, it offers to install it via
   `pip install -U openai-whisper` (note: whisper also requires `ffmpeg` on
   your PATH).
-- `vno visualize` — generates a self-contained `index.html` in the target
+- `vno visualize` (alias `vno v` / `vno --v`) — generates a self-contained `index.html` in the target
   folder: a two-pane organizer. The left pane is a file list (newest recording
   first) where each row shows the file name, its recorded date and time,
   duration, and size, plus a 📝 icon when a transcript is available (○ when
@@ -140,6 +149,12 @@ vno
   This is the one command in `vno` that deletes files —
   `import`/`transcribe`/`visualize` never do (aside from `import` moving
   previously-nested files up into the flat layout).
+- `vno setting` (alias `vno settings`) — an interactive wizard for the direct
+  switches you're most likely to flip without hand-editing `config.json`:
+  whether imports auto-translate (on / off / ask each time), the default
+  whisper model, the target import folder, and forgetting all remembered volume
+  choices. Arrow keys to pick a setting, Esc to exit; changes save as you make
+  them.
 - `vno config` — prints the path to the config file.
 
 Every command is also available as an npm script:
@@ -149,6 +164,7 @@ npm run import
 npm run transcribe            # or: npm run transcribe -- --file 250810_1328
 npm run cleanup               # or: npm run cleanup -- --dry-run
 npm run visualize             # or: npm run visualize -- --open
+npm run setting
 npm run config
 ```
 
@@ -167,7 +183,9 @@ Settings live in a global per-user config file:
 {
   "target": "/path/to/voice-notes",
   "sources": [],
-  "knownMounts": {}
+  "knownMounts": {},
+  "autoTranslate": null,
+  "defaultModel": "turbo"
 }
 ```
 
@@ -197,6 +215,13 @@ Settings live in a global per-user config file:
   subfolder (if any) to sync from, and when it was last synced, so you're
   only asked once per volume. Edit this file directly to change a volume's
   remembered `sourceSubdir`.
+- `autoTranslate` — whether freshly imported notes are auto-translated to
+  English on import. `null` (the default) means "not decided yet", so `vno`
+  asks once and stores your answer here; `true`/`false` translate imports (or
+  don't) without asking. Reset it to `null` — or flip it — from `vno setting`.
+- `defaultModel` — the whisper model used for auto-translation and pre-selected
+  in the `vno transcribe` picker. One of `turbo`, `tiny`, `base`, `small`,
+  `medium`, `large`. Change it from `vno setting`.
 
 ## Supported audio extensions
 

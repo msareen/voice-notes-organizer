@@ -67,14 +67,19 @@ export async function ensureWhisperInstalled() {
  * to the source file. VTT is plain, human-readable text plus the timing that
  * powers the follow-along highlight in `vno visualize`, so it's the only
  * transcript we keep — the rest of the tool keys off the `.vtt`.
+ *
+ * With `translate: true` whisper uses its translate task, turning audio in any
+ * language into an English transcript instead of transcribing verbatim.
  */
-export function transcribeFile(filePath, { model = "turbo" } = {}) {
+export function transcribeFile(filePath, { model = "turbo", translate = false } = {}) {
   return new Promise((resolve, reject) => {
     const outputDir = path.dirname(filePath);
     const args = [
       filePath,
       "--model",
       model,
+      "--task",
+      translate ? "translate" : "transcribe",
       "--output_format",
       "vtt",
       "--output_dir",

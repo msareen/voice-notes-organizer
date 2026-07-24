@@ -63,6 +63,7 @@ export async function syncVolume(volume, target) {
   const files = (await findAudioFiles(volume.mountPath)).sort((a, b) => a.localeCompare(b));
   let copied = 0;
   let skipped = 0;
+  const copiedFiles = [];
 
   const spinner = ora(`Syncing "${volume.name}" (${files.length} audio file(s) found)...`).start();
 
@@ -77,6 +78,7 @@ export async function syncVolume(volume, target) {
       }
       await fs.copy(src, dest, { overwrite: true });
       copied++;
+      copiedFiles.push(dest);
       spinner.text = `Syncing "${volume.name}"... (${copied} copied, ${skipped} skipped)`;
     } catch (err) {
       spinner.warn(`Failed to copy ${label}: ${err.message}`);
@@ -88,7 +90,7 @@ export async function syncVolume(volume, target) {
     `Synced "${volume.name}": ${chalk.green(copied + " copied")}, ${chalk.dim(skipped + " already up to date")} -> ${destRoot}`
   );
 
-  return { destRoot, copied, skipped, total: files.length };
+  return { destRoot, copied, skipped, total: files.length, copiedFiles };
 }
 
 /**

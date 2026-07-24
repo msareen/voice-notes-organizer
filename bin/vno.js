@@ -5,16 +5,30 @@ import { runImport } from "../src/import.js";
 import { runTranscribe } from "../src/transcribe.js";
 import { runCleanup } from "../src/cleanup.js";
 import { runVisualize } from "../src/visualize.js";
+import { runSettings } from "../src/settings.js";
 import { configFilePath } from "../src/config.js";
 
 const program = new Command();
+
+// Short, dashed aliases for the two commands people reach for most, so `vno
+// --v` and `vno --t` work as muscle-memory shortcuts. Commander treats these
+// as options otherwise, so we rewrite them to their command names before parse.
+const SHORTCUTS = {
+  "--v": "visualize",
+  "-v": "visualize",
+  "--t": "transcribe",
+  "-t": "transcribe",
+};
+if (SHORTCUTS[process.argv[2]]) {
+  process.argv[2] = SHORTCUTS[process.argv[2]];
+}
 
 program
   .name("vno")
   .description(
     "Detects removable volumes, imports voice notes to local storage, and transcribes them with whisper."
   )
-  .version("0.1.0");
+  .version("0.2.0");
 
 program
   .command("import", { isDefault: true })
@@ -25,7 +39,8 @@ program
 
 program
   .command("transcribe")
-  .description("Transcribe imported voice notes using whisper")
+  .alias("t")
+  .description("Transcribe imported voice notes using whisper (alias: t, --t)")
   .option("-m, --model <model>", "whisper model to use (turbo, tiny, base, small, medium, large)")
   .option(
     "-f, --file <name>",
@@ -35,8 +50,14 @@ program
     "-s, --filter <text>",
     "pre-filter the picker list to files whose name or recorded date contains this text"
   )
+  .option("--translate", "translate to English (whisper translate task) instead of verbatim transcription")
   .action(async (opts) => {
-    await runTranscribe({ model: opts.model, file: opts.file, filter: opts.filter });
+    await runTranscribe({
+      model: opts.model,
+      file: opts.file,
+      filter: opts.filter,
+      translate: Boolean(opts.translate),
+    });
   });
 
 program
@@ -50,10 +71,19 @@ program
 
 program
   .command("visualize")
-  .description("Generate a self-contained index.html player for the imported notes (with follow-along transcripts)")
+  .alias("v")
+  .description("Generate a self-contained index.html player for the imported notes (alias: v, --v)")
   .option("-o, --open", "open the generated page in your default browser")
   .action(async (opts) => {
     await runVisualize({ open: Boolean(opts.open) });
+  });
+
+program
+  .command("setting")
+  .alias("settings")
+  .description("Interactive wizard to toggle/reset direct switches (auto-translate, model, target, remembered volumes)")
+  .action(async () => {
+    await runSettings();
   });
 
 program

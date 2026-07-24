@@ -40,6 +40,10 @@ async function buildNotes(target) {
   const notes = [];
   for (const audioPath of audioFiles) {
     const rel = path.relative(target, audioPath);
+    const dirRaw = path.dirname(rel);
+    // Folder the note lives in, relative to target, normalised to forward
+    // slashes ("" for files sitting directly in the target root).
+    const dir = dirRaw === "." ? "" : dirRaw.split(path.sep).join("/");
     const transcript = await findTranscript(audioPath);
 
     let cues = [];
@@ -68,6 +72,7 @@ async function buildNotes(target) {
 
     notes.push({
       title: rel.split(path.sep).join(" / "),
+      dir, // folder for sidebar grouping ("" = target root)
       name: path.basename(audioPath),
       src: toRelUrl(rel),
       cues, // [] when there's no timed transcript
@@ -153,7 +158,8 @@ function renderHtml(notes, target) {
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026");
 
-  const folderName = escapeHtml(path.basename(target) || "voice notes");
+  const rootLabel = path.basename(target) || "voice notes";
+  const folderName = escapeHtml(rootLabel);
 
   return `<!doctype html>
 <html lang="en">
@@ -266,6 +272,26 @@ body.resizing { cursor: col-resize; user-select: none; }
 .row-dur { font-size: .8rem; color: var(--ink); }
 .row-size { font-size: .64rem; color: var(--faint); }
 
+/* ---- Folder group headers (collapsible) ---- */
+.group-head {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 9px 15px 9px 11px; background: var(--panel-2);
+  border: none; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  color: var(--dim); font-family: var(--mono); font-size: .68rem;
+  letter-spacing: .1em; text-transform: uppercase; cursor: pointer;
+  position: sticky; top: 0; z-index: 1;
+}
+.group-head:hover { color: var(--ink); }
+.group-head:focus-visible { outline: none; color: var(--amber); }
+.group-head .chev { flex: none; color: var(--faint); transition: transform .12s; }
+.group-head.collapsed .chev { transform: rotate(-90deg); }
+.group-head .g-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-head .g-count {
+  flex: none; color: var(--faint); font-size: .62rem;
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px;
+}
+.group-body.collapsed { display: none; }
+
 /* ---- Right pane: playback deck ---- */
 .detail { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .placeholder { margin: auto; text-align: center; color: var(--dim); padding: 32px; }
@@ -365,6 +391,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 <script>
 (function () {
   const NOTES = JSON.parse(document.getElementById("data").textContent);
+  const FOLDER_ROOT = ${JSON.stringify(rootLabel)};
   const list = document.getElementById("list");
   const shown = document.getElementById("shown");
   const q = document.getElementById("q");
@@ -449,8 +476,22 @@ body.resizing { cursor: col-resize; user-select: none; }
   document.getElementById("statTakes").textContent = NOTES.length;
   document.getElementById("statTotal").textContent = fmtDur(totalSec);
 
-  // ---- Build the left takes list ----
-  const rows = NOTES.map((note, i) => {
+  // ---- Build the left takes list, grouped by folder ----
+  // Collapsed-folder state persists across visits, keyed by folder path.
+  const COLLAPSE_KEY = "vno-collapsed";
+  let collapsed = {};
+  try { collapsed = JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch (e) {}
+  function saveCollapsed() {
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed)); } catch (e) {}
+  }
+
+  const rows = new Array(NOTES.length);
+  const groups = [];
+  const groupByKey = new Map();
+
+  // NOTES is already newest-first, so first-seen order puts the group holding
+  // the newest take first, and each group's rows stay newest-first too.
+  NOTES.forEach((note, i) => {
     const row = document.createElement("div");
     row.className = "row";
     row.tabIndex = 0;
@@ -490,15 +531,74 @@ body.resizing { cursor: col-resize; user-select: none; }
     row.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(i); }
     });
-    list.appendChild(row);
-    return row;
+
+    const key = note.dir || "";
+    let g = groupByKey.get(key);
+    if (!g) { g = { key, rows: [], header: null, body: null }; groupByKey.set(key, g); groups.push(g); }
+    g.rows.push(row);
+    row._group = g;
+    rows[i] = row;
   });
+
+  // With a single folder there's nothing to group under, so skip the headers
+  // and render a plain flat list (the original behaviour).
+  const showGroups = groups.length > 1;
+
+  function applyCollapsed(g) {
+    const c = !!collapsed[g.key];
+    if (g.header) {
+      g.header.classList.toggle("collapsed", c);
+      g.header.setAttribute("aria-expanded", String(!c));
+    }
+    if (g.body) g.body.classList.toggle("collapsed", c);
+  }
+
+  groups.forEach((g) => {
+    if (showGroups) {
+      const header = document.createElement("button");
+      header.type = "button";
+      header.className = "group-head";
+      const chev = document.createElement("span");
+      chev.className = "chev";
+      chev.textContent = "▾";
+      header.appendChild(chev);
+      const gname = document.createElement("span");
+      gname.className = "g-name";
+      gname.textContent = g.key === "" ? FOLDER_ROOT : g.key;
+      header.appendChild(gname);
+      const gcount = document.createElement("span");
+      gcount.className = "g-count";
+      gcount.textContent = g.rows.length;
+      header.appendChild(gcount);
+      header.addEventListener("click", () => {
+        collapsed[g.key] = !collapsed[g.key];
+        saveCollapsed();
+        applyCollapsed(g);
+      });
+      list.appendChild(header);
+      g.header = header;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "group-body";
+    wrap.setAttribute("role", "group");
+    g.rows.forEach((r) => wrap.appendChild(r));
+    list.appendChild(wrap);
+    g.body = wrap;
+    applyCollapsed(g);
+  });
+
+  // A row counts as navigable only when it's neither filtered out nor tucked
+  // inside a collapsed folder.
+  function rowVisible(r) {
+    return !r.classList.contains("hidden") &&
+      !(r._group.body && r._group.body.classList.contains("collapsed"));
+  }
 
   // Arrow-key navigation moves through the currently visible takes.
   list.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const vis = rows.filter((r) => !r.classList.contains("hidden"));
+    const vis = rows.filter(rowVisible);
     if (!vis.length) return;
     let pos = vis.indexOf(document.activeElement);
     if (pos === -1) pos = vis.indexOf(rows[selectedIndex]);
@@ -625,6 +725,13 @@ body.resizing { cursor: col-resize; user-select: none; }
       const match = !term || row._haystack.indexOf(term) !== -1;
       row.classList.toggle("hidden", !match);
       if (match) visible++;
+    });
+    // Drop headers for folders with no surviving rows; while a search is active
+    // force every remaining folder open so matches aren't hidden by collapse.
+    groups.forEach((g) => {
+      const anyMatch = g.rows.some((r) => !r.classList.contains("hidden"));
+      if (g.header) g.header.classList.toggle("hidden", !anyMatch);
+      if (g.body) g.body.classList.toggle("collapsed", term ? false : !!collapsed[g.key]);
     });
     shown.textContent = visible + " / " + rows.length + " takes";
   }

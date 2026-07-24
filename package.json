@@ -19,6 +19,7 @@
     "transcribe": "node bin/vno.js transcribe",
     "cleanup": "node bin/vno.js cleanup",
     "visualize": "node bin/vno.js visualize",
+    "setting": "node bin/vno.js setting",
     "config": "node bin/vno.js config"
   },
   "dependencies": {

@@ -18,6 +18,14 @@ function defaultConfig() {
     // keyed by a stable identifier for the volume (label + size), remembers
     // whether the user wants it auto-imported and when it was last synced.
     knownMounts: {},
+    // Whether freshly imported notes are auto-transcribed with whisper's
+    // translate task (audio in any language -> English transcript) as they
+    // come in. null = not decided yet, so `vno` asks once and remembers the
+    // answer here; true/false = translate imports (or don't) without asking.
+    autoTranslate: null,
+    // Default whisper model used for auto-translation and as the pre-selected
+    // choice in the transcribe picker.
+    defaultModel: "turbo",
   };
 }
 

@@ -14,6 +14,29 @@ function transcriptPathFor(audioPath) {
 }
 
 /**
+ * Runs whisper over a list of audio files, logging progress. Shared by the
+ * interactive `transcribe` command and the auto-translate step of `import`.
+ * Returns the number that succeeded. With `translate: true` the transcripts
+ * are English translations rather than verbatim transcriptions.
+ */
+export async function transcribeMany(files, { model = "turbo", translate = false } = {}) {
+  const gerund = translate ? "Translating" : "Transcribing";
+  const verb = translate ? "translate" : "transcribe";
+  let done = 0;
+  for (const f of files) {
+    console.log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
+    try {
+      await transcribeFile(f, { model, translate });
+      console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
+      done++;
+    } catch (err) {
+      console.log(chalk.red(`Failed to ${verb} ${path.basename(f)}: ${err.message}`));
+    }
+  }
+  return done;
+}
+
+/**
  * Resolves a user-provided --file value to one of the discovered audio files.
  * Accepts an absolute path, a path relative to the target folder, or a bare
  * filename matched (case-insensitively) against the known audio files.
@@ -85,7 +108,7 @@ async function describeFiles(files, target) {
   return rows;
 }
 
-export async function runTranscribe({ model, file, filter } = {}) {
+export async function runTranscribe({ model, file, filter, translate = false } = {}) {
   const config = await loadConfig();
 
   if (!(await fs.pathExists(config.target))) {
@@ -173,7 +196,7 @@ export async function runTranscribe({ model, file, filter } = {}) {
         name: "model",
         message: "Whisper model to use (Esc to quit)",
         choices: ["turbo", "tiny", "base", "small", "medium", "large"],
-        default: "turbo",
+        default: config.defaultModel || "turbo",
         loop: false,
       },
     ]);
@@ -184,16 +207,8 @@ export async function runTranscribe({ model, file, filter } = {}) {
     chosenModel = answer.model;
   }
 
-  let done = 0;
-  for (const f of selected) {
-    console.log(chalk.cyan(`\n[${++done}/${selected.length}] Transcribing ${path.basename(f)}...`));
-    try {
-      await transcribeFile(f, { model: chosenModel });
-      console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
-    } catch (err) {
-      console.log(chalk.red(`Failed to transcribe ${path.basename(f)}: ${err.message}`));
-    }
-  }
+  const done = await transcribeMany(selected, { model: chosenModel, translate });
 
-  console.log(chalk.bold(`\nDone. Transcribed ${done}/${selected.length} file(s).`));
+  const label = translate ? "Translated" : "Transcribed";
+  console.log(chalk.bold(`\nDone. ${label} ${done}/${selected.length} file(s).`));
 }

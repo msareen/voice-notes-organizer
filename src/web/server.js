@@ -11,7 +11,8 @@ import { parseCues, serializeCues } from "../lib/vtt.js";
 import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume, findAudioFiles } from "../lib/sync.js";
-import { isWhisperInstalled, transcribeFile } from "../lib/whisper.js";
+import { transcribeFile } from "../lib/whisper.js";
+import { checkDependencies } from "../lib/setup.js";
 import { recordDeletions } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
 
@@ -228,15 +229,12 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
     }
   }
 
-  // Probing whisper shells out to Python, which costs seconds - far too slow
-  // to repeat on every state request, so the answer is memoised briefly.
-  let whisperCache = { value: null, at: 0 };
-  async function whisperAvailable(force = false) {
-    if (!force && whisperCache.value !== null && Date.now() - whisperCache.at < 60000) {
-      return whisperCache.value;
-    }
-    whisperCache = { value: await isWhisperInstalled(), at: Date.now() };
-    return whisperCache.value;
+  // Both probes are PATH lookups, so they're cheap enough to redo per request -
+  // which also means the page notices an install done in another terminal as
+  // soon as it refreshes, with nothing to invalidate.
+  async function dependencyStatus() {
+    const [ffmpeg, whisper] = await checkDependencies(["ffmpeg", "whisper"]);
+    return { ffmpeg: ffmpeg.found, whisper: whisper.found };
   }
 
   async function stateResponse() {
@@ -252,7 +250,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
         configPath: configFilePath(),
       },
       models: MODELS,
-      whisper: await whisperAvailable(),
+      ...(await dependencyStatus()),
       job,
     };
   }
@@ -493,9 +491,13 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
 
   async function startTranscribe(res, body) {
     if (guardJob(res)) return;
-    if (!(await whisperAvailable(true))) {
+    // The browser can't run an installer, so the page points at the CLI, which
+    // can: `vno setup` offers the install for whichever half is missing.
+    const deps = await dependencyStatus();
+    if (!deps.whisper || !deps.ffmpeg) {
+      const missing = [!deps.ffmpeg && "ffmpeg", !deps.whisper && "whisper"].filter(Boolean);
       return sendJson(res, 412, {
-        error: "whisper isn't on your PATH. Install it with: pip install -U openai-whisper",
+        error: `${missing.join(" and ")} ${missing.length > 1 ? "aren't" : "isn't"} on your PATH. Run \`vno setup\` in a terminal to install ${missing.length > 1 ? "them" : "it"}.`,
       });
     }
 
@@ -640,8 +642,9 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
       await refreshNotes();
 
       if (translate && imported.length > 0) {
-        if (!(await whisperAvailable(true))) {
-          jobLog("Skipping translation - whisper isn't on your PATH.");
+        const deps = await dependencyStatus();
+        if (!deps.whisper || !deps.ffmpeg) {
+          jobLog("Skipping translation - whisper/ffmpeg isn't on your PATH. Run `vno setup`.");
         } else {
           const model = currentConfig.defaultModel || "turbo";
           job.total = picked.length + imported.length;
@@ -759,10 +762,6 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
     for (const socket of sockets) socket.destroy();
     return closed;
   }
-
-  // Warm the whisper probe in the background so the first page load doesn't
-  // pay for a Python start-up.
-  whisperAvailable().catch(() => {});
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);

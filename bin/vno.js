@@ -7,6 +7,7 @@ import { runTranscribe } from "../src/cli/transcribe.js";
 import { runCleanup, runLedgerCleanup } from "../src/cli/cleanup.js";
 import { runVisualize } from "../src/cli/visualize.js";
 import { runSettings } from "../src/cli/settings.js";
+import { runSetup } from "../src/cli/setup.js";
 import { configFilePath } from "../src/lib/config.js";
 
 // Single source of truth for the version - a hardcoded copy here silently
@@ -118,6 +119,17 @@ program
   )
   .action(async () => {
     await runSettings();
+  });
+
+program
+  .command("setup")
+  .alias("doctor")
+  .description(
+    "Check that ffmpeg and whisper are installed and offer to install what's missing (alias: doctor)"
+  )
+  .option("--check", "only report what's installed; never offer to install anything")
+  .action(async (opts) => {
+    await runSetup({ check: Boolean(opts.check) });
   });
 
 program

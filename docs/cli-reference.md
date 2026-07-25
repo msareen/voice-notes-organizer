@@ -12,6 +12,7 @@ Everything here works unlinked too, as `node bin/vno.js <command>`.
 | [`vno visualize`](#vno-visualize) | `vno v`, `vno --v`, `vno -v` | Launch the browser UI |
 | [`vno cleanup`](#vno-cleanup) | — | Delete very short recordings |
 | [`vno setting`](#vno-setting) | `vno settings` | Interactive settings wizard |
+| [`vno setup`](#vno-setup) | `vno doctor` | Check ffmpeg + whisper, install what's missing |
 | [`vno config`](#vno-config) | — | Print the config file path |
 
 ---
@@ -94,8 +95,10 @@ picker.
 | `--translate` | Produce an English translation (whisper's translate task) instead of a verbatim transcript |
 | `--no-open` | Don't launch the browser UI when the run finishes |
 
-If `whisper` isn't installed, the command offers to install it with
-`pip install -U openai-whisper`. ffmpeg still has to be installed separately.
+Before anything else it checks that `ffmpeg` and `whisper` are on your `PATH`,
+and offers to install whichever is missing — the same check [`vno
+setup`](#vno-setup) runs. The check happens up front, not after you've picked
+files, because the picker shows durations that need `ffprobe`.
 
 Once at least one file has been converted, it launches the [browser
 UI](ui.md) so you can play and proof-read the new transcripts right away.
@@ -201,9 +204,65 @@ hand-editing `config.json`:
 - the **target** import folder
 - whether finished runs **launch the browser UI**
 - **forget all remembered volume choices**
+- **check ffmpeg + whisper** and install what's missing (runs [`vno
+  setup`](#vno-setup); the menu line shows the current state)
 
 Arrow keys to pick a setting, `Esc` to exit; changes save as you make them. The
 first three are also editable from the [UI's Settings dialog](ui.md#settings).
+
+---
+
+## `vno setup`
+
+Alias: `vno doctor`.
+
+Reports whether `ffmpeg`, `ffprobe` and `whisper` are on your `PATH` — with the
+resolved path of each — then offers to install whatever is missing.
+
+```bash
+vno setup
+vno setup --check     # report only, never offer to install
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--check` | Print the status and stop. Installs nothing, asks nothing |
+
+Installs go through whatever package manager you already have, first match
+wins:
+
+| Platform | Tried in this order |
+| --- | --- |
+| Windows | winget → Chocolatey → Scoop |
+| macOS | Homebrew → MacPorts |
+| Linux | apt → dnf → yum → pacman → zypper → apk → Homebrew |
+
+Whisper always installs with `pip install -U openai-whisper` (`pip3`, `pip`, or
+`python -m pip`, whichever exists). If there's no Python at all, vno offers to
+install that first, through the same package manager. On a distro whose Python
+refuses to be installed into (Debian/Ubuntu's "externally managed
+environment"), it offers `pipx install openai-whisper` instead.
+
+**Nothing is installed without you confirming it.** You always see the exact
+command first, and can choose to run it yourself instead. Where a system
+package manager needs root, the command is prefixed with `sudo` — so you may be
+asked for your password; on Windows you may get a UAC prompt. In a
+non-interactive shell (a pipe, CI) vno prints the command and stops rather than
+asking a question nobody can answer.
+
+Afterwards vno re-reads your `PATH` — from the registry on Windows, and by
+adding the usual install directories elsewhere — so a freshly installed tool is
+usable in the same run instead of after a terminal restart. If it still isn't
+visible, vno says so rather than pretending it worked.
+
+**This check runs by itself.** `vno transcribe`, `vno cleanup`'s duration scan,
+and an import that auto-translates all run it before starting work, so a
+missing tool surfaces as an install offer instead of a failure part-way
+through. When everything is present the check is silent and instant — it's a
+`PATH` lookup, not a program launch.
+
+The browser UI can't install anything (it's a web page), so it shows the same
+information and points you back at `vno setup`.
 
 ---
 
@@ -224,6 +283,7 @@ npm run transcribe            # or: npm run transcribe -- --file 250810_1328
 npm run cleanup               # or: npm run cleanup -- --dry-run
 npm run visualize             # or: npm run visualize -- --port 8477
 npm run setting
+npm run setup
 npm run config
 ```
 

@@ -6,6 +6,11 @@ Transcription is [OpenAI Whisper](https://github.com/openai/whisper), running
 > *Whisper is slow — but it is free.* A long recording on a big model can take
 > longer than the recording itself. That's the trade you're making.
 
+Whisper and ffmpeg both have to be on your `PATH`. You don't have to arrange
+that yourself: every command that transcribes checks first and offers to
+install what's missing, and [`vno setup`](cli-reference.md#vno-setup) does the
+same on demand.
+
 ## Choosing a model
 
 `turbo` is the default and the right answer most of the time: near

@@ -101,31 +101,35 @@ npm unlink -g @msareen/voice-notes-organizer
 Prefer not to link? Run it in place with `node bin/vno.js <command>`, or use
 the npm scripts (`npm run import`, etc.).
 
-### 3. Install ffmpeg
+### 3. Install ffmpeg and Whisper
 
-| OS | Command |
-| --- | --- |
-| macOS | `brew install ffmpeg` |
-| Windows | `winget install ffmpeg` (or `choco install ffmpeg`) |
-| Linux (Debian/Ubuntu) | `sudo apt install ffmpeg` |
+```bash
+vno setup
+```
 
-Verify with `ffmpeg -version` and `ffprobe -version`.
+Checks `ffmpeg`, `ffprobe` and `whisper`, and offers to install whatever is
+missing using your machine's own package manager — winget/Chocolatey/Scoop on
+Windows, Homebrew/MacPorts on macOS, apt/dnf/pacman/zypper/apk on Linux — with
+Whisper coming from `pip` (and Python itself if you don't have it yet).
 
-### 4. Install Whisper
+You don't have to remember to run it: `vno transcribe`, `vno cleanup` and an
+import that auto-translates all run the same check first, and offer the same
+install when something is missing. Nothing is installed without you confirming
+it. `vno setup --check` reports and installs nothing.
+
+Prefer to do it yourself:
+
+| OS | ffmpeg | Whisper |
+| --- | --- | --- |
+| macOS | `brew install ffmpeg` | `pip install -U openai-whisper` |
+| Windows | `winget install --id Gyan.FFmpeg -e` | `pip install -U openai-whisper` |
+| Linux (Debian/Ubuntu) | `sudo apt install ffmpeg` | `pip install -U openai-whisper` |
+
+Verify with `ffmpeg -version`, `ffprobe -version` and `whisper --help`.
 
 > *Whisper is slow — but it is free.* Transcription runs on your own machine,
 > so expect to wait; a long recording on a big model can take longer than the
 > recording itself.
-
-```bash
-pip install -U openai-whisper
-```
-
-(Use `pip3` if `pip` points at Python 2.) Verify with `whisper --help`.
-
-If Whisper isn't on your `PATH` when you run `vno transcribe`, the tool offers
-to run this install for you — but ffmpeg still has to be installed separately
-(step 3).
 
 > **Windows note:** `pip` installs `whisper.exe` into your Python `Scripts`
 > directory (e.g. `C:\PythonXX\Scripts`). If `whisper` isn't found after
@@ -144,6 +148,7 @@ to run this install for you — but ffmpeg still has to be installed separately
 | `vno cleanup -f <files>` | — | Delete named recordings and their transcripts |
 | `vno cleanup ledger` | — | Forget which recordings you deleted, so they import again |
 | `vno setting` | `vno settings` | Interactive wizard for the common settings |
+| `vno setup` | `vno doctor` | Check ffmpeg + whisper, offer to install what's missing |
 | `vno config` | — | Print the path to the config file |
 
 A few things worth knowing up front:
@@ -161,6 +166,9 @@ A few things worth knowing up front:
 - **Nothing deletes without asking.** Only `cleanup` and the UI's delete
   buttons remove files, always behind a confirmation. Import and transcribe
   never delete anything.
+- **Missing tools are caught before the work starts.** Any command that needs
+  ffmpeg or whisper checks for them first and offers the install, so you never
+  get halfway through and stall. Nothing installs without your say-so.
 
 📖 **[Full CLI reference →](docs/cli-reference.md)** — every flag, in detail.
 

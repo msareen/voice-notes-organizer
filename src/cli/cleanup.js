@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
@@ -10,8 +8,7 @@ import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
 import { getDurationSeconds } from "../lib/media.js";
 import { recordDeletions, clearLedger, ledgerSummary } from "../lib/ledger.js";
 import { prompt, CANCELLED } from "./prompt.js";
-
-const execFileAsync = promisify(execFile);
+import { ensureDependencies } from "./setup.js";
 
 // Transcript sidecars written next to an audio file (whisper .vtt, the
 // derived .txt, plus .srt for completeness) that should go with it on delete.
@@ -152,14 +149,9 @@ async function resolveNamed(names, allAudio, target) {
 
 /** The short-recording scan. Returns null when ffprobe isn't available. */
 async function findShortRecordings(allAudio, threshold, target) {
-  try {
-    await execFileAsync("ffprobe", ["-version"], { windowsHide: true });
-  } catch {
-    console.log(
-      chalk.red(
-        "ffprobe (part of ffmpeg) was not found on your PATH. It's needed to measure audio duration - install ffmpeg and try again."
-      )
-    );
+  // Without ffprobe every duration reads as unknown, so the scan would find
+  // nothing and quietly look like "no short recordings" instead of a miss.
+  if (!(await ensureDependencies(["ffmpeg"], { reason: "measuring recording length" }))) {
     console.log(chalk.dim("To delete specific recordings without it, name them: vno cleanup -f <file>..."));
     return null;
   }

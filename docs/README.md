@@ -15,7 +15,9 @@ day to day. These pages cover everything else.
 
 ## Where to start
 
-- **Just installed it?** [CLI reference](cli-reference.md) → [Configuration](configuration.md).
+- **Just installed it?** Run `vno setup` to get ffmpeg + whisper in place
+  ([what it does](cli-reference.md#vno-setup)), then
+  [CLI reference](cli-reference.md) → [Configuration](configuration.md).
 - **Living in the browser UI?** [The browser UI](ui.md).
 - **Recorder buries files in nested folders?** [Import & sync](import-and-sync.md).
 - **Transcripts wrong, slow, or in the wrong language?** [Transcription](transcription.md).

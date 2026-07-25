@@ -21,11 +21,12 @@ node bin/vno.js               # import (default command)
 node bin/vno.js visualize     # browser UI; also `v` / `--v`
 node bin/vno.js transcribe    # also `t` / `--t`
 node bin/vno.js cleanup --dry-run
+node bin/vno.js setup         # check/install ffmpeg + whisper; also `doctor`
 node bin/vno.js config        # prints ~/.vno/config.json path
 ```
 
-npm scripts (`npm run import|transcribe|cleanup|visualize|setting|config`) are thin
-wrappers over the same.
+npm scripts (`npm run import|transcribe|cleanup|visualize|setting|setup|config`) are
+thin wrappers over the same.
 
 ## The full `vno` surface
 
@@ -83,6 +84,17 @@ Interactive wizard: auto-translate, default model, target folder, open-when-done
 remember-deletions, plus resets for remembered volumes and the deletion ledger.
 Esc exits.
 
+### `vno setup` (`doctor`)
+Reports whether `ffmpeg`, `ffprobe` and `whisper` are on PATH (with resolved
+paths) and offers to install what's missing via the machine's own package manager
+— winget/choco/scoop, brew/port, apt/dnf/yum/pacman/zypper/apk — with whisper from
+pip, Python first if there is none, and pipx as the fallback when the system Python
+is externally managed. Nothing installs without a confirmation.
+
+| Flag | Effect |
+| --- | --- |
+| `--check` | Report only; never offer to install |
+
 ### `vno config`
 Prints the path to `~/.vno/config.json`.
 
@@ -117,7 +129,8 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
 - `src/cli/*` — one module per command, each exporting `run<Command>()`. `import.js`
   ends by handing off to `runVisualize()`, so `vno` blocks until the browser tab closes.
 - `src/lib/*` — domain logic and OS access: config, volume detection, the flat copy,
-  whisper, ffprobe, VTT parsing, the note model, the deletion ledger, opening folders.
+  whisper, ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
+  and `setup.js` (PATH lookup + per-OS install recipes for ffmpeg/whisper/Python).
 - `src/web/server.js` — the whole HTTP server: token gate, JSON API, SSE job stream,
   range-request media streaming. `page.js` emits the HTML shell and nothing else.
 - `src/web/assets/app.js` — the entire client, ~1200 lines of plain ES5-flavoured JS
@@ -132,6 +145,16 @@ before changing the API surface.
   server's `resolveInside()` converts it back to an absolute path and refuses anything
   escaping the target folder. Never build a filesystem path from client input any
   other way.
+- **External tools are detected by looking them up on PATH, never by running
+  them.** `lib/setup.js:which()` scans PATH itself (PATHEXT-aware, `lstat` so
+  Windows App Execution Aliases resolve). Running `whisper --help` boots Python and
+  torch and costs seconds, which is why the old probe had to be memoised; a lookup
+  is free, so the check runs at the start of every command that shells out and on
+  every `/api/state` with no cache to invalidate. It also resolves exactly the way
+  `spawn` will. `lib/setup.js` never prompts — the offer-and-install flow is
+  `cli/setup.js:ensureDependencies()`, which `transcribe`, `cleanup`'s duration
+  scan and import's auto-translate all call before starting work. The browser
+  can't install anything, so the page reports and points at `vno setup`.
 - **Notes are cached in the server closure.** Building the model costs an ffprobe per
   file, so it is rebuilt only when something changes it, then broadcast over SSE
   (`refreshNotes()`).

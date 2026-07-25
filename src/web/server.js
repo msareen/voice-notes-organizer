@@ -12,6 +12,7 @@ import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume, findAudioFiles } from "../lib/sync.js";
 import { isWhisperInstalled, transcribeFile } from "../lib/whisper.js";
+import { recordDeletions } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
 
 const MIME = {
@@ -247,6 +248,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
         autoTranslate: currentConfig.autoTranslate ?? null,
         defaultModel: currentConfig.defaultModel || "turbo",
         openWhenDone: currentConfig.openWhenDone !== false,
+        rememberDeletions: currentConfig.rememberDeletions !== false,
         configPath: configFilePath(),
       },
       models: MODELS,
@@ -342,6 +344,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
       currentConfig.defaultModel = patch.defaultModel;
     }
     if ("openWhenDone" in patch) currentConfig.openWhenDone = Boolean(patch.openWhenDone);
+    if ("rememberDeletions" in patch) currentConfig.rememberDeletions = Boolean(patch.rememberDeletions);
     await saveConfig(currentConfig);
     console.log(chalk.dim("Settings updated from the browser."));
     return (await stateResponse()).config;
@@ -400,17 +403,34 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
   async function deleteNote(res, body) {
     const note = noteFor(body.rel);
     if (!note) return sendJson(res, 404, { error: "Unknown note" });
-    const removed = await removeRecording(body.rel);
+    const { removed, entry } = await removeRecording(body.rel);
+    await remember(entry ? [entry] : [], "delete");
     notes = notes.filter((n) => n.rel !== body.rel);
     broadcast("notes", { count: notes.length });
     console.log(chalk.dim(`Deleted from the browser: ${body.rel}`));
     return sendJson(res, 200, { removed });
   }
 
-  /** Deletes an audio file plus any transcript sidecars. Returns the count. */
+  /**
+   * Deletes an audio file plus any transcript sidecars. Returns the file count
+   * and, when the recording itself was really there, the `{ rel, size }` the
+   * deletion ledger needs - read before the delete, since it can't be after.
+   * Callers record the entries themselves so a batch is one ledger write.
+   */
   async function removeRecording(rel) {
     const audio = resolveInside(rel);
     if (!audio) throw new Error("Path outside the target folder");
+
+    let size = null;
+    let existed = false;
+    try {
+      const stat = await fs.stat(audio);
+      existed = stat.isFile();
+      size = stat.size;
+    } catch {
+      // already gone, or unreadable - the sidecars are still worth clearing
+    }
+
     const base = audio.slice(0, -path.extname(audio).length);
     let removed = 0;
     for (const file of [audio, ...TRANSCRIPT_EXTS.map((ext) => base + ext)]) {
@@ -419,7 +439,16 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
         removed++;
       }
     }
-    return removed;
+    return { removed, entry: existed ? { rel, size } : null };
+  }
+
+  /** Writes a batch of deletions to the ledger, honouring the config switch. */
+  function remember(entries, via) {
+    return recordDeletions(
+      target,
+      entries.map((entry) => ({ ...entry, via })),
+      { enabled: currentConfig.rememberDeletions !== false }
+    );
   }
 
   /* --------------------------------- jobs -------------------------------- */
@@ -583,9 +612,14 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
           mountPath: subdir ? path.join(volume.mountPath, subdir) : volume.mountPath,
         };
         try {
-          const result = await syncVolume(effective, target);
+          const result = await syncVolume(effective, target, {
+            rememberDeletions: currentConfig.rememberDeletions !== false,
+          });
           imported.push(...result.copiedFiles);
-          jobLog(`"${volume.name}": ${result.copied} copied, ${result.skipped} already up to date`);
+          jobLog(
+            `"${volume.name}": ${result.copied} copied, ${result.skipped} already up to date` +
+              (result.suppressed > 0 ? `, ${result.suppressed} previously deleted (left alone)` : "")
+          );
           if (!volume.isManualSource && request.remember !== false) {
             currentConfig.knownMounts[volume.id] = {
               name: volume.name,
@@ -656,13 +690,17 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
     const rels = (Array.isArray(body.rels) ? body.rels : []).filter((rel) => noteFor(rel));
     if (rels.length === 0) return sendJson(res, 400, { error: "Nothing selected" });
     let removed = 0;
+    const deleted = [];
     for (const rel of rels) {
       try {
-        removed += await removeRecording(rel);
+        const result = await removeRecording(rel);
+        removed += result.removed;
+        if (result.entry) deleted.push(result.entry);
       } catch {
         // skip files that vanished or are locked; the count reflects reality
       }
     }
+    await remember(deleted, "cleanup");
     await refreshNotes();
     console.log(chalk.dim(`Cleanup from the browser: removed ${removed} file(s).`));
     return sendJson(res, 200, { removed, deleted: rels.length });

@@ -90,6 +90,37 @@ Synced "IC RECORDER": 4 copied, 112 already up to date -> D:\voice-notes\IC RECO
 
 **Nothing is ever deleted from the device.** Import only reads.
 
+## Deleted recordings stay deleted
+
+That idempotency has a gap on its own: it only recognises files that are
+*still there*. Delete a bad recording locally, leave the recorder plugged in,
+run `vno` again, and the empty slot gets refilled from the device.
+
+So deletions made through vno are remembered. The UI's per-take **Delete**, the
+UI's **Cleanup**, and `vno cleanup` each append an entry to
+`~/.vno/deleted.json`, and import leaves those recordings alone:
+
+```
+Synced "IC RECORDER": 4 copied, 112 already up to date, 3 previously deleted
+```
+
+Entries match on path **and** byte size, the same pair used to spot an
+already-imported file. A genuinely different recording that happens to reuse a
+filename has a different size, so it still imports normally.
+
+Two limits worth knowing:
+
+- **Only deletions made through vno count.** Deleting a file in Explorer or
+  Finder can't be seen from here, so it will come back on the next import.
+- **The device still has the audio.** Nothing here deletes from the recorder;
+  the ledger only stops the local copy reappearing.
+
+Changed your mind? `vno cleanup ledger` (or deleting `~/.vno/deleted.json`
+yourself, or `vno setting` → *forget deleted recordings*) makes vno forget
+everything it's remembered, and the next import brings those recordings back.
+To switch the whole mechanism off, set
+[`rememberDeletions`](configuration.md#rememberdeletions) to `false`.
+
 ## What's remembered
 
 After a successful import, the volume is recorded in

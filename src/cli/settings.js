@@ -2,6 +2,7 @@ import path from "node:path";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
+import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { prompt, CANCELLED } from "./prompt.js";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
@@ -26,6 +27,7 @@ export async function runSettings() {
 
   while (true) {
     const knownCount = Object.keys(config.knownMounts || {}).length;
+    const ledger = await ledgerSummary(config.target);
 
     const answer = await prompt([
       {
@@ -38,7 +40,9 @@ export async function runSettings() {
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
+          { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
+          { name: `Forget deleted recordings (clear the ledger)  ${chalk.dim(`[${ledger.forTarget} remembered]`)}`, value: "resetLedger" },
           { name: chalk.dim(`Show config file path`), value: "path" },
           new inquirer.Separator(),
           { name: "Done", value: "done" },
@@ -114,6 +118,47 @@ export async function runSettings() {
       if (res !== CANCELLED) {
         config.openWhenDone = res.value;
         await saveConfig(config);
+      }
+    } else if (answer.action === "rememberDeletions") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "Remember recordings deleted through vno, so importing again doesn't copy them back?",
+          default: config.rememberDeletions !== false,
+          choices: [
+            { name: "On — deletes are logged, and import leaves them alone", value: true },
+            { name: "Off — import copies whatever the device has", value: false },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.rememberDeletions = res.value;
+        await saveConfig(config);
+        if (res.value === false && ledger.exists) {
+          console.log(chalk.dim("The existing ledger is kept but ignored. Remove it with `vno cleanup ledger`."));
+        }
+      }
+    } else if (answer.action === "resetLedger") {
+      if (!ledger.exists) {
+        console.log(chalk.dim(`No deletion ledger yet (${ledger.path}).`));
+        continue;
+      }
+      const res = await prompt([
+        {
+          type: "list",
+          name: "confirm",
+          message: `Forget ${ledger.total} remembered deletion(s)? Those recordings import again if the device still has them.`,
+          default: false,
+          choices: [
+            { name: "No, keep them", value: false },
+            { name: "Yes, delete the ledger", value: true },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED && res.confirm) {
+        await clearLedger();
+        console.log(chalk.dim("Deletion ledger removed."));
       }
     } else if (answer.action === "resetMounts") {
       const res = await prompt([

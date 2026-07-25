@@ -1,5 +1,6 @@
 import fs from "fs-extra";
 import path from "node:path";
+import chalk from "chalk";
 import { findAudioFiles } from "./sync.js";
 import { parseCues } from "./vtt.js";
 import { getDurationSeconds, recordedDate } from "./media.js";
@@ -18,6 +19,66 @@ export async function findTranscript(audioPath) {
     if (await fs.pathExists(candidate)) return { path: candidate, ext };
   }
   return null;
+}
+
+/**
+ * Resolves a user-provided file name to one of the discovered audio files.
+ * Accepts an absolute path, a path relative to the target folder, or a bare
+ * filename matched (case-insensitively) against the known audio files.
+ *
+ * Returns `{ file, matches }`: `file` is null when nothing matched *and* when
+ * the name was ambiguous, with `matches` holding the candidates in the second
+ * case so the caller can tell the two apart. Printing is left to the caller -
+ * see `reportUnresolved`.
+ *
+ * Shared by `vno transcribe -f` and `vno cleanup -f` so that naming a file
+ * means the same thing whichever command you're pointing at it.
+ */
+export async function resolveNamedFile(name, allAudio, target) {
+  const candidates = [];
+  if (path.isAbsolute(name)) candidates.push(name);
+  candidates.push(path.resolve(target, name));
+
+  for (const candidate of candidates) {
+    if (await fs.pathExists(candidate)) {
+      const resolved = path.resolve(candidate);
+      const inList = allAudio.find((f) => path.resolve(f) === resolved);
+      if (inList) return { file: inList, matches: [inList] };
+      // Exists but wasn't discovered as audio (e.g. unsupported extension).
+      return { file: resolved, matches: [resolved] };
+    }
+  }
+
+  // Fall back to matching against just the filename, case-insensitively:
+  // exact basename first, then the name with the extension dropped (so
+  // "250810_1328" finds "250810_1328.mp3"), then a unique substring match.
+  const wanted = path.basename(name).toLowerCase();
+  const wantedStem = wanted.slice(0, wanted.length - path.extname(wanted).length) || wanted;
+  const baseOf = (f) => path.basename(f).toLowerCase();
+  const stemOf = (f) => {
+    const b = baseOf(f);
+    return b.slice(0, b.length - path.extname(b).length);
+  };
+
+  let matches = allAudio.filter((f) => baseOf(f) === wanted);
+  if (matches.length === 0) matches = allAudio.filter((f) => stemOf(f) === wantedStem);
+  if (matches.length === 0) matches = allAudio.filter((f) => baseOf(f).includes(wantedStem));
+
+  return { file: matches.length === 1 ? matches[0] : null, matches };
+}
+
+/**
+ * Prints why a `-f` name didn't resolve: either it matched nothing, or it
+ * matched several files and the user has to narrow it down. Shared so both
+ * commands explain a miss the same way.
+ */
+export function reportUnresolved(name, result, target) {
+  if (result.matches.length > 1) {
+    console.log(chalk.yellow(`"${name}" matches ${result.matches.length} files; be more specific:`));
+    for (const f of result.matches) console.log(`  - ${path.relative(target, f)}`);
+    return;
+  }
+  console.log(chalk.red(`No audio file matching "${name}" was found in ${target}.`));
 }
 
 /** Reads a note's transcript into the shape the page renders from. */

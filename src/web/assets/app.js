@@ -580,7 +580,7 @@
   document.getElementById("btnSettings").addEventListener("click", openSettings);
 
   function openSettings() {
-    var autoSel, modelSel, openSel;
+    var autoSel, modelSel, openSel, rememberSel;
     modal({
       title: "Settings",
       message: null,
@@ -615,12 +615,22 @@
           { label: "On — launch the viewer after import/transcribe", value: "true" },
           { label: "Off — finish quietly", value: "false" }
         ], String(CONFIG.openWhenDone !== false));
+
+        rememberSel = selectField(host, "Remember deleted recordings", [
+          { label: "On — don't re-import what I deleted here", value: "true" },
+          { label: "Off — import whatever the device has", value: "false" }
+        ], String(CONFIG.rememberDeletions !== false));
+        var rh = document.createElement("p");
+        rh.className = "hint";
+        rh.textContent = "Deletes made here and by cleanup are logged, so importing again won't copy them back. \"vno cleanup ledger\" forgets them.";
+        host.appendChild(rh);
       },
       onConfirm: function () {
         var patch = {
           autoTranslate: autoSel.value === "null" ? null : autoSel.value === "true",
           defaultModel: modelSel.value,
-          openWhenDone: openSel.value === "true"
+          openWhenDone: openSel.value === "true",
+          rememberDeletions: rememberSel.value === "true"
         };
         return api("/api/settings", { method: "POST", body: patch }).then(function (res) {
           CONFIG = res.config;

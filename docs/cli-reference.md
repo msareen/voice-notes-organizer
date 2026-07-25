@@ -128,15 +128,64 @@ with any matching `.vtt` / `.srt` / `.txt` sidecar.
 
 | Flag | Effect |
 | --- | --- |
+| `-f, --file <names...>` | Delete exactly these recordings instead of scanning for short ones |
 | `-t, --threshold <seconds>` | Recordings shorter than this are candidates. Default `3` |
 | `--dry-run` | List what would be deleted, delete nothing |
 
 The same scan-and-confirm flow is available from the UI's *Cleanup* button.
 
+### Deleting named recordings
+
+`-f` takes one or more recordings and deletes them with their transcripts,
+skipping the duration scan entirely:
+
+```bash
+vno cleanup -f 250724_1032                        # bare name
+vno cleanup -f 250724_1032.mp3 250724_1105.mp3    # several at once
+vno cleanup -f "IC RECORDER/250725_0900.mp3"      # path relative to the target
+vno cleanup -f 250724_1032 --dry-run              # show what would go
+```
+
+Names resolve exactly like [`vno transcribe -f`](#vno-transcribe): an absolute
+path, a path relative to the target, or a bare filename matched
+case-insensitively — with or without the extension. A name matching several
+recordings lists them and asks you to narrow it down.
+
+**If any name doesn't resolve, nothing is deleted** — a typo makes you re-run
+with a fixed list rather than silently deleting the subset that did match. The
+confirmation still applies (default *no*), and everything deleted goes into the
+ledger.
+
+Because it never measures duration, `-f` is also the way to delete recordings
+when `ffprobe` isn't installed.
+
+Everything deleted here is written to the [deletion
+ledger](import-and-sync.md#deleted-recordings-stay-deleted), so plugging the
+recorder back in and importing again won't copy it back.
+
 > **Deleting only ever happens here, or from the UI** (its *Cleanup* and
 > per-take *Delete*), and always behind a confirmation. `import` and
 > `transcribe` never delete anything — aside from `import` moving previously
 > nested files up into the flat layout.
+
+---
+
+## `vno cleanup ledger`
+
+Deletes the deletion ledger (`~/.vno/deleted.json`) after showing how much it
+remembers. Exactly the same thing as deleting that file by hand.
+
+```bash
+vno cleanup ledger
+```
+
+**No recording is touched.** All this does is make vno forget what you deleted
+— so the next import copies those recordings back if the device still has
+them. That's the point: it's how you undo a deletion you've changed your mind
+about.
+
+The ledger can also be cleared from `vno setting`, and switched off entirely
+with the [`rememberDeletions`](configuration.md#rememberdeletions) setting.
 
 ---
 

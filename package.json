@@ -1,6 +1,6 @@
 {
   "name": "@msareen/voice-notes-organizer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards - a replacement for the stalled desktop software that ships with them.",
   "type": "module",
   "bin": {

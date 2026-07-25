@@ -20,7 +20,7 @@ src/
     prompt.js  searchableCheckbox.js
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.js  notes.js  sync.js  media.js  vtt.js
-    volumes.js  whisper.js  open.js
+    volumes.js  whisper.js  open.js  ledger.js
   web/               the browser UI behind `vno visualize`
     server.js        HTTP server: session token, JSON API, SSE job stream
     page.js          the HTML shell, and nothing else
@@ -41,6 +41,7 @@ so anything there is safe to reuse from either side.
 | `lib/vtt.js` | Parse and serialize WebVTT cues |
 | `lib/notes.js` | Builds the note model both the CLI and the page render from |
 | `lib/open.js` | Opening a folder / revealing a file, per OS |
+| `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
 
 ## There is no build step
 
@@ -106,7 +107,14 @@ folder and rejects anything that escapes it.
 - **Imports are idempotent** by name + size. See
   [Import & sync](import-and-sync.md#re-running-is-safe).
 - **Deletion is confined** to `cleanup`, the UI's cleanup, and per-take delete.
-  Nothing else in the codebase removes a user file — keep it that way.
+  Nothing else in the codebase removes a user file — keep it that way. Those
+  three are also the only writers to the deletion ledger, which is why they're
+  the only deletions import can know about.
+- **The ledger must never be load-bearing.** `lib/ledger.js` swallows its own
+  read *and* write failures: missing, corrupt and unreadable all resolve to
+  "nothing is remembered", and a failed write can't turn a successful delete
+  into an error. Suppression is folded into `resolveFlatDest` so it reuses the
+  existing name+size key rather than inventing a second notion of sameness.
 
 ---
 

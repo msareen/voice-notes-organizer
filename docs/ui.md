@@ -25,7 +25,7 @@ with `vno v`.
 | **Transcribe** | Pick takes and run whisper on them — see [Transcribe dialog](#transcribe) |
 | **Cleanup** | Find and delete very short recordings — see [Cleanup dialog](#cleanup) |
 | **Open folder** | Reveals the target folder in Explorer / Finder / your file manager |
-| **Settings** | The three settings also offered by `vno setting` — see [Settings dialog](#settings) |
+| **Settings** | The four settings also offered by `vno setting` — see [Settings dialog](#settings) |
 | **Takes / Total** | Number of recordings and their combined running time |
 | **Quit** | Stops the server and ends the CLI session |
 
@@ -131,12 +131,17 @@ want to keep, and a confirmation before deleting. Matching `.vtt` / `.srt` /
 
 ### Settings
 
-The three settings that are also offered by `vno setting`:
+The four settings that are also offered by `vno setting`:
 [`autoTranslate`](configuration.md#autotranslate) (on / off / ask each time),
-[`defaultModel`](configuration.md#defaultmodel), and
-[`openWhenDone`](configuration.md#openwhendone). The **target folder** is shown
-but not editable here — changing it needs a re-scan, so it lives in
+[`defaultModel`](configuration.md#defaultmodel),
+[`openWhenDone`](configuration.md#openwhendone), and
+[`rememberDeletions`](configuration.md#rememberdeletions). The **target folder**
+is shown but not editable here — changing it needs a re-scan, so it lives in
 `vno setting`. Changes save as you make them.
+
+Deletes made from this page — both the per-take **Delete** and **Cleanup** —
+are recorded, so importing again won't copy those recordings back off the
+device. Clearing that record is a CLI job: `vno cleanup ledger`.
 
 `Esc` closes any dialog. When dialogs stack (the subfolder browser over the
 import dialog), `Esc` closes only the topmost one.

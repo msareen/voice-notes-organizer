@@ -20,9 +20,14 @@ rather than crashing the tool.
   "knownMounts": {},
   "autoTranslate": null,
   "defaultModel": "turbo",
-  "openWhenDone": true
+  "openWhenDone": true,
+  "rememberDeletions": true
 }
 ```
+
+`config.json` isn't the only file in `~/.vno`: deletions are recorded next to
+it in [`deleted.json`](#rememberdeletions), which you can throw away at any
+time.
 
 ## What can change what
 
@@ -34,6 +39,7 @@ rather than crashing the tool.
 | `autoTranslate` | ✅ | ✅ | ✅ |
 | `defaultModel` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
+| `rememberDeletions` | ✅ | ✅ | ✅ |
 
 ---
 
@@ -130,6 +136,57 @@ Whether a finished `vno import` / `vno transcribe` run launches the
 headless.
 
 `--no-open` overrides it for a single run.
+
+---
+
+## `rememberDeletions`
+
+Whether recordings you delete through vno are remembered, so that importing
+again doesn't copy them straight back off a device that still holds them.
+`true` by default.
+
+Deletions are appended to a plain JSON file next to your config:
+
+```
+~/.vno/deleted.json
+```
+
+Each entry records the target it belongs to, the recording's path within that
+target, its size in bytes, which action removed it, and when:
+
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "target": "/path/to/voice-notes",
+      "rel": "IC RECORDER/250724_1032.mp3",
+      "size": 184320,
+      "via": "cleanup",
+      "deletedAt": "2026-07-25T10:14:02.881Z"
+    }
+  ]
+}
+```
+
+An entry matches a file on the device only when **both** the path and the byte
+size line up — the same test import already uses to recognise a recording it
+has already copied. Re-record over the same filename and you get a different
+size, so the new recording still imports.
+
+**The ledger is optional in the strongest sense: delete the file and nothing
+breaks.** Import goes straight back to the behaviour it had before the ledger
+existed — copy anything that isn't already on disk. A corrupt or unreadable
+ledger is treated the same way, so bad bookkeeping can never block an import.
+`vno cleanup ledger` is just a convenient way to delete it.
+
+Setting `rememberDeletions` to `false` stops both halves — nothing is recorded,
+and nothing is skipped. An existing ledger file is left alone but ignored.
+
+> **Only deletions made *through* vno can be recorded** — the UI's per-take
+> delete, the UI's cleanup, and `vno cleanup`. Deleting a file by hand in
+> Explorer or Finder is invisible to the tool, so that recording will come back
+> on the next import.
 
 ---
 

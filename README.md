@@ -141,6 +141,8 @@ to run this install for you — but ffmpeg still has to be installed separately
 | `vno transcribe` | `vno t`, `vno --t` | Pick recordings and transcribe (or translate) them |
 | `vno visualize` | `vno v`, `vno --v` | Open the browser UI |
 | `vno cleanup` | — | Delete recordings shorter than 3 seconds, after confirming |
+| `vno cleanup -f <files>` | — | Delete named recordings and their transcripts |
+| `vno cleanup ledger` | — | Forget which recordings you deleted, so they import again |
 | `vno setting` | `vno settings` | Interactive wizard for the common settings |
 | `vno config` | — | Print the path to the config file |
 

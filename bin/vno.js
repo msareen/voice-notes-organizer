@@ -4,7 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { runImport } from "../src/cli/import.js";
 import { runTranscribe } from "../src/cli/transcribe.js";
-import { runCleanup } from "../src/cli/cleanup.js";
+import { runCleanup, runLedgerCleanup } from "../src/cli/cleanup.js";
 import { runVisualize } from "../src/cli/visualize.js";
 import { runSettings } from "../src/cli/settings.js";
 import { configFilePath } from "../src/lib/config.js";
@@ -70,11 +70,32 @@ program
 
 program
   .command("cleanup")
+  .argument(
+    "[what]",
+    'pass "ledger" to delete the deletion ledger instead of any recordings; omit it to clean up short recordings'
+  )
   .description("Delete very short recordings (likely accidental button presses) from the target folder")
+  .option(
+    "-f, --file <names...>",
+    "delete these specific recordings and their transcripts (name, relative path, or absolute path) instead of scanning for short ones"
+  )
   .option("-t, --threshold <seconds>", "recordings shorter than this (seconds) are removed", "3")
   .option("--dry-run", "list what would be deleted without deleting anything")
-  .action(async (opts) => {
-    await runCleanup({ threshold: parseFloat(opts.threshold), dryRun: Boolean(opts.dryRun) });
+  .action(async (what, opts) => {
+    if (what === "ledger") {
+      await runLedgerCleanup();
+      return;
+    }
+    if (what) {
+      console.error(chalk.red(`Unknown cleanup target "${what}". Did you mean \`vno cleanup ledger\`?`));
+      process.exitCode = 1;
+      return;
+    }
+    await runCleanup({
+      threshold: parseFloat(opts.threshold),
+      dryRun: Boolean(opts.dryRun),
+      files: opts.file || null,
+    });
   });
 
 program
@@ -92,7 +113,9 @@ program
 program
   .command("setting")
   .alias("settings")
-  .description("Interactive wizard to toggle/reset direct switches (auto-translate, model, target, remembered volumes)")
+  .description(
+    "Interactive wizard to toggle/reset direct switches (auto-translate, model, target, remembered volumes, deletion ledger)"
+  )
   .action(async () => {
     await runSettings();
   });

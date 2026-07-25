@@ -26,6 +26,12 @@ function defaultConfig() {
     // Default whisper model used for auto-translation and as the pre-selected
     // choice in the transcribe picker.
     defaultModel: "turbo",
+    // Whether recordings deleted through vno (the UI's delete/cleanup, and
+    // `vno cleanup`) are remembered in ~/.vno/deleted.json so a later import
+    // doesn't copy them back off a device that still has them. Turning this
+    // off stops both the remembering and the skipping; the ledger file itself
+    // can be thrown away at any time with `vno cleanup ledger`.
+    rememberDeletions: true,
     // After an import/transcribe run finishes, reveal the folder(s) the new
     // files landed in and open the regenerated index.html player. Set to
     // false (or pass --no-open) to keep runs headless.

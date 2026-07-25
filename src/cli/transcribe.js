@@ -4,6 +4,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { loadConfig } from "../lib/config.js";
 import { findAudioFiles } from "../lib/sync.js";
+import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
 import { ensureWhisperInstalled, transcribeFile } from "../lib/whisper.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
 import { prompt, CANCELLED } from "./prompt.js";
@@ -35,52 +36,6 @@ export async function transcribeMany(files, { model = "turbo", translate = false
     }
   }
   return done;
-}
-
-/**
- * Resolves a user-provided --file value to one of the discovered audio files.
- * Accepts an absolute path, a path relative to the target folder, or a bare
- * filename matched (case-insensitively) against the known audio files.
- */
-async function resolveNamedFile(name, allAudio, target) {
-  const candidates = [];
-  if (path.isAbsolute(name)) candidates.push(name);
-  candidates.push(path.resolve(target, name));
-
-  for (const candidate of candidates) {
-    if (await fs.pathExists(candidate)) {
-      const resolved = path.resolve(candidate);
-      const inList = allAudio.find((f) => path.resolve(f) === resolved);
-      if (inList) return inList;
-      // Exists but wasn't discovered as audio (e.g. unsupported extension).
-      return resolved;
-    }
-  }
-
-  // Fall back to matching against just the filename, case-insensitively:
-  // exact basename first, then the name with the extension dropped (so
-  // "250810_1328" finds "250810_1328.mp3"), then a unique substring match.
-  const wanted = path.basename(name).toLowerCase();
-  const wantedStem = wanted.slice(0, wanted.length - path.extname(wanted).length) || wanted;
-  const baseOf = (f) => path.basename(f).toLowerCase();
-  const stemOf = (f) => {
-    const b = baseOf(f);
-    return b.slice(0, b.length - path.extname(b).length);
-  };
-
-  let matches = allAudio.filter((f) => baseOf(f) === wanted);
-  if (matches.length === 0) matches = allAudio.filter((f) => stemOf(f) === wantedStem);
-  if (matches.length === 0) matches = allAudio.filter((f) => baseOf(f).includes(wantedStem));
-
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    console.log(
-      chalk.yellow(`"${name}" matches ${matches.length} files; be more specific:`)
-    );
-    for (const f of matches) console.log(`  - ${path.relative(target, f)}`);
-    return null;
-  }
-  return null;
 }
 
 /**
@@ -137,11 +92,11 @@ export async function runTranscribe({ model, file, filter, translate = false, op
     // absolute path. Re-transcribes even if a transcript already exists, since
     // asking for a specific file is an explicit request.
     const match = await resolveNamedFile(named, allAudio, config.target);
-    if (!match) {
-      console.log(chalk.red(`No audio file matching "${named}" was found in ${config.target}.`));
+    if (!match.file) {
+      reportUnresolved(named, match, config.target);
       return;
     }
-    selected = [match];
+    selected = [match.file];
   } else {
     const candidates = [];
     for (const f of allAudio) {

@@ -219,7 +219,9 @@ async function importVolumes(volumes, config) {
       ? { ...volume, mountPath: path.join(volume.mountPath, subdir) }
       : volume;
 
-    const result = await syncVolume(effectiveVolume, config.target);
+    const result = await syncVolume(effectiveVolume, config.target, {
+      rememberDeletions: config.rememberDeletions !== false,
+    });
     imported.push(...result.copiedFiles);
     if (!volume.isManualSource) {
       config.knownMounts[volume.id] = {

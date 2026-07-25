@@ -1,12 +1,17 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { runImport } from "../src/import.js";
-import { runTranscribe } from "../src/transcribe.js";
-import { runCleanup } from "../src/cleanup.js";
-import { runVisualize } from "../src/visualize.js";
-import { runSettings } from "../src/settings.js";
-import { configFilePath } from "../src/config.js";
+import { runImport } from "../src/cli/import.js";
+import { runTranscribe } from "../src/cli/transcribe.js";
+import { runCleanup } from "../src/cli/cleanup.js";
+import { runVisualize } from "../src/cli/visualize.js";
+import { runSettings } from "../src/cli/settings.js";
+import { configFilePath } from "../src/lib/config.js";
+
+// Single source of truth for the version - a hardcoded copy here silently
+// drifts from package.json the first time someone bumps only one of them.
+const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 const program = new Command();
 
@@ -26,15 +31,16 @@ if (SHORTCUTS[process.argv[2]]) {
 program
   .name("vno")
   .description(
-    "Detects removable volumes, imports voice notes to local storage, and transcribes them with whisper."
+    "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards."
   )
-  .version("0.3.0");
+  .version(version);
 
 program
   .command("import", { isDefault: true })
   .description("Detect connected volumes and import voice notes (default command)")
-  .action(async () => {
-    await runImport();
+  .option("--no-open", "don't open the target folder(s) and index.html when the run finishes")
+  .action(async (opts) => {
+    await runImport({ open: opts.open });
   });
 
 program
@@ -43,20 +49,22 @@ program
   .description("Transcribe imported voice notes using whisper (alias: t, --t)")
   .option("-m, --model <model>", "whisper model to use (turbo, tiny, base, small, medium, large)")
   .option(
-    "-f, --file <name>",
-    "transcribe a specific file (name, relative path, or absolute path) instead of picking from a list"
+    "-f, --file [name]",
+    "transcribe a specific file (name, relative path, or absolute path) instead of picking from a list; pass -f on its own to pick from every file, including ones already transcribed"
   )
   .option(
     "-s, --filter <text>",
     "pre-filter the picker list to files whose name or recorded date contains this text"
   )
   .option("--translate", "translate to English (whisper translate task) instead of verbatim transcription")
+  .option("--no-open", "don't open the target folder(s) and index.html when the run finishes")
   .action(async (opts) => {
     await runTranscribe({
       model: opts.model,
       file: opts.file,
       filter: opts.filter,
       translate: Boolean(opts.translate),
+      open: opts.open,
     });
   });
 
@@ -72,10 +80,13 @@ program
 program
   .command("visualize")
   .alias("v")
-  .description("Generate a self-contained index.html player for the imported notes (alias: v, --v)")
-  .option("-o, --open", "open the generated page in your default browser")
+  .description(
+    "Launch the browser UI: play, edit transcripts, import, transcribe, clean up and change settings (alias: v, --v)"
+  )
+  .option("-p, --port <number>", "port to listen on (default: a free one picked automatically)", "0")
+  .option("--no-open", "start the server without opening a browser")
   .action(async (opts) => {
-    await runVisualize({ open: Boolean(opts.open) });
+    await runVisualize({ open: opts.open, port: parseInt(opts.port, 10) || 0 });
   });
 
 program

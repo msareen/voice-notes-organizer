@@ -4,9 +4,9 @@ import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
 import inquirer from "inquirer";
-import { loadConfig } from "./config.js";
-import { findAudioFiles } from "./sync.js";
-import { getDurationSeconds } from "./media.js";
+import { loadConfig } from "../lib/config.js";
+import { findAudioFiles } from "../lib/sync.js";
+import { getDurationSeconds } from "../lib/media.js";
 
 const execFileAsync = promisify(execFile);
 

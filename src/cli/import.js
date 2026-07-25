@@ -1,15 +1,19 @@
 import path from "node:path";
 import fs from "fs-extra";
 import chalk from "chalk";
-import { loadConfig, saveConfig } from "./config.js";
-import { detectVolumes } from "./volumes.js";
-import { syncVolume } from "./sync.js";
+import { loadConfig, saveConfig } from "../lib/config.js";
+import { detectVolumes } from "../lib/volumes.js";
+import { syncVolume } from "../lib/sync.js";
 import { runVisualize } from "./visualize.js";
 import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.js";
-import { ensureWhisperInstalled } from "./whisper.js";
+import { ensureWhisperInstalled } from "../lib/whisper.js";
 import { transcribeMany } from "./transcribe.js";
 
-export async function runImport() {
+/**
+ * `open === false` (from `--no-open`) stops the viewer from launching at the
+ * end; otherwise the remembered `openWhenDone` setting decides.
+ */
+export async function runImport({ open } = {}) {
   const config = await loadConfig();
   const volumes = await detectVolumes();
 
@@ -64,9 +68,14 @@ export async function runImport() {
 
   if (changed) await saveConfig(config);
 
-  // Refresh the browsable player so it always reflects the latest import
-  // (and any transcripts just produced).
-  await runVisualize({ quiet: true });
+  // Hand off to the viewer so the freshly imported notes are immediately
+  // browsable. It serves until the browser tab is closed, so this is the last
+  // thing the import does. Skipped when the run brought nothing in.
+  const shouldOpen = open === false ? false : config.openWhenDone !== false;
+  if (imported.length > 0 && shouldOpen) {
+    console.log(chalk.dim("\nOpening the viewer..."));
+    await runVisualize();
+  }
 
   return config;
 }

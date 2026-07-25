@@ -1,10 +1,12 @@
 import path from "node:path";
 import chalk from "chalk";
 import inquirer from "inquirer";
-import { loadConfig, saveConfig, configFilePath } from "./config.js";
+import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { prompt, CANCELLED } from "./prompt.js";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
+
+const onOffLabel = (value) => (value ? chalk.green("on") : chalk.red("off"));
 
 /** Human-readable state of the three-way auto-translate switch. */
 function autoTranslateLabel(value) {
@@ -35,6 +37,7 @@ export async function runSettings() {
           { name: `Auto-translate imports  ${chalk.dim("[" )}${autoTranslateLabel(config.autoTranslate)}${chalk.dim("]")}`, value: "autoTranslate" },
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
+          { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
           { name: chalk.dim(`Show config file path`), value: "path" },
           new inquirer.Separator(),
@@ -94,6 +97,23 @@ export async function runSettings() {
         config.target = path.resolve(res.value.trim());
         await saveConfig(config);
         console.log(chalk.dim(`Target set to ${config.target}`));
+      }
+    } else if (answer.action === "openWhenDone") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "When an import/transcribe run finishes, open the folder(s) and index.html?",
+          default: config.openWhenDone !== false,
+          choices: [
+            { name: "On — reveal the folder(s) and open the player", value: true },
+            { name: "Off — finish quietly, open things yourself", value: false },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.openWhenDone = res.value;
+        await saveConfig(config);
       }
     } else if (answer.action === "resetMounts") {
       const res = await prompt([

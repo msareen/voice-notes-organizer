@@ -2,11 +2,12 @@ import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
 import ora from "ora";
-import { loadConfig } from "./config.js";
-import { findAudioFiles } from "./sync.js";
-import { ensureWhisperInstalled, transcribeFile } from "./whisper.js";
-import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "./media.js";
+import { loadConfig } from "../lib/config.js";
+import { findAudioFiles } from "../lib/sync.js";
+import { ensureWhisperInstalled, transcribeFile } from "../lib/whisper.js";
+import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
 import { prompt, CANCELLED } from "./prompt.js";
+import { runVisualize } from "./visualize.js";
 import "./searchableCheckbox.js";
 
 function transcriptPathFor(audioPath) {
@@ -88,13 +89,13 @@ async function resolveNamedFile(name, allAudio, target) {
  * Duration is filled in later (only for files that survive filtering) since it
  * needs an ffprobe call per file.
  */
-async function describeFiles(files, target) {
+async function describeFiles(entries, target) {
   const rows = [];
-  for (const file of files) {
-    const date = await recordedDate(file);
+  for (const entry of entries) {
+    const date = await recordedDate(entry.file);
     rows.push({
-      file,
-      label: path.relative(target, file),
+      ...entry,
+      label: path.relative(target, entry.file),
       date,
       dateStr: formatDate(date),
     });
@@ -108,7 +109,11 @@ async function describeFiles(files, target) {
   return rows;
 }
 
-export async function runTranscribe({ model, file, filter, translate = false } = {}) {
+/**
+ * `open === false` (from `--no-open`) forces the reveal off; otherwise the
+ * remembered `openWhenDone` setting decides.
+ */
+export async function runTranscribe({ model, file, filter, translate = false, open } = {}) {
   const config = await loadConfig();
 
   if (!(await fs.pathExists(config.target))) {
@@ -119,33 +124,45 @@ export async function runTranscribe({ model, file, filter, translate = false } =
 
   const allAudio = await findAudioFiles(config.target);
 
+  // `-f` with a name is direct mode; `-f` on its own (commander gives us `true`
+  // for an option declared `[name]`) means "let me pick, and show me everything"
+  // - the only way to reach an already-transcribed file from the picker.
+  const named = typeof file === "string" ? file : null;
+  const pickAll = file === true;
+
   let selected;
-  if (file) {
+  if (named) {
     // Direct mode: transcribe exactly the file the user named, resolving it
     // against the target folder (by relative path or bare filename) or as an
     // absolute path. Re-transcribes even if a transcript already exists, since
     // asking for a specific file is an explicit request.
-    const match = await resolveNamedFile(file, allAudio, config.target);
+    const match = await resolveNamedFile(named, allAudio, config.target);
     if (!match) {
-      console.log(chalk.red(`No audio file matching "${file}" was found in ${config.target}.`));
+      console.log(chalk.red(`No audio file matching "${named}" was found in ${config.target}.`));
       return;
     }
     selected = [match];
   } else {
-    const pending = [];
+    const candidates = [];
     for (const f of allAudio) {
-      if (!(await fs.pathExists(transcriptPathFor(f)))) pending.push(f);
+      const hasTranscript = await fs.pathExists(transcriptPathFor(f));
+      if (pickAll || !hasTranscript) candidates.push({ file: f, hasTranscript });
     }
 
-    if (pending.length === 0) {
-      console.log(chalk.green("Everything is already transcribed."));
+    if (candidates.length === 0) {
+      if (pickAll) {
+        console.log(chalk.yellow(`No audio files found in ${config.target}.`));
+      } else {
+        console.log(chalk.green("Everything is already transcribed."));
+        console.log(chalk.dim("Run `vno t -f` to pick from every file and re-transcribe one."));
+      }
       return;
     }
 
     // Recorded dates are cheap (filename/mtime); duration needs an ffprobe call
     // per file. The picker filters live as you type, so we can't narrow first —
-    // probe every pending file up front behind a spinner.
-    const rows = await describeFiles(pending, config.target);
+    // probe every candidate up front behind a spinner.
+    const rows = await describeFiles(candidates, config.target);
 
     const spinner = ora(`Reading duration of ${rows.length} file(s)...`).start();
     for (const row of rows) {
@@ -155,18 +172,30 @@ export async function runTranscribe({ model, file, filter, translate = false } =
 
     const labelWidth = Math.min(50, Math.max(...rows.map((r) => r.label.length)));
     const choices = rows.map((r) => ({
-      name: `${r.label.padEnd(labelWidth)}  ${chalk.dim(r.dateStr.padEnd(16))}  ${chalk.dim(r.durStr.padStart(7))}`,
+      name:
+        `${r.label.padEnd(labelWidth)}  ${chalk.dim(r.dateStr.padEnd(16))}  ${chalk.dim(r.durStr.padStart(7))}` +
+        (r.hasTranscript ? chalk.yellow("  • transcribed") : ""),
       value: r.file,
-      checked: true,
+      // Pre-checking everything is right when the list is only untranscribed
+      // files, but not here: a reflex Enter would overwrite every transcript
+      // you have. In re-transcribe mode you pick explicitly.
+      checked: !pickAll,
     }));
 
-    console.log(chalk.bold(`${rows.length} file(s) to transcribe:`));
+    if (pickAll) {
+      console.log(chalk.bold(`${rows.length} file(s) in ${config.target}:`));
+      console.log(
+        chalk.dim("Nothing is pre-selected. Space to pick; rows marked • already have a transcript.")
+      );
+    } else {
+      console.log(chalk.bold(`${rows.length} file(s) to transcribe:`));
+    }
 
     const answer = await prompt([
       {
         type: "searchable-checkbox",
         name: "selected",
-        message: "Select files to transcribe",
+        message: pickAll ? "Select files to (re-)transcribe" : "Select files to transcribe",
         choices,
         pageSize: 15,
         loop: false,
@@ -182,6 +211,30 @@ export async function runTranscribe({ model, file, filter, translate = false } =
     if (selected.length === 0) {
       console.log(chalk.dim("Nothing selected."));
       return;
+    }
+
+    // Whisper writes the .vtt straight over the old one, so any corrections
+    // made in the transcript editor are gone. Worth one deliberate keystroke.
+    const overwriting = rows.filter((r) => r.hasTranscript && selected.includes(r.file));
+    if (overwriting.length > 0) {
+      console.log();
+      for (const r of overwriting) console.log(chalk.yellow(`  overwrites  ${r.label}`));
+      const confirm = await prompt([
+        {
+          type: "list",
+          name: "ok",
+          message: `Replace ${overwriting.length} existing transcript(s)? Any edits you made will be lost.`,
+          choices: [
+            { name: "No, cancel", value: false },
+            { name: "Yes, re-transcribe", value: true },
+          ],
+          default: false,
+        },
+      ]);
+      if (confirm === CANCELLED || !confirm.ok) {
+        console.log(chalk.dim("Cancelled - nothing re-transcribed."));
+        return;
+      }
     }
   }
 
@@ -211,4 +264,13 @@ export async function runTranscribe({ model, file, filter, translate = false } =
 
   const label = translate ? "Translated" : "Transcribed";
   console.log(chalk.bold(`\nDone. ${label} ${done}/${selected.length} file(s).`));
+
+  if (done === 0) return;
+
+  // Hand off to the viewer so the new transcripts can be read, edited and
+  // played straight away. It serves until the browser tab is closed.
+  if (open === false ? false : config.openWhenDone !== false) {
+    console.log(chalk.dim("\nOpening the viewer..."));
+    await runVisualize();
+  }
 }

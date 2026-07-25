@@ -62,3 +62,26 @@ export function parseCues(content) {
 export function cuesToPlainText(cues) {
   return cues.map((c) => c.text).join("\n").trim() + "\n";
 }
+
+/** Seconds -> "00:01:02.500", the long VTT timestamp form. */
+export function formatTimestamp(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const pad = (n, width = 2) => String(n).padStart(width, "0");
+  return [
+    pad(Math.floor(total / 3600)),
+    pad(Math.floor((total % 3600) / 60)),
+    pad(Math.floor(total % 60)),
+  ].join(":") + "." + pad(Math.round((total % 1) * 1000), 3);
+}
+
+/**
+ * Renders cues back into a WebVTT document. Used when a transcript is edited
+ * in the browser: only the text changes, the original timings are written
+ * back verbatim so follow-along highlighting keeps working.
+ */
+export function serializeCues(cues) {
+  const body = cues
+    .map((c) => `${formatTimestamp(c.start)} --> ${formatTimestamp(c.end)}\n${String(c.text ?? "").trim()}`)
+    .join("\n\n");
+  return `WEBVTT\n\n${body}\n`;
+}

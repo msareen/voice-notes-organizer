@@ -26,6 +26,10 @@ function defaultConfig() {
     // Default whisper model used for auto-translation and as the pre-selected
     // choice in the transcribe picker.
     defaultModel: "turbo",
+    // After an import/transcribe run finishes, reveal the folder(s) the new
+    // files landed in and open the regenerated index.html player. Set to
+    // false (or pass --no-open) to keep runs headless.
+    openWhenDone: true,
   };
 }
 

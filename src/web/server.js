@@ -46,13 +46,13 @@ const ASSETS = {
  * `closed` settles when the server shuts down, which happens when the browser
  * tab goes away, the page's Quit button is used, or `stop()` is called.
  */
-export async function startServer({ config, port = 0, host = "127.0.0.1" } = {}) {
+export async function startServer({ config, port = 0, host = "127.0.0.1", onScanProgress = null } = {}) {
   const token = crypto.randomBytes(24).toString("hex");
   const target = path.resolve(config.target);
 
   // Notes are expensive to build (an ffprobe per file), so they're cached and
   // rebuilt only when something actually changes them.
-  let notes = await buildNotes(target);
+  let notes = await buildNotes(target, { onProgress: onScanProgress });
   let currentConfig = config;
 
   const clients = new Set(); // open SSE responses
@@ -86,6 +86,8 @@ export async function startServer({ config, port = 0, host = "127.0.0.1" } = {})
   }
 
   async function refreshNotes() {
+    // No progress reporting here: rebuilds happen while the page is up, where
+    // status belongs in the page log, not drawn over the terminal.
     notes = await buildNotes(target);
     broadcast("notes", { count: notes.length });
   }

@@ -120,6 +120,16 @@ Starts a local web server and opens the two-pane organizer in your browser.
 | `-p, --port <number>` | Pin the port. Default: a free one, picked automatically |
 | `--no-open` | Start the server without opening a browser (prints the URL) |
 
+Startup measures every recording with `ffprobe`, which on a large library takes
+a while, so a progress bar shows the count and the folder being read:
+
+```
+Reading recordings [████████████░░░░░░░░░░░░] 268/551  Sony
+```
+
+It clears itself the moment the viewer is up, and is drawn only on a terminal —
+piped or redirected output stays clean.
+
 ---
 
 ## `vno cleanup`

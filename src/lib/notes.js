@@ -103,9 +103,28 @@ export async function readTranscript(audioPath) {
  * Builds the per-note data model the page renders from. `rel` doubles as the
  * note's id in every API call, so it's always a target-relative, forward-slash
  * path (the server resolves it back and refuses anything escaping the target).
+ *
+ * `onProgress` is how a caller shows this taking its time - an ffprobe per file
+ * makes a large library a long silence otherwise. It's a callback rather than
+ * any printing of our own because `lib/` is shared with the browser path, which
+ * has no terminal to draw on. Events are `{ phase: "scan" }` while the tree is
+ * being walked (no count known yet), then `{ phase: "read", done, total, dir,
+ * name }` per file. `findAudioFiles` walks depth-first, so `dir` advances one
+ * folder at a time rather than jumping around.
  */
-export async function buildNotes(target) {
+export async function buildNotes(target, { onProgress } = {}) {
+  // A progress callback must never be able to fail the build it's reporting on.
+  const report = (event) => {
+    try {
+      onProgress?.(event);
+    } catch {
+      // reporting is decoration; keep building
+    }
+  };
+
+  report({ phase: "scan" });
   const audioFiles = await findAudioFiles(target);
+  const total = audioFiles.length;
 
   const notes = [];
   for (const audioPath of audioFiles) {
@@ -115,6 +134,9 @@ export async function buildNotes(target) {
     // Folder the note lives in, relative to target, normalised to forward
     // slashes ("" for files sitting directly in the target root).
     const dir = dirRaw === "." ? "" : dirRaw.split(path.sep).join("/");
+
+    // Reported before the work, so what's on screen is the file being read.
+    report({ phase: "read", done: notes.length, total, dir, name: path.basename(audioPath) });
 
     const transcript = await readTranscript(audioPath);
 
@@ -147,6 +169,8 @@ export async function buildNotes(target) {
       timeStr: date ? `${pad2(date.getHours())}:${pad2(date.getMinutes())}` : "",
     });
   }
+
+  report({ phase: "read", done: notes.length, total, dir: "", name: "" });
 
   // Newest recording first; files with no determinable date sort to the end.
   notes.sort((a, b) => (b.dateMs ?? -Infinity) - (a.dateMs ?? -Infinity));

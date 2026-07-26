@@ -72,7 +72,9 @@ was deleted, so those recordings import again if the device still has them.
 
 ### `vno visualize` (`v`, `--v`)
 Serves the browser UI on loopback and blocks until the tab closes, the page's Quit
-button is used, or Ctrl+C. Everything the CLI does is available in the page.
+button is used, or Ctrl+C. Everything the CLI does is available in the page. Building
+the note model up front costs an ffprobe per recording, so a progress bar (count +
+current folder) runs until the server is up, then clears itself.
 
 | Flag | Effect |
 | --- | --- |

@@ -17,7 +17,7 @@ bin/vno.js           command definitions and argument parsing (commander)
 src/
   cli/               one module per command, plus the terminal prompt helpers
     import.js  transcribe.js  cleanup.js  visualize.js  settings.js
-    setup.js   prompt.js  searchableCheckbox.js
+    setup.js   prompt.js  searchableCheckbox.js  progress.js
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.js  notes.js  sync.js  media.js  vtt.js
     volumes.js  whisper.js  setup.js  open.js  ledger.js
@@ -40,7 +40,8 @@ so anything there is safe to reuse from either side.
 | `lib/setup.js` | Finding ffmpeg/whisper/pip on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.js` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.js` | Parse and serialize WebVTT cues |
-| `lib/notes.js` | Builds the note model both the CLI and the page render from |
+| `lib/notes.js` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
+| `cli/progress.js` | The terminal progress bar `visualize` draws while that model is being built |
 | `lib/open.js` | Opening a folder / revealing a file, per OS |
 | `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
 

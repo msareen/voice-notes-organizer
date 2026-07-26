@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { loadConfig } from "../lib/config.js";
 import { startServer } from "../web/server.js";
 import { openPath } from "../lib/open.js";
+import { createProgressBar } from "./progress.js";
 
 /**
  * Launches the local viewer: a small HTTP server on loopback that serves the
@@ -20,15 +21,22 @@ export async function runVisualize({ open = true, port = 0, quiet = false } = {}
   // be used to import into it.
   await fs.ensureDir(config.target);
 
+  // Building the note model costs an ffprobe per recording, so a large library
+  // leaves the terminal silent for a long time before the browser opens. The
+  // bar is transient - cleared the moment the server is up.
+  const bar = createProgressBar(chalk.dim("Reading recordings"));
+
   let server;
   try {
-    server = await startServer({ config, port });
+    server = await startServer({ config, port, onScanProgress: bar.report });
   } catch (err) {
     if (err.code === "EADDRINUSE") {
       console.log(chalk.red(`Port ${port} is already in use. Pick another with --port, or omit it to auto-pick.`));
       return null;
     }
     throw err;
+  } finally {
+    bar.stop();
   }
 
   if (quiet) {

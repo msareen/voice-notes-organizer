@@ -1,3 +1,4 @@
+import path from "node:path";
 import chalk from "chalk";
 
 const BAR_WIDTH = 24;
@@ -18,16 +19,19 @@ const FULL = UNICODE ? "█" : "#";
 const EMPTY = UNICODE ? "░" : "-";
 
 /**
- * A single-line, determinate progress bar for countable work - currently the
- * ffprobe pass that builds the note model before the viewer opens, which is
- * otherwise a long silence on a large library.
+ * A single-line progress bar for the per-file work that would otherwise leave
+ * the terminal silent: the ffprobe pass behind `visualize` and `transcribe`'s
+ * picker, `cleanup`'s duration scan, and `import`'s copy.
  *
- * Deliberately not `ora`: this is a count, not a spinner, and ora's own redraw
+ * Deliberately not `ora`: these are counts, not spinners, and ora's own redraw
  * timer fights with ours. Nothing is drawn when stdout isn't a TTY, so piped
  * or redirected output doesn't collect escape codes.
  *
- * `report` takes the event shape `buildNotes` emits, so it can be handed
- * straight to it as `onProgress`.
+ * `report` takes the events `lib/` emits, so it can be handed straight to any
+ * of them as `onProgress`:
+ *   { phase: "scan", dir, found }               walking, no total known yet
+ *   { phase: "work", done, total, dir, name }   countable, draws the bar
+ *   { phase: "log", message, level }            a line that outlives the bar
  */
 export function createProgressBar(label) {
   const tty = Boolean(process.stdout.isTTY);
@@ -55,8 +59,12 @@ export function createProgressBar(label) {
   function render(event) {
     const width = (process.stdout.columns || 80) - 1;
 
+    // The walk has no total to count towards, so it reports what it has found
+    // so far and where it is instead of a bar.
     if (event.phase === "scan") {
-      return truncate(`${label} ${chalk.dim("scanning for recordings...")}`, width);
+      const found = event.found ? ` ${event.found} found` : "";
+      const where = event.dir ? `  ${event.dir}` : "";
+      return truncate(`${label} ${chalk.dim(`scanning...${found}${where}`)}`, width);
     }
 
     const { done = 0, total = 0, dir = "", name = "" } = event;
@@ -80,12 +88,39 @@ export function createProgressBar(label) {
     write(CLEAR_LINE + render(current));
   }
 
+  /**
+   * Prints a line that outlives the bar. The bar is erased first - otherwise
+   * the message lands appended to a half-drawn bar - and redrawn underneath.
+   * Unlike the bar itself this prints without a TTY, since these are the
+   * failures and notices a piped run still needs to see.
+   */
+  function logLine(message, level) {
+    const text =
+      level === "error" ? chalk.red(message) : level === "warn" ? chalk.yellow(message) : chalk.dim(message);
+    if (tty) write(CLEAR_LINE);
+    write(text + "\n");
+    draw(true);
+  }
+
   return {
-    /** Feed a `buildNotes` progress event. Safe to call at any rate. */
+    /**
+     * Feed a progress event. Safe to call at any rate, and never throws, so a
+     * caller can hand this straight to a `lib/` function as `onProgress`.
+     */
     report(event) {
-      current = event;
-      // Phase changes and the final tick must land however fast they arrive.
-      draw(event.phase === "scan" || (event.total > 0 && event.done >= event.total));
+      try {
+        if (!event) return;
+        if (event.phase === "log") return logLine(event.message, event.level);
+        current = event;
+        // Phase changes and the final tick must land however fast they arrive.
+        draw(event.phase === "scan" || (event.total > 0 && event.done >= event.total));
+      } catch {
+        // drawing is decoration; never let it break the work being reported on
+      }
+    },
+    /** Print a line above the bar, keeping the bar on screen below it. */
+    log(message, level) {
+      logLine(message, level);
     },
     /** Erase the bar and hand the line back. Idempotent. */
     stop() {
@@ -94,6 +129,19 @@ export function createProgressBar(label) {
       write(CLEAR_LINE);
       showCursor();
     },
+  };
+}
+
+/**
+ * The `{ dir, name }` half of a "work" event for a file: its folder relative to
+ * `root`, forward-slashed the way the bar shows it. Saves every caller looping
+ * over files from rebuilding the same two lines.
+ */
+export function locationOf(file, root) {
+  const rel = path.relative(root, path.dirname(file));
+  return {
+    dir: rel && rel !== "." ? rel.split(path.sep).join("/") : "",
+    name: path.basename(file),
   };
 }
 

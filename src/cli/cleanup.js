@@ -9,6 +9,7 @@ import { getDurationSeconds } from "../lib/media.js";
 import { recordDeletions, clearLedger, ledgerSummary } from "../lib/ledger.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { ensureDependencies } from "./setup.js";
+import { createProgressBar, locationOf } from "./progress.js";
 
 // Transcript sidecars written next to an audio file (whisper .vtt, the
 // derived .txt, plus .srt for completeness) that should go with it on delete.
@@ -33,7 +34,7 @@ export async function runCleanup({ threshold = 3, dryRun = false, files = null }
     return;
   }
 
-  const allAudio = await findAudioFiles(config.target);
+  const allAudio = await findScanned(config.target);
   if (allAudio.length === 0) {
     console.log(chalk.dim("No audio files found."));
     return;
@@ -115,6 +116,19 @@ export async function runCleanup({ threshold = 3, dryRun = false, files = null }
 }
 
 /**
+ * The file walk, with a bar over it: on a big or cloud-synced target this is
+ * itself a noticeable wait before anything else can start.
+ */
+async function findScanned(target) {
+  const bar = createProgressBar(chalk.dim("Finding recordings"));
+  try {
+    return await findAudioFiles(target, { onProgress: bar.report });
+  } finally {
+    bar.stop();
+  }
+}
+
+/**
  * Maps the `-f` names onto real audio files, reporting the ones that miss.
  * Duplicates (the same recording named twice, or by two different spellings)
  * collapse to one entry so it isn't listed - or counted - twice.
@@ -158,10 +172,18 @@ async function findShortRecordings(allAudio, threshold, target) {
 
   console.log(chalk.dim(`Checking duration of ${allAudio.length} file(s) in ${target}...`));
 
+  // One ffprobe per recording, so a large library sits here for a while.
+  const bar = createProgressBar(chalk.dim("Measuring"));
   const short = [];
-  for (const file of allAudio) {
-    const duration = await getDurationSeconds(file);
-    if (duration !== null && duration < threshold) short.push({ file, duration });
+  try {
+    for (const [done, file] of allAudio.entries()) {
+      bar.report({ phase: "work", done, total: allAudio.length, ...locationOf(file, target) });
+      const duration = await getDurationSeconds(file);
+      if (duration !== null && duration < threshold) short.push({ file, duration });
+    }
+    bar.report({ phase: "work", done: allAudio.length, total: allAudio.length });
+  } finally {
+    bar.stop();
   }
   return short;
 }

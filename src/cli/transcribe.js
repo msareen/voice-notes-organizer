@@ -1,7 +1,6 @@
 import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
-import ora from "ora";
 import { loadConfig } from "../lib/config.js";
 import { findAudioFiles } from "../lib/sync.js";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
@@ -10,6 +9,7 @@ import { ensureDependencies } from "./setup.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runVisualize } from "./visualize.js";
+import { createProgressBar, locationOf } from "./progress.js";
 import "./searchableCheckbox.js";
 
 function transcriptPathFor(audioPath) {
@@ -82,7 +82,13 @@ export async function runTranscribe({ model, file, filter, translate = false, op
   // ffprobe, so finding out late would mean a list of "?" and a wasted choice.
   if (!(await ensureDependencies(["ffmpeg", "whisper"], { reason: "transcribing" }))) return;
 
-  const allAudio = await findAudioFiles(config.target);
+  const findBar = createProgressBar(chalk.dim("Finding recordings"));
+  let allAudio;
+  try {
+    allAudio = await findAudioFiles(config.target, { onProgress: findBar.report });
+  } finally {
+    findBar.stop();
+  }
 
   // `-f` with a name is direct mode; `-f` on its own (commander gives us `true`
   // for an option declared `[name]`) means "let me pick, and show me everything"
@@ -104,9 +110,15 @@ export async function runTranscribe({ model, file, filter, translate = false, op
     selected = [match.file];
   } else {
     const candidates = [];
-    for (const f of allAudio) {
-      const hasTranscript = await fs.pathExists(transcriptPathFor(f));
-      if (pickAll || !hasTranscript) candidates.push({ file: f, hasTranscript });
+    const checkBar = createProgressBar(chalk.dim("Checking transcripts"));
+    try {
+      for (const [done, f] of allAudio.entries()) {
+        checkBar.report({ phase: "work", done, total: allAudio.length, ...locationOf(f, config.target) });
+        const hasTranscript = await fs.pathExists(transcriptPathFor(f));
+        if (pickAll || !hasTranscript) candidates.push({ file: f, hasTranscript });
+      }
+    } finally {
+      checkBar.stop();
     }
 
     if (candidates.length === 0) {
@@ -121,14 +133,19 @@ export async function runTranscribe({ model, file, filter, translate = false, op
 
     // Recorded dates are cheap (filename/mtime); duration needs an ffprobe call
     // per file. The picker filters live as you type, so we can't narrow first —
-    // probe every candidate up front behind a spinner.
+    // probe every candidate up front, behind a bar since that's the wait.
     const rows = await describeFiles(candidates, config.target);
 
-    const spinner = ora(`Reading duration of ${rows.length} file(s)...`).start();
-    for (const row of rows) {
-      row.durStr = formatDuration(await getDurationSeconds(row.file));
+    const bar = createProgressBar(chalk.dim("Reading durations"));
+    try {
+      for (const [done, row] of rows.entries()) {
+        bar.report({ phase: "work", done, total: rows.length, ...locationOf(row.file, config.target) });
+        row.durStr = formatDuration(await getDurationSeconds(row.file));
+      }
+      bar.report({ phase: "work", done: rows.length, total: rows.length });
+    } finally {
+      bar.stop();
     }
-    spinner.stop();
 
     const labelWidth = Math.min(50, Math.max(...rows.map((r) => r.label.length)));
     const choices = rows.map((r) => ({

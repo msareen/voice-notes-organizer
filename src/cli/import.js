@@ -8,6 +8,7 @@ import { runVisualize } from "./visualize.js";
 import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.js";
 import { ensureDependencies } from "./setup.js";
 import { transcribeMany } from "./transcribe.js";
+import { createProgressBar } from "./progress.js";
 
 /**
  * `open === false` (from `--no-open`) stops the viewer from launching at the
@@ -221,9 +222,7 @@ async function importVolumes(volumes, config) {
       ? { ...volume, mountPath: path.join(volume.mountPath, subdir) }
       : volume;
 
-    const result = await syncVolume(effectiveVolume, config.target, {
-      rememberDeletions: config.rememberDeletions !== false,
-    });
+    const result = await syncCopy(effectiveVolume, config);
     imported.push(...result.copiedFiles);
     if (!volume.isManualSource) {
       config.knownMounts[volume.id] = {
@@ -236,6 +235,40 @@ async function importVolumes(volumes, config) {
   }
 
   return { changed, imported };
+}
+
+/**
+ * Copies one volume, drawing the progress bar and printing the summary that
+ * `syncVolume` itself no longer does - it reports events so the browser can
+ * render the same copy as job log lines instead.
+ */
+async function syncCopy(volume, config) {
+  const bar = createProgressBar(chalk.dim(`Copying from "${volume.name}"`));
+  let result;
+  try {
+    result = await syncVolume(volume, config.target, {
+      rememberDeletions: config.rememberDeletions !== false,
+      onProgress: bar.report,
+    });
+  } finally {
+    bar.stop();
+  }
+
+  console.log(
+    `Synced "${volume.name}": ${chalk.green(result.copied + " copied")}, ${chalk.dim(
+      result.skipped + " already up to date"
+    )}${result.suppressed > 0 ? `, ${chalk.dim(result.suppressed + " previously deleted")}` : ""} -> ${result.destRoot}`
+  );
+
+  if (result.suppressed > 0) {
+    console.log(
+      chalk.dim(
+        `${result.suppressed} recording(s) you deleted through vno were left alone. Run \`vno cleanup ledger\` to forget them and import them again.`
+      )
+    );
+  }
+
+  return result;
 }
 
 /**

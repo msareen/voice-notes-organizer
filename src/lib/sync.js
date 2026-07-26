@@ -1,7 +1,5 @@
 import fs from "fs-extra";
 import path from "node:path";
-import chalk from "chalk";
-import ora from "ora";
 import { loadDeletionMatcher } from "./ledger.js";
 
 export const AUDIO_EXTENSIONS = new Set([
@@ -19,27 +17,50 @@ export const AUDIO_EXTENSIONS = new Set([
   ".3gp",
 ]);
 
-export async function findAudioFiles(root) {
+/**
+ * Every audio file under `root`, depth-first. The walk itself is slow enough to
+ * be worth reporting on a large or network-backed folder, so `onProgress` gets
+ * a `{ phase: "scan", dir, found }` per directory entered - `dir` relative to
+ * `root`. See `reporter` for why the callback can't break the walk.
+ */
+export async function findAudioFiles(root, { onProgress } = {}) {
   const results = [];
-  await walk(root, results);
+  await walk(root, results, root, reporter(onProgress));
   return results;
 }
 
-async function walk(dir, results) {
+async function walk(dir, results, root, report) {
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
     return; // unreadable directory (permissions, disconnected drive, etc.)
   }
+  const rel = path.relative(root, dir);
+  report({ phase: "scan", dir: rel ? rel.split(path.sep).join("/") : "", found: results.length });
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walk(full, results);
+      await walk(full, results, root, report);
     } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
       results.push(full);
     }
   }
+}
+
+/**
+ * Wraps a progress callback so it can never fail the work it reports on, and
+ * so callers that passed nothing don't need a null check at every call site.
+ */
+export function reporter(onProgress) {
+  if (typeof onProgress !== "function") return () => {};
+  return (event) => {
+    try {
+      onProgress(event);
+    } catch {
+      // reporting is decoration; keep going
+    }
+  };
 }
 
 /**
@@ -54,8 +75,14 @@ async function walk(dir, results) {
  * `rememberDeletions` (the config setting of the same name) decides whether
  * recordings previously deleted through vno are left alone instead of being
  * copied back; they're counted separately from ordinary already-there skips.
+ *
+ * Displaying any of this is the caller's job - the terminal draws a progress
+ * bar from `onProgress`, the browser turns the same events into job log lines.
+ * That's why nothing here prints: the two callers need different output, and
+ * `lib/` can't know which one it's running under.
  */
-export async function syncVolume(volume, target, { rememberDeletions = true } = {}) {
+export async function syncVolume(volume, target, { rememberDeletions = true, onProgress } = {}) {
+  const report = reporter(onProgress);
   const destRoot = path.join(target, sanitize(volume.destName || volume.name));
   await fs.ensureDir(destRoot);
 
@@ -66,19 +93,26 @@ export async function syncVolume(volume, target, { rememberDeletions = true } = 
   // Self-heal any previously nested import into the flat layout.
   const flattened = await flattenVolumeFolder(destRoot);
   if (flattened > 0) {
-    console.log(chalk.dim(`Flattened ${flattened} previously nested file(s) in ${destRoot}.`));
+    report({ phase: "log", message: `Flattened ${flattened} previously nested file(s) in ${destRoot}.` });
   }
 
-  const files = (await findAudioFiles(volume.mountPath)).sort((a, b) => a.localeCompare(b));
+  const files = (await findAudioFiles(volume.mountPath, { onProgress })).sort((a, b) => a.localeCompare(b));
   let copied = 0;
   let skipped = 0;
   let suppressed = 0;
   const copiedFiles = [];
-
-  const spinner = ora(`Syncing "${volume.name}" (${files.length} audio file(s) found)...`).start();
+  let done = 0;
 
   for (const src of files) {
     const label = path.basename(src);
+    const rel = path.relative(volume.mountPath, path.dirname(src));
+    report({
+      phase: "work",
+      done,
+      total: files.length,
+      dir: rel && rel !== "." ? rel.split(path.sep).join("/") : "",
+      name: label,
+    });
     try {
       const srcSize = (await fs.stat(src)).size;
       const { dest, skip, wasDeletedBefore } = await resolveFlatDest(destRoot, label, srcSize, isDeleted);
@@ -90,26 +124,14 @@ export async function syncVolume(volume, target, { rememberDeletions = true } = 
       await fs.copy(src, dest, { overwrite: true });
       copied++;
       copiedFiles.push(dest);
-      spinner.text = `Syncing "${volume.name}"... (${copied} copied, ${skipped} skipped)`;
     } catch (err) {
-      spinner.warn(`Failed to copy ${label}: ${err.message}`);
-      spinner.start();
+      report({ phase: "log", level: "warn", message: `Failed to copy ${label}: ${err.message}` });
+    } finally {
+      done++;
     }
   }
 
-  spinner.succeed(
-    `Synced "${volume.name}": ${chalk.green(copied + " copied")}, ${chalk.dim(skipped + " already up to date")}${
-      suppressed > 0 ? `, ${chalk.dim(suppressed + " previously deleted")}` : ""
-    } -> ${destRoot}`
-  );
-
-  if (suppressed > 0) {
-    console.log(
-      chalk.dim(
-        `${suppressed} recording(s) you deleted through vno were left alone. Run \`vno cleanup ledger\` to forget them and import them again.`
-      )
-    );
-  }
+  report({ phase: "work", done, total: files.length, dir: "", name: "" });
 
   return { destRoot, copied, skipped, suppressed, total: files.length, copiedFiles };
 }

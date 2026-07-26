@@ -35,13 +35,13 @@ so anything there is safe to reuse from either side.
 | --- | --- |
 | `lib/config.js` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
 | `lib/volumes.js` | Per-OS removable-volume detection |
-| `lib/sync.js` | Audio file discovery, the flat copy, self-healing old nested imports |
+| `lib/sync.js` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
 | `lib/whisper.js` | Probing for whisper and running a transcription |
 | `lib/setup.js` | Finding ffmpeg/whisper/pip on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.js` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.js` | Parse and serialize WebVTT cues |
 | `lib/notes.js` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
-| `cli/progress.js` | The terminal progress bar `visualize` draws while that model is being built |
+| `cli/progress.js` | The terminal progress bar every slow per-file loop draws through |
 | `lib/open.js` | Opening a folder / revealing a file, per OS |
 | `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
 

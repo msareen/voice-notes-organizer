@@ -615,9 +615,24 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
           destName: volume.name,
           mountPath: subdir ? path.join(volume.mountPath, subdir) : volume.mountPath,
         };
+        // syncVolume reports rather than prints, so the copy shows up in the
+        // page's log and title instead of the terminal it can't see. One
+        // broadcast per file would flood the SSE stream on a full card, so
+        // only the log lines and a twice-a-second tick get through.
+        let lastTick = 0;
+        const onProgress = (event) => {
+          if (event.phase === "log") return jobLog(event.message);
+          if (event.phase !== "work" || !event.total) return;
+          const now = Date.now();
+          if (now - lastTick < 500 && event.done < event.total) return;
+          lastTick = now;
+          jobProgress(done, `Importing "${volume.name}" (${event.done}/${event.total})`);
+        };
+
         try {
           const result = await syncVolume(effective, target, {
             rememberDeletions: currentConfig.rememberDeletions !== false,
+            onProgress,
           });
           imported.push(...result.copiedFiles);
           jobLog(

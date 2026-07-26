@@ -207,6 +207,13 @@ before changing the API surface.
   the UI's settings dialog (`app.js:openSettings`), and passthrough in the server's
   `patchSettings` **and** `stateResponse` — the dialog can't show what state doesn't
   send. `~/.vno` also holds `deleted.json`; config is not the only file there.
+- **Long per-file work reports, it doesn't print.** `buildNotes`, `findAudioFiles` and
+  `syncVolume` take an optional `onProgress` and emit `{ phase: "scan", dir, found }`,
+  `{ phase: "work", done, total, dir, name }` and `{ phase: "log", message, level }`.
+  The terminal renders those as a progress bar (`cli/progress.js`), the browser turns
+  the same events into job log lines and title updates — which is the whole reason
+  `lib/` can't do the printing itself. `lib/sync.js:reporter()` wraps the callback so
+  a display bug can never fail the work. Adding a new slow loop? Report, don't print.
 - Child processes (`whisper`, `ffprobe`, `pip`) always pass `windowsHide: true`.
 - Comments in this codebase explain *why* a non-obvious choice was made, not what the
   line does. Match that when adding code.

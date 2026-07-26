@@ -1,7 +1,7 @@
 import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
-import { findAudioFiles } from "./sync.js";
+import { findAudioFiles, reporter } from "./sync.js";
 import { parseCues } from "./vtt.js";
 import { getDurationSeconds, recordedDate } from "./media.js";
 
@@ -107,23 +107,15 @@ export async function readTranscript(audioPath) {
  * `onProgress` is how a caller shows this taking its time - an ffprobe per file
  * makes a large library a long silence otherwise. It's a callback rather than
  * any printing of our own because `lib/` is shared with the browser path, which
- * has no terminal to draw on. Events are `{ phase: "scan" }` while the tree is
- * being walked (no count known yet), then `{ phase: "read", done, total, dir,
- * name }` per file. `findAudioFiles` walks depth-first, so `dir` advances one
- * folder at a time rather than jumping around.
+ * has no terminal to draw on. Events are `{ phase: "scan", dir, found }` while
+ * the tree is being walked (no count known yet), then `{ phase: "work", done,
+ * total, dir, name }` per file. `findAudioFiles` walks depth-first, so `dir`
+ * advances one folder at a time rather than jumping around.
  */
 export async function buildNotes(target, { onProgress } = {}) {
-  // A progress callback must never be able to fail the build it's reporting on.
-  const report = (event) => {
-    try {
-      onProgress?.(event);
-    } catch {
-      // reporting is decoration; keep building
-    }
-  };
+  const report = reporter(onProgress);
 
-  report({ phase: "scan" });
-  const audioFiles = await findAudioFiles(target);
+  const audioFiles = await findAudioFiles(target, { onProgress });
   const total = audioFiles.length;
 
   const notes = [];
@@ -136,7 +128,7 @@ export async function buildNotes(target, { onProgress } = {}) {
     const dir = dirRaw === "." ? "" : dirRaw.split(path.sep).join("/");
 
     // Reported before the work, so what's on screen is the file being read.
-    report({ phase: "read", done: notes.length, total, dir, name: path.basename(audioPath) });
+    report({ phase: "work", done: notes.length, total, dir, name: path.basename(audioPath) });
 
     const transcript = await readTranscript(audioPath);
 
@@ -170,7 +162,7 @@ export async function buildNotes(target, { onProgress } = {}) {
     });
   }
 
-  report({ phase: "read", done: notes.length, total, dir: "", name: "" });
+  report({ phase: "work", done: notes.length, total, dir: "", name: "" });
 
   // Newest recording first; files with no determinable date sort to the end.
   notes.sort((a, b) => (b.dateMs ?? -Infinity) - (a.dateMs ?? -Infinity));

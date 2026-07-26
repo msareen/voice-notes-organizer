@@ -17,6 +17,27 @@ Everything here works unlinked too, as `node bin/vno.js <command>`.
 
 ---
 
+## Progress bars
+
+Several commands do a slow thing once per recording — an `ffprobe` to measure
+duration, a file copy, a transcript check. On a large library that used to be a
+long silence, so each shows a bar with the count and the folder it's working
+through:
+
+```
+Reading recordings [████████████░░░░░░░░░░░░] 268/526  Sony
+```
+
+You'll see it in `visualize` (and anything that opens the viewer), `transcribe`
+before the picker, `cleanup`'s duration scan, and `import`'s copy. Each one
+clears itself when its step finishes, so nothing is left on screen.
+
+Bars are drawn only on a terminal — piping or redirecting output gives you the
+ordinary lines with no escape codes. Warnings printed mid-scan (a file that
+couldn't be copied, say) appear above the bar and stay there.
+
+---
+
 ## `vno import`
 
 The default command — plain `vno` runs it.
@@ -33,7 +54,8 @@ already copied is kept.
 
 Imported files land **flat**, one folder per device. See
 [Import & sync](import-and-sync.md) for why, and for how name collisions are
-handled.
+handled. The copy itself runs behind a [progress bar](#progress-bars), and ends
+with a per-volume summary of what was copied and what was already there.
 
 **Auto-translate:** after importing, `vno` offers *once* to auto-translate new
 notes to English as they come in. Your answer is remembered and applied to
@@ -58,6 +80,9 @@ you pick which to transcribe, and runs `whisper` on each. One file is written
 next to the audio: a timed `.vtt` (`note.m4a` → `note.vtt`).
 
 ### The picker
+
+The rows show durations, which means an `ffprobe` per candidate before the
+picker can open — [progress bars](#progress-bars) cover that wait.
 
 - **Filters live as you type** — start typing to narrow to rows whose text
   (name, recorded date, or duration) contains what you typed; `Backspace` to
@@ -121,21 +146,16 @@ Starts a local web server and opens the two-pane organizer in your browser.
 | `--no-open` | Start the server without opening a browser (prints the URL) |
 
 Startup measures every recording with `ffprobe`, which on a large library takes
-a while, so a progress bar shows the count and the folder being read:
-
-```
-Reading recordings [████████████░░░░░░░░░░░░] 268/551  Sony
-```
-
-It clears itself the moment the viewer is up, and is drawn only on a terminal —
-piped or redirected output stays clean.
+a while, so a progress bar shows the count and the folder being read. It clears
+itself the moment the viewer is up. See [Progress bars](#progress-bars).
 
 ---
 
 ## `vno cleanup`
 
 Scans the target folder for recordings shorter than a threshold — the 2-second
-accidental button presses — using `ffprobe` to measure duration. Shows the
+accidental button presses — using `ffprobe` to measure duration, behind a
+[progress bar](#progress-bars) since that's one probe per recording. Shows the
 list, then asks for confirmation (**default: no**) before deleting them along
 with any matching `.vtt` / `.srt` / `.txt` sidecar.
 

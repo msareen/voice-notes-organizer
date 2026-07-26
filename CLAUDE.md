@@ -113,8 +113,18 @@ it; ignore it rather than trying to satisfy it.
 from disk on *every request*, so a browser reload shows a UI edit. Changes to
 `server.js`, `page.js`, or anything in `src/lib/` need a server restart.
 
-**Not published to npm.** Distribution is `npm link` until the project settles —
-don't suggest `npx` or `npm publish`.
+**Published to npm as a public scoped package.** `@msareen/voice-notes-organizer`
+— `publishConfig.access` must stay `"public"`, since scoped packages default to
+restricted and `npm publish` fails without it. Users install with `npm i -g` or run
+it via `npx`; `npm link` is the *development* workflow, not the distribution story.
+There is still no build step: `files` ships `bin/`, `src/` and `docs/` as-is, and
+`src/web/assets/` is resolved off `import.meta.url` so it works from `node_modules`.
+
+**`.gitattributes` pins the working tree to LF, and that is load-bearing.** `npm
+pack` packs the working tree rather than the git index, so on a clone with
+`core.autocrlf=true` the shebang in `bin/vno.js` would ship as `#!/usr/bin/env
+node\r` and every Linux/macOS install would fail with `env: 'node\r': No such file
+or directory`. Don't remove `* text=auto eol=lf`.
 
 ## Architecture
 

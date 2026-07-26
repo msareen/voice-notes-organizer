@@ -1,6 +1,6 @@
 # Voice Note Organizer
 
-![Capture. Transcribe. Organize. — turn voice notes into usable recordings.](images/banner.png)
+![Capture. Transcribe. Organize. — turn voice notes into usable recordings.](https://raw.githubusercontent.com/msareen/voice-notes-organizer/main/images/banner.png)
 
 **A small utility to import, organize, transcribe and visualize your recordings, using your favourite voice recorder.**
 
@@ -48,7 +48,7 @@ runs on your machine.
 can be done from here**, and the page is live: edits, deletes and imports take
 effect on disk immediately.
 
-![The Voice Note Organizer browser UI: takes list on the left, playback deck and follow-along transcript on the right.](images/vno-ui.png)
+![The Voice Note Organizer browser UI: takes list on the left, playback deck and follow-along transcript on the right.](https://raw.githubusercontent.com/msareen/voice-notes-organizer/main/images/vno-ui.png)
 
 - **Takes list** — newest first, grouped by device, with a green LED where a
   transcript exists. The filter box searches names **and transcript text**, so
@@ -77,29 +77,21 @@ shortcut.
 - **ffmpeg** on your `PATH` — Whisper uses it to read audio, and `vno cleanup`
   uses `ffprobe` (shipped with ffmpeg) to measure durations.
 
-### 2. Get the project and link it
-
-**Not on npm yet.** It'll be published once the project settles down; until
-then, clone it and link it:
+### 2. Install it
 
 ```bash
-git clone https://github.com/msareen/voice-notes-organizer.git
-cd voice-notes-organizer
-
-npm install          # or: bun install
-npm link             # makes `vno` available from any folder
+npm install -g @msareen/voice-notes-organizer
 ```
 
-`npm link` symlinks the repo into your global `node_modules`, so `vno` always
-runs your working copy — pull or edit the source and the next `vno` picks it
-up, with no reinstall step. To undo it:
+That puts `vno` on your `PATH`. To try it without installing anything:
 
 ```bash
-npm unlink -g @msareen/voice-notes-organizer
+npx @msareen/voice-notes-organizer          # same as `vno`
+npx @msareen/voice-notes-organizer v        # ...or any other command
 ```
 
-Prefer not to link? Run it in place with `node bin/vno.js <command>`, or use
-the npm scripts (`npm run import`, etc.).
+To update later, `npm update -g @msareen/voice-notes-organizer`; to remove it,
+`npm uninstall -g @msareen/voice-notes-organizer`.
 
 ### 3. Install ffmpeg and Whisper
 
@@ -227,9 +219,11 @@ shouldn't need to touch the file.
 ## Development
 
 ```bash
+git clone https://github.com/msareen/voice-notes-organizer.git
+cd voice-notes-organizer
+
 npm install
-npm link              # `vno` now runs your working copy from anywhere
-node bin/vno.js       # or just run it directly, without linking
+node bin/vno.js       # runs your working copy
 ```
 
 **There is no build step.** The UI's CSS and JS are read from disk on each

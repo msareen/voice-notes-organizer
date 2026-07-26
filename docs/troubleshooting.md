@@ -131,13 +131,24 @@ any model also downloads it (hundreds of MB to ~3 GB), which looks like a hang.
 
 ## `vno` isn't a recognised command
 
-`npm link` didn't take, or your shell hasn't picked up the global bin folder.
-Restart the shell, and check `npm ls -g --depth 0` lists
-`@msareen/voice-notes-organizer`. Otherwise just run it in place:
+Your shell hasn't picked up npm's global bin folder, or the install didn't take.
+Restart the shell first, then check the package is actually there:
 
 ```bash
-node bin/vno.js <command>
+npm ls -g --depth 0        # should list @msareen/voice-notes-organizer
+npm bin -g                 # this folder has to be on your PATH
 ```
+
+If that folder isn't on your `PATH`, add it — on Windows it's usually
+`%APPDATA%\npm`, on macOS/Linux something like `/usr/local/bin` or
+`~/.npm-global/bin`. Either way you can skip the global bin entirely:
+
+```bash
+npx @msareen/voice-notes-organizer <command>
+```
+
+Working from a clone (`npm link`)? Same checks apply, and you can always run it
+in place with `node bin/vno.js <command>`.
 
 ## The config file is broken
 

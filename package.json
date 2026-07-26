@@ -3,13 +3,39 @@
   "version": "0.4.2",
   "description": "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards - a replacement for the stalled desktop software that ships with them.",
   "type": "module",
+  "keywords": [
+    "voice-notes",
+    "voice-recorder",
+    "dictaphone",
+    "transcription",
+    "whisper",
+    "vtt",
+    "ffmpeg",
+    "sd-card",
+    "sony",
+    "cli",
+    "local-first"
+  ],
+  "author": "Manasvi Sareen <manasvi.sareen@live.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/msareen/voice-notes-organizer.git"
+  },
+  "homepage": "https://github.com/msareen/voice-notes-organizer#readme",
+  "bugs": {
+    "url": "https://github.com/msareen/voice-notes-organizer/issues"
+  },
   "bin": {
     "vno": "bin/vno.js"
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "docs"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
@@ -21,7 +47,8 @@
     "visualize": "node bin/vno.js visualize",
     "setting": "node bin/vno.js setting",
     "setup": "node bin/vno.js setup",
-    "config": "node bin/vno.js config"
+    "config": "node bin/vno.js config",
+    "prepublishOnly": "node bin/vno.js --version"
   },
   "dependencies": {
     "chalk": "^5.3.0",

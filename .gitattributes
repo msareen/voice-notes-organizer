@@ -1,0 +1,7 @@
+# npm packs the working tree, not the git index. On a clone with
+# core.autocrlf=true that would ship bin/vno.js with a CRLF shebang, and every
+# Linux/macOS install would die with `env: 'node\r': No such file or directory`.
+# Forcing LF in the working tree is what keeps the published binary runnable.
+* text=auto eol=lf
+
+*.png binary

@@ -5,7 +5,8 @@ import ora from "ora";
 import { loadConfig } from "../lib/config.js";
 import { findAudioFiles } from "../lib/sync.js";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
-import { ensureWhisperInstalled, transcribeFile } from "../lib/whisper.js";
+import { transcribeFile } from "../lib/whisper.js";
+import { ensureDependencies } from "./setup.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runVisualize } from "./visualize.js";
@@ -76,6 +77,10 @@ export async function runTranscribe({ model, file, filter, translate = false, op
     console.log(chalk.dim("Run the import command first to sync some voice notes."));
     return;
   }
+
+  // Up front, not after the picker: the file list shows durations, which need
+  // ffprobe, so finding out late would mean a list of "?" and a wasted choice.
+  if (!(await ensureDependencies(["ffmpeg", "whisper"], { reason: "transcribing" }))) return;
 
   const allAudio = await findAudioFiles(config.target);
 
@@ -192,9 +197,6 @@ export async function runTranscribe({ model, file, filter, translate = false, op
       }
     }
   }
-
-  const whisperReady = await ensureWhisperInstalled();
-  if (!whisperReady) return;
 
   let chosenModel = model;
   if (!chosenModel) {

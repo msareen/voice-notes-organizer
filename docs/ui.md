@@ -119,8 +119,10 @@ Below the list: the **whisper model** (defaulting to your
 [`defaultModel`](configuration.md#defaultmodel)) and a **translate to English**
 checkbox. **Start** kicks off the job.
 
-If whisper isn't on your `PATH`, the dialog says so up front with the install
-command.
+If whisper or ffmpeg isn't on your `PATH`, the dialog says so up front. A web
+page can't run an installer, so it points you at `vno setup` in a terminal,
+which offers to install what's missing. Starting the job anyway is refused with
+the same message.
 
 ### Cleanup
 

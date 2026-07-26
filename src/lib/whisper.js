@@ -1,65 +1,17 @@
-import { spawn, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import chalk from "chalk";
-import inquirer from "inquirer";
 import path from "node:path";
-
-const execFileAsync = promisify(execFile);
-
-export async function isWhisperInstalled() {
-  try {
-    await execFileAsync("whisper", ["--help"], { windowsHide: true });
-    return true;
-  } catch (err) {
-    // whisper is present but `--help` exited non-zero: on some Python 3.12 /
-    // argparse combos whisper's CLI throws a traceback on --help even though
-    // real transcription works. Only "command not found" (ENOENT) means it
-    // isn't installed; any other failure means it ran, so treat it as present.
-    return err?.code !== "ENOENT";
-  }
-}
+import { which } from "./setup.js";
 
 /**
- * Offers to install openai-whisper via pip. Whisper also requires ffmpeg on
- * PATH, which we can't install for the user portably, so we just warn about it.
+ * Whether the whisper CLI is callable. Resolved by looking it up on PATH
+ * rather than by running it: `whisper --help` boots Python and torch, which
+ * costs seconds, and it's the same resolution `spawn` will do below anyway.
+ *
+ * Installing it (and ffmpeg) is `cli/setup.js`'s job - lib/ never prompts.
  */
-export async function ensureWhisperInstalled() {
-  if (await isWhisperInstalled()) return true;
-
-  console.log(chalk.yellow("whisper CLI was not found on your PATH."));
-  const { shouldInstall } = await inquirer.prompt([
-    {
-      type: "confirm",
-      name: "shouldInstall",
-      message: 'Install it now via "pip install -U openai-whisper"?',
-      default: true,
-    },
-  ]);
-
-  if (!shouldInstall) {
-    console.log(chalk.dim('You can install it later with: pip install -U openai-whisper'));
-    return false;
-  }
-
-  console.log(chalk.dim("This also requires ffmpeg to be installed and on your PATH."));
-  const installed = await runCommand("pip", ["install", "-U", "openai-whisper"]);
-  if (!installed) {
-    console.log(chalk.red('Install failed. Try running "pip install -U openai-whisper" manually.'));
-    return false;
-  }
-
-  if (!(await isWhisperInstalled())) {
-    console.log(
-      chalk.red(
-        "whisper still isn't on your PATH after install. You may need to restart your shell, " +
-          "or ensure your Python scripts directory is on PATH."
-      )
-    );
-    return false;
-  }
-
-  console.log(chalk.green("whisper installed successfully."));
-  return true;
+export async function isWhisperInstalled() {
+  return Boolean(await which("whisper"));
 }
 
 /**
@@ -121,12 +73,4 @@ function emitLines(chunk, onOutput) {
     const trimmed = line.trim();
     if (trimmed) onOutput(trimmed);
   }
-}
-
-function runCommand(cmd, args) {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: "inherit", windowsHide: true });
-    child.on("error", () => resolve(false));
-    child.on("close", (code) => resolve(code === 0));
-  });
 }

@@ -17,10 +17,10 @@ bin/vno.js           command definitions and argument parsing (commander)
 src/
   cli/               one module per command, plus the terminal prompt helpers
     import.js  transcribe.js  cleanup.js  visualize.js  settings.js
-    prompt.js  searchableCheckbox.js
+    setup.js   prompt.js  searchableCheckbox.js
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.js  notes.js  sync.js  media.js  vtt.js
-    volumes.js  whisper.js  open.js  ledger.js
+    volumes.js  whisper.js  setup.js  open.js  ledger.js
   web/               the browser UI behind `vno visualize`
     server.js        HTTP server: session token, JSON API, SSE job stream
     page.js          the HTML shell, and nothing else
@@ -36,7 +36,8 @@ so anything there is safe to reuse from either side.
 | `lib/config.js` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
 | `lib/volumes.js` | Per-OS removable-volume detection |
 | `lib/sync.js` | Audio file discovery, the flat copy, self-healing old nested imports |
-| `lib/whisper.js` | Probing for whisper, offering the install, running a transcription |
+| `lib/whisper.js` | Probing for whisper and running a transcription |
+| `lib/setup.js` | Finding ffmpeg/whisper/pip on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.js` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.js` | Parse and serialize WebVTT cues |
 | `lib/notes.js` | Builds the note model both the CLI and the page render from |
@@ -68,7 +69,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/` | GET | The page. Token required as `?t=` |
 | `/assets/{app.css,app.js}` | GET | Static assets. **Not** token-gated, by design |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
-| `/api/state` | GET | Notes, config, model list, whisper availability, current job |
+| `/api/state` | GET | Notes, config, model list, `ffmpeg`/`whisper` availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
@@ -93,9 +94,19 @@ folder and rejects anything that escapes it.
   rebuilt only when something actually changes it, then broadcast over SSE.
 - **One job at a time.** A second start returns `409 Busy`. Jobs stream their
   output line by line to the page's log panel; the last 200 lines are kept.
-- **Whisper probing is memoised** for 60 seconds — it shells out to Python and
-  costs whole seconds — and warmed in the background at startup so the first
-  page load doesn't pay for it.
+- **Dependency probing is a PATH lookup, never an execution.** `lib/setup.js`
+  scans `PATH` (honouring `PATHEXT`, and `lstat` so Windows App Execution
+  Aliases resolve) instead of running `whisper --help`, which boots Python and
+  torch and costs whole seconds. That's what makes the check affordable at the
+  start of every command and on every `/api/state`, with nothing to memoise or
+  invalidate — an install done in another terminal shows up on the next
+  refresh. It's also the same resolution `spawn` will do, so it predicts the
+  real outcome.
+- **`lib/setup.js` decides, `cli/setup.js` asks.** Detection and install
+  recipes are pure lib code; every prompt and every "shall I run this?" lives
+  in the CLI module, which is what keeps the browser path able to use the
+  detection half. The page can't install anything, so it reports and points at
+  `vno setup`.
 - **Shutdown is deferred, not immediate.** The open SSE stream is the reliable
   "a tab is watching" signal (unlike a heartbeat it isn't throttled in a
   background tab). Losing it schedules a shutdown a few seconds out, so a

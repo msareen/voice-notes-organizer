@@ -3,7 +3,9 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
+import { checkDependencies } from "../lib/setup.js";
 import { prompt, CANCELLED } from "./prompt.js";
+import { runSetup } from "./setup.js";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
 
@@ -28,6 +30,8 @@ export async function runSettings() {
   while (true) {
     const knownCount = Object.keys(config.knownMounts || {}).length;
     const ledger = await ledgerSummary(config.target);
+    const deps = await checkDependencies(["ffmpeg", "whisper"]);
+    const missingDeps = deps.filter((d) => !d.found).map((d) => d.label);
 
     const answer = await prompt([
       {
@@ -43,6 +47,15 @@ export async function runSettings() {
           { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
           { name: `Forget deleted recordings (clear the ledger)  ${chalk.dim(`[${ledger.forTarget} remembered]`)}`, value: "resetLedger" },
+          {
+            name:
+              `Check ffmpeg + whisper (install what's missing)  ${chalk.dim("[")}` +
+              (missingDeps.length === 0
+                ? chalk.green("installed")
+                : chalk.red(`missing ${missingDeps.join(", ")}`)) +
+              chalk.dim("]"),
+            value: "setup",
+          },
           { name: chalk.dim(`Show config file path`), value: "path" },
           new inquirer.Separator(),
           { name: "Done", value: "done" },
@@ -178,6 +191,10 @@ export async function runSettings() {
         await saveConfig(config);
         console.log(chalk.dim("Forgot all remembered volume choices."));
       }
+    } else if (answer.action === "setup") {
+      console.log();
+      await runSetup();
+      console.log();
     } else if (answer.action === "path") {
       console.log(configFilePath());
     }

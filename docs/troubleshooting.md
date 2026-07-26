@@ -1,54 +1,64 @@
 # Troubleshooting
 
-## `whisper` isn't found
+## `whisper` or `ffmpeg` isn't found
 
 ```
-whisper CLI was not found on your PATH.
+ffmpeg and whisper aren't on your PATH, and transcribing needs them.
 ```
 
-Install it:
+Run:
 
 ```bash
-pip install -U openai-whisper
+vno setup
 ```
 
-(`pip3` if `pip` points at Python 2.) Verify with `whisper --help`.
+It reports which of `ffmpeg`, `ffprobe` and `whisper` are missing and offers to
+install them with your machine's package manager. The commands it offers are in
+the [CLI reference](cli-reference.md#vno-setup) if you'd rather run them
+yourself. You don't have to remember to run it — `vno transcribe`, `vno
+cleanup` and auto-translating imports all run the same check first.
+
+## `vno setup` installed it, but vno still can't find it
+
+vno re-reads your `PATH` after installing (from the registry on Windows, plus
+the usual install directories elsewhere), but some installers put things
+somewhere else entirely. **Open a new terminal** and try again.
 
 **On Windows**, `pip` installs `whisper.exe` into your Python `Scripts`
 directory — e.g. `C:\Users\<you>\AppData\Local\Programs\Python\Python312\Scripts`
-or `C:\PythonXX\Scripts`. If `whisper` still isn't found after installing, add
-that folder to your `PATH` and **restart your shell**. Find it with:
+or `C:\PythonXX\Scripts`. If `whisper` still isn't found, add that folder to
+your `PATH` and restart your shell. Find it with:
 
 ```powershell
 python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
 ```
 
-`vno transcribe` offers to run the pip install for you, but it can't fix your
-`PATH`, and it can't install ffmpeg.
-
-## `whisper --help` throws a traceback, but transcription works
-
-Known with some Python 3.12 / argparse combinations. `vno` handles it: only a
-genuine "command not found" is treated as *not installed*, so whisper is still
-used normally.
-
-## ffmpeg / ffprobe isn't found
-
-Whisper needs `ffmpeg` to read audio, and `vno cleanup` needs `ffprobe`
-(shipped with ffmpeg) to measure durations.
+Check what vno itself resolves, and where:
 
 ```bash
-brew install ffmpeg          # macOS
-winget install ffmpeg        # Windows (or: choco install ffmpeg)
-sudo apt install ffmpeg      # Debian / Ubuntu
+vno setup --check
 ```
 
-Verify **both**: `ffmpeg -version` and `ffprobe -version`.
+## pip refuses to install whisper: "externally-managed-environment"
 
-**Symptom without it:** durations show as `?` in the picker and the UI, the
-takes list has no `LEN` chip, and `vno cleanup` finds nothing — it can't
-measure anything, so nothing looks short. This fails quietly by design, so a
-missing ffprobe never blocks import or playback.
+Debian, Ubuntu and Homebrew's Python won't let `pip` install into the system
+interpreter. `vno setup` spots this and offers `pipx install openai-whisper`
+instead, which puts whisper in its own environment. If you don't have pipx:
+
+```bash
+sudo apt-get install pipx    # or: brew install pipx
+pipx install openai-whisper
+```
+
+## Durations show as `?`
+
+That's `ffprobe` (part of ffmpeg) missing. Run `vno setup`.
+
+Duration reading fails **quietly** by design, so a missing ffprobe never blocks
+import or playback: the picker and the UI show `?`, and the takes list has no
+`LEN` chip. The one place it isn't quiet is `vno cleanup`'s short-recording
+scan, which would otherwise report "nothing is short" when the truth is "I
+can't measure anything" — that stops and offers the install instead.
 
 ## No volumes are detected
 

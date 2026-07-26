@@ -4,6 +4,7 @@
   var CONFIG = {};
   var MODELS = [];
   var WHISPER = true;
+  var FFMPEG = true;
   var selectedRel = null;
   var alive = true;
 
@@ -850,6 +851,7 @@
       CONFIG = state.config;
       MODELS = state.models;
       WHISPER = state.whisper;
+      FFMPEG = state.ffmpeg;
       document.getElementById("folderLabel").textContent = CONFIG.rootLabel;
       renderList();
       if (selectedRel && noteFor(selectedRel)) select(selectedRel);
@@ -944,6 +946,18 @@
   /* ---- Transcribe ---- */
   document.getElementById("btnTranscribe").addEventListener("click", function () { openTranscribe(null); });
 
+  // Nothing in the page can install these, so the warning sends you to the CLI,
+  // where `vno setup` will offer to do it.
+  function missingDeps() {
+    var missing = [];
+    if (!FFMPEG) missing.push("ffmpeg");
+    if (!WHISPER) missing.push("whisper");
+    if (!missing.length) return null;
+    return missing.join(" and ") + (missing.length > 1 ? " aren't" : " isn't") +
+      " on your PATH. Run `vno setup` in a terminal to install " +
+      (missing.length > 1 ? "them." : "it.");
+  }
+
   function openTranscribe(onlyRel) {
     var candidates = onlyRel ? NOTES.filter(function (n) { return n.rel === onlyRel; }) : NOTES;
     if (!candidates.length) return toast("No recordings to transcribe", "err");
@@ -957,7 +971,7 @@
     var picks, modelSel, translateChk;
     modal({
       title: onlyRel ? "Transcribe this take" : "Transcribe",
-      message: WHISPER ? null : "whisper isn't on your PATH. Install it with: pip install -U openai-whisper",
+      message: missingDeps(),
       confirmLabel: "Start",
       build: function (host) {
         picks = pickList(host, candidates.map(function (n) {
@@ -1008,7 +1022,9 @@
 
       modal({
         title: "Import",
-        message: "Choose which volumes to pull voice notes from.",
+        // The translate option below needs whisper, so say up front when it
+        // isn't there rather than letting the job log report it afterwards.
+        message: "Choose which volumes to pull voice notes from." + (missingDeps() ? " " + missingDeps() : ""),
         confirmLabel: "Import",
         build: function (host) {
           picks = pickList(host, res.volumes.map(function (v) {

@@ -1,6 +1,6 @@
 {
   "name": "@msareen/voice-notes-organizer",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards - a replacement for the stalled desktop software that ships with them.",
   "type": "module",
   "bin": {
@@ -20,6 +20,7 @@
     "cleanup": "node bin/vno.js cleanup",
     "visualize": "node bin/vno.js visualize",
     "setting": "node bin/vno.js setting",
+    "setup": "node bin/vno.js setup",
     "config": "node bin/vno.js config"
   },
   "dependencies": {

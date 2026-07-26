@@ -6,7 +6,7 @@ import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume } from "../lib/sync.js";
 import { runVisualize } from "./visualize.js";
 import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.js";
-import { ensureWhisperInstalled } from "../lib/whisper.js";
+import { ensureDependencies } from "./setup.js";
 import { transcribeMany } from "./transcribe.js";
 
 /**
@@ -122,7 +122,9 @@ async function maybeAutoTranslate(imported, config) {
 
   if (!translate) return changed;
 
-  if (!(await ensureWhisperInstalled())) {
+  // Only once the answer is "yes, translate": a plain import needs neither
+  // whisper nor ffmpeg, so it shouldn't be held up by an install offer.
+  if (!(await ensureDependencies(["ffmpeg", "whisper"], { reason: "auto-translating imports" }))) {
     console.log(chalk.yellow("Skipping auto-translate — whisper isn't available."));
     return changed;
   }

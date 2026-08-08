@@ -29,7 +29,7 @@ export function renderPage({ rootLabel, token }) {
     <button class="btn" id="btnImport" title="Detect volumes and import voice notes">Import</button>
     <button class="btn" id="btnTranscribe" title="Run whisper over your recordings">Transcribe</button>
     <button class="btn" id="btnCleanup" title="Delete very short recordings">Cleanup</button>
-    <button class="btn" id="btnFolder" title="Open the target folder in your file manager">Open folder</button>
+    <button class="btn" id="btnFolder" title="Open the target folder in Explorer / Finder (same as vno explore)">Explore</button>
     <button class="btn" id="btnSettings">Settings</button>
     <span class="spacer"></span>
     <div class="readout">

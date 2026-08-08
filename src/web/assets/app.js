@@ -581,7 +581,7 @@
   document.getElementById("btnSettings").addEventListener("click", openSettings);
 
   function openSettings() {
-    var autoSel, modelSel, openSel, rememberSel;
+    var autoSel, modelSel, openSel, rememberSel, gpuSel;
     modal({
       title: "Settings",
       message: null,
@@ -612,6 +612,24 @@
           MODELS.map(function (m) { return { label: m, value: m }; }),
           CONFIG.defaultModel);
 
+        var gpu = CONFIG.gpu || {};
+        gpuSel = null;
+        if (gpu.available) {
+          gpuSel = selectField(host, "GPU acceleration", [
+            { label: "On — transcribe on " + (gpu.name || "the GPU"), value: "true" },
+            { label: "Off — transcribe on the CPU", value: "false" }
+          ], String(gpu.use !== false));
+        } else {
+          // Detecting a GPU means booting Python and torch, which is far too
+          // slow to do from a page load — "vno setup" owns the probe.
+          var gh = document.createElement("p");
+          gh.className = "hint";
+          gh.textContent = gpu.checked
+            ? "GPU acceleration: no CUDA GPU found — transcription runs on the CPU."
+            : "GPU acceleration: run \"vno setup\" in a terminal to check whether this machine has one.";
+          host.appendChild(gh);
+        }
+
         openSel = selectField(host, "Open this viewer when a run finishes", [
           { label: "On — launch the viewer after import/transcribe", value: "true" },
           { label: "Off — finish quietly", value: "false" }
@@ -633,6 +651,7 @@
           openWhenDone: openSel.value === "true",
           rememberDeletions: rememberSel.value === "true"
         };
+        if (gpuSel) patch.useGpu = gpuSel.value === "true";
         return api("/api/settings", { method: "POST", body: patch }).then(function (res) {
           CONFIG = res.config;
           toast("Settings saved", "ok");

@@ -81,6 +81,15 @@ current folder) runs until the server is up, then clears itself.
 | `-p, --port <number>` | Default `0` = pick a free port |
 | `--no-open` | Start the server without opening a browser |
 
+### `vno explore` (`open`)
+Opens the target folder in the OS file manager. With a `[file]` argument, reveals
+that recording with the file selected instead (name resolution below; Linux has no
+portable "select" verb, so there it opens the containing folder). Always prints the
+path first, since `openPath` is best-effort. A name that matches nothing or several
+recordings prints the shared explanation and exits non-zero. The UI's **Explore**
+button, the `⧉` on each device group and per-take *Open file location* are the same
+thing over `/api/reveal`.
+
 ### `vno setting` (`settings`)
 Interactive wizard: auto-translate, default model, target folder, open-when-done,
 remember-deletions, plus resets for remembered volumes and the deletion ledger.
@@ -91,16 +100,17 @@ Reports whether `ffmpeg`, `ffprobe` and `whisper` are on PATH (with resolved
 paths) and offers to install what's missing via the machine's own package manager
 — winget/choco/scoop, brew/port, apt/dnf/yum/pacman/zypper/apk — with whisper from
 pip, Python first if there is none, and pipx as the fallback when the system Python
-is externally managed. Nothing installs without a confirmation.
+is externally managed. Nothing installs without a confirmation. It's also the only
+place the CUDA probe runs, and where the offer to use a GPU is made.
 
 | Flag | Effect |
 | --- | --- |
-| `--check` | Report only; never offer to install |
+| `--check` | Report only; never offer to install, never re-probe the GPU |
 
 ### `vno config`
 Prints the path to `~/.vno/config.json`.
 
-**Name resolution for `-f`** (shared by `transcribe` and `cleanup`, in
+**Name resolution for `-f`** (shared by `transcribe`, `cleanup` and `explore`, in
 `lib/notes.js:resolveNamedFile`): an absolute path, a path relative to the target, or
 a bare filename matched case-insensitively — exact basename, then stem (so
 `250810_1328` finds `250810_1328.mp3`), then unique substring. Several matches means
@@ -142,7 +152,8 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   ends by handing off to `runVisualize()`, so `vno` blocks until the browser tab closes.
 - `src/lib/*` — domain logic and OS access: config, volume detection, the flat copy,
   whisper, ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
-  and `setup.js` (PATH lookup + per-OS install recipes for ffmpeg/whisper/Python).
+  `setup.js` (PATH lookup + per-OS install recipes for ffmpeg/whisper/Python) and
+  `gpu.js` (the CUDA probe and the device decision).
 - `src/web/server.js` — the whole HTTP server: token gate, JSON API, SSE job stream,
   range-request media streaming. `page.js` emits the HTML shell and nothing else.
 - `src/web/assets/app.js` — the entire client, ~1200 lines of plain ES5-flavoured JS
@@ -167,11 +178,28 @@ before changing the API surface.
   `cli/setup.js:ensureDependencies()`, which `transcribe`, `cleanup`'s duration
   scan and import's auto-translate all call before starting work. The browser
   can't install anything, so the page reports and points at `vno setup`.
+- **The GPU probe runs in `vno setup` and nowhere else.** `lib/gpu.js:probeGpu()`
+  boots Python to ask `torch.cuda.is_available()` — the only trustworthy answer,
+  since an NVIDIA card plus a CPU-only torch wheel is a common combination — which
+  costs seconds and so can never sit on a hot path the way the PATH lookup does.
+  The result is cached in `config.gpu` and, like the deletion ledger, is never
+  load-bearing: delete it and everything still runs on the CPU. `resolveDevice()`
+  is the single place the "use it unless the user said no" rule lives, because the
+  browser has nowhere to ask at job time. A GPU failure mid-run falls back to the
+  CPU and clears the cache so the next `vno setup` re-detects. `--device` and
+  `--fp16` are passed together and explicitly: fp16 is the point of a GPU and a
+  warning on a CPU.
 - **Notes are cached in the server closure.** Building the model costs an ffprobe per
   file, so it is rebuilt only when something changes it, then broadcast over SSE
   (`refreshNotes()`).
 - **One job at a time.** `guardJob()` returns `409 Busy` for a second start. Job output
   streams line-by-line to the page log.
+- **whisper exiting 0 doesn't mean it transcribed anything.** Its CLI catches
+  per-file errors, prints `Skipping <file> due to ...` and carries on, so
+  `transcribeFile` checks for that line *and* for a freshly written `.vtt` before
+  resolving. The usual cause was Python encoding stdout with the Windows console
+  codepage and choking on non-Latin script, which is why the child runs with
+  `PYTHONIOENCODING=utf-8`.
 - **Timed transcript saves never touch timings.** The editor sends text only; the
   server re-reads cues off disk and merges. A cue-count mismatch is a `409`.
 - **Imports are idempotent** by name + size (`resolveFlatDest`). Files land flat, one

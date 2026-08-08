@@ -57,7 +57,7 @@ effect on disk immediately.
   audio plays. Click any line to jump straight to that moment.
 - **Fix what whisper got wrong** — an in-page editor with one box per line.
   Your edits never disturb the timings.
-- **Full toolbar** — import, transcribe, cleanup, open folder and settings, all
+- **Full toolbar** — import, transcribe, cleanup, explore and settings, all
   without leaving the page. Long jobs show a progress bar and stream whisper's
   live output into a log panel.
 - **Private by construction** — bound to `127.0.0.1` on a random port behind a
@@ -139,6 +139,7 @@ Verify with `ffmpeg -version`, `ffprobe -version` and `whisper --help`.
 | `vno cleanup` | — | Delete recordings shorter than 3 seconds, after confirming |
 | `vno cleanup -f <files>` | — | Delete named recordings and their transcripts |
 | `vno cleanup ledger` | — | Forget which recordings you deleted, so they import again |
+| `vno explore [file]` | `vno open` | Open the target folder in Explorer / Finder, or reveal one recording |
 | `vno setting` | `vno settings` | Interactive wizard for the common settings |
 | `vno setup` | `vno doctor` | Check ffmpeg + whisper, offer to install what's missing |
 | `vno config` | — | Print the path to the config file |
@@ -178,7 +179,8 @@ Settings live in one global per-user file — `~/.vno/config.json`. Run
   "knownMounts": {},
   "autoTranslate": null,
   "defaultModel": "turbo",
-  "openWhenDone": true
+  "openWhenDone": true,
+  "gpu": { "device": null, "use": null }
 }
 ```
 
@@ -190,6 +192,7 @@ Settings live in one global per-user file — `~/.vno/config.json`. Run
 | `autoTranslate` | Translate imports to English — `true` / `false` / `null` (ask once) |
 | `defaultModel` | Whisper model: `turbo`, `tiny`, `base`, `small`, `medium`, `large` |
 | `openWhenDone` | Whether finished runs launch the browser UI |
+| `gpu` | What `vno setup` found out about GPU acceleration, and whether to use it |
 
 Most of these are editable from `vno setting` or the UI's Settings dialog — you
 shouldn't need to touch the file.

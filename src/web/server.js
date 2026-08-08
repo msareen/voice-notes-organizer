@@ -12,6 +12,7 @@ import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume, findAudioFiles } from "../lib/sync.js";
 import { transcribeFile } from "../lib/whisper.js";
+import { resolveDevice, gpuState, gpuUnasked, isDeviceError, forgetGpuProbe, lastLine } from "../lib/gpu.js";
 import { checkDependencies } from "../lib/setup.js";
 import { recordDeletions } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
@@ -249,6 +250,15 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         defaultModel: currentConfig.defaultModel || "turbo",
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
+        // Only the answer is the browser's to change; the probe itself is
+        // `vno setup`'s, since it costs seconds and the page can't run it.
+        gpu: {
+          checked: gpuState(currentConfig).device !== null,
+          available: gpuState(currentConfig).device === "cuda",
+          name: gpuState(currentConfig).name,
+          use: gpuState(currentConfig).use,
+          active: resolveDevice(currentConfig) === "cuda",
+        },
         configPath: configFilePath(),
       },
       models: MODELS,
@@ -345,6 +355,11 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     }
     if ("openWhenDone" in patch) currentConfig.openWhenDone = Boolean(patch.openWhenDone);
     if ("rememberDeletions" in patch) currentConfig.rememberDeletions = Boolean(patch.rememberDeletions);
+    // `useGpu` and not the whole gpu block: the probe result is server-owned,
+    // so a client can't claim a GPU this machine hasn't got.
+    if ("useGpu" in patch) {
+      currentConfig.gpu = { ...gpuState(currentConfig), use: Boolean(patch.useGpu) };
+    }
     await saveConfig(currentConfig);
     console.log(chalk.dim("Settings updated from the browser."));
     return (await stateResponse()).config;
@@ -491,6 +506,37 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
 
   /* ------------------------------ transcribe ----------------------------- */
 
+  /**
+   * One job's whisper runs, sharing the device decision across its files.
+   *
+   * The page has nowhere to ask at job time, so a GPU the user was never asked
+   * about is used and announced rather than left idle - the Settings dialog is
+   * where they turn it off. A GPU failure mid-job downgrades the rest of the
+   * job to the CPU and forgets the cached probe, so `vno setup` re-detects.
+   */
+  function whisperRunner({ model, translate }) {
+    let device = resolveDevice(currentConfig);
+    if (device === "cuda") {
+      const gpu = gpuState(currentConfig);
+      jobLog(`Using GPU acceleration${gpu.name ? ` (${gpu.name})` : ""}.`);
+      if (gpuUnasked(currentConfig)) jobLog("Turn this off in Settings if you'd rather stay on the CPU.");
+    }
+
+    return async function run(file) {
+      try {
+        await transcribeFile(file, { model, translate, device, onOutput: (line) => jobLog(line) });
+        return;
+      } catch (err) {
+        if (device !== "cuda" || !isDeviceError(err.message)) throw err;
+        jobLog(`GPU run failed: ${lastLine(err.message)}`);
+        jobLog("Falling back to the CPU for the rest of this job. Re-check it with `vno setup`.");
+        device = "cpu";
+        await forgetGpuProbe(currentConfig);
+      }
+      await transcribeFile(file, { model, translate, device: "cpu", onOutput: (line) => jobLog(line) });
+    };
+  }
+
   async function startTranscribe(res, body) {
     if (guardJob(res)) return;
     // The browser can't run an installer, so the page points at the CLI, which
@@ -514,6 +560,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
 
     (async () => {
       const verb = translate ? "Translating" : "Transcribing";
+      const runWhisper = whisperRunner({ model, translate });
       let done = 0;
       for (const rel of rels) {
         const full = resolveInside(rel);
@@ -521,7 +568,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         jobLog(`[${done + 1}/${rels.length}] ${verb} ${rel}`);
         console.log(chalk.cyan(`\n[${done + 1}/${rels.length}] ${verb} ${rel} (from the browser)...`));
         try {
-          await transcribeFile(full, { model, translate, onOutput: (line) => jobLog(line) });
+          await runWhisper(full);
           done++;
           jobLog(`Saved ${rel.replace(/\.[^.]+$/, ".vtt")}`);
         } catch (err) {
@@ -664,6 +711,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
           jobLog("Skipping translation - whisper/ffmpeg isn't on your PATH. Run `vno setup`.");
         } else {
           const model = currentConfig.defaultModel || "turbo";
+          const runWhisper = whisperRunner({ model, translate: true });
           job.total = picked.length + imported.length;
           let t = 0;
           for (const file of imported) {
@@ -671,7 +719,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
             jobProgress(picked.length + t, `Translating ${path.basename(file)} (${t + 1}/${imported.length})`);
             jobLog(`[${t + 1}/${imported.length}] Translating ${rel}`);
             try {
-              await transcribeFile(file, { model, translate: true, onOutput: (line) => jobLog(line) });
+              await runWhisper(file);
               jobLog(`Saved ${rel.replace(/\.[^.]+$/, ".vtt")}`);
             } catch (err) {
               jobLog(`FAILED ${rel}: ${err.message}`);

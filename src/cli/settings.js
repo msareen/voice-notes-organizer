@@ -4,12 +4,24 @@ import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { checkDependencies } from "../lib/setup.js";
+import { gpuState } from "../lib/gpu.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runSetup } from "./setup.js";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
 
 const onOffLabel = (value) => (value ? chalk.green("on") : chalk.red("off"));
+
+/**
+ * GPU state as one bracketed phrase. The probe is `vno setup`'s job (it costs
+ * seconds), so an unprobed machine is reported as such rather than as "off".
+ */
+function gpuLabel(config) {
+  const gpu = gpuState(config);
+  if (gpu.device === null) return chalk.yellow("not checked");
+  if (gpu.device !== "cuda") return chalk.dim("no GPU on this machine");
+  return gpu.use === false ? chalk.red("off") : chalk.green(`on — ${gpu.name || "CUDA"}`);
+}
 
 /** Human-readable state of the three-way auto-translate switch. */
 function autoTranslateLabel(value) {
@@ -25,7 +37,7 @@ function autoTranslateLabel(value) {
  * remembered volume choices. Loops until the user chooses Done (or Esc).
  */
 export async function runSettings() {
-  const config = await loadConfig();
+  let config = await loadConfig();
 
   while (true) {
     const knownCount = Object.keys(config.knownMounts || {}).length;
@@ -42,6 +54,7 @@ export async function runSettings() {
         choices: [
           { name: `Auto-translate imports  ${chalk.dim("[" )}${autoTranslateLabel(config.autoTranslate)}${chalk.dim("]")}`, value: "autoTranslate" },
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
+          { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
           { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
@@ -99,6 +112,34 @@ export async function runSettings() {
       ]);
       if (res !== CANCELLED) {
         config.defaultModel = res.value;
+        await saveConfig(config);
+      }
+    } else if (answer.action === "gpu") {
+      const gpu = gpuState(config);
+      if (gpu.device !== "cuda") {
+        console.log(
+          chalk.dim(
+            gpu.device === null
+              ? "Not checked yet — use “Check ffmpeg + whisper” below, which also probes for a GPU."
+              : "No CUDA GPU was found on this machine, so transcription runs on the CPU."
+          )
+        );
+        continue;
+      }
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: `Use ${gpu.name || "the GPU"} for transcription?`,
+          default: gpu.use !== false,
+          choices: [
+            { name: "On — transcribe on the GPU (much faster)", value: true },
+            { name: "Off — transcribe on the CPU", value: false },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.gpu = { ...gpu, use: res.value };
         await saveConfig(config);
       }
     } else if (answer.action === "target") {
@@ -194,6 +235,9 @@ export async function runSettings() {
     } else if (answer.action === "setup") {
       console.log();
       await runSetup();
+      // runSetup writes the GPU probe straight to disk, so the copy held here
+      // is stale - and the next save from this loop would undo it.
+      config = await loadConfig();
       console.log();
     } else if (answer.action === "path") {
       console.log(configFilePath());

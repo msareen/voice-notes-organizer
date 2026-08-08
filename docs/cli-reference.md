@@ -11,6 +11,7 @@ Everything here works unlinked too, as `node bin/vno.js <command>`.
 | [`vno transcribe`](#vno-transcribe) | `vno t`, `vno --t`, `vno -t` | Transcribe or translate recordings with whisper |
 | [`vno visualize`](#vno-visualize) | `vno v`, `vno --v`, `vno -v` | Launch the browser UI |
 | [`vno cleanup`](#vno-cleanup) | — | Delete very short recordings |
+| [`vno explore`](#vno-explore) | `vno open` | Open the target folder in Explorer / Finder |
 | [`vno setting`](#vno-setting) | `vno settings` | Interactive settings wizard |
 | [`vno setup`](#vno-setup) | `vno doctor` | Check ffmpeg + whisper, install what's missing |
 | [`vno config`](#vno-config) | — | Print the config file path |
@@ -231,14 +232,16 @@ hand-editing `config.json`:
 
 - whether imports **auto-translate** (on / off / ask each time)
 - the default **whisper model**
+- **GPU acceleration** on or off (detecting one is `vno setup`'s job — this only
+  flips what was found)
 - the **target** import folder
 - whether finished runs **launch the browser UI**
 - **forget all remembered volume choices**
 - **check ffmpeg + whisper** and install what's missing (runs [`vno
   setup`](#vno-setup); the menu line shows the current state)
 
-Arrow keys to pick a setting, `Esc` to exit; changes save as you make them. The
-first three are also editable from the [UI's Settings dialog](ui.md#settings).
+Arrow keys to pick a setting, `Esc` to exit; changes save as you make them. Most
+of these are also editable from the [UI's Settings dialog](ui.md#settings).
 
 ---
 
@@ -256,7 +259,18 @@ vno setup --check     # report only, never offer to install
 
 | Flag | Effect |
 | --- | --- |
-| `--check` | Print the status and stop. Installs nothing, asks nothing |
+| `--check` | Print the status and stop. Installs nothing, asks nothing, doesn't re-probe the GPU |
+
+Once everything is installed, setup also asks torch whether this machine has a
+usable CUDA GPU, and offers to use it — see [GPU
+acceleration](transcription.md#gpu-acceleration). That probe boots Python, so it
+lives here and nowhere else; running `vno setup` again is how you re-detect after
+a driver or torch change. `--check` prints the last result instead.
+
+```
+  ✓ whisper  C:\Python312\Scripts\whisper.EXE
+  ✓ gpu      NVIDIA GeForce RTX 3060 Laptop GPU in use
+```
 
 Installs go through whatever package manager you already have, first match
 wins:
@@ -296,6 +310,35 @@ information and points you back at `vno setup`.
 
 ---
 
+## `vno explore`
+
+Opens the folder your recordings live in, in the machine's own file manager —
+Explorer on Windows, Finder on macOS, whatever `xdg-open` picks on Linux.
+
+```bash
+vno explore                   # open the target folder
+vno explore 250810_1328       # open its folder with that recording selected
+vno open 250810_1328.mp3      # same thing
+```
+
+| Argument | Effect |
+| --- | --- |
+| `[file]` | Reveal this recording with the file selected, instead of just opening the target folder. Resolved like `-f` elsewhere: absolute path, path relative to the target, a bare filename with or without its extension, or a unique substring |
+
+The path is printed before the window opens, so you still have something to
+copy if your desktop has no file manager to hand. Naming a file that matches
+nothing — or matches several recordings — prints the same explanation
+`transcribe -f` and `cleanup -f` do, and exits non-zero without opening
+anything.
+
+Linux has no portable "select this file" verb, so there `vno explore <file>`
+opens the containing folder without highlighting the file.
+
+The browser UI has the same thing on its **Explore** button, plus a `⧉` on each
+device group and *Open file location* on each take.
+
+---
+
 ## `vno config`
 
 Prints the path to the config file (`~/.vno/config.json`). See
@@ -312,6 +355,7 @@ npm run import
 npm run transcribe            # or: npm run transcribe -- --file 250810_1328
 npm run cleanup               # or: npm run cleanup -- --dry-run
 npm run visualize             # or: npm run visualize -- --port 8477
+npm run explore               # or: npm run explore -- 250810_1328
 npm run setting
 npm run setup
 npm run config

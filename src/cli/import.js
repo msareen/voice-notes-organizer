@@ -4,6 +4,7 @@ import chalk from "chalk";
 import { loadConfig, saveConfig } from "../lib/config.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume } from "../lib/sync.js";
+import { resolveDevice, gpuState } from "../lib/gpu.js";
 import { runVisualize } from "./visualize.js";
 import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.js";
 import { ensureDependencies } from "./setup.js";
@@ -131,8 +132,13 @@ async function maybeAutoTranslate(imported, config) {
   }
 
   const model = config.defaultModel || "turbo";
+  const device = resolveDevice(config);
   console.log(chalk.bold(`\nAuto-translating ${imported.length} imported note(s) with the "${model}" model...`));
-  const done = await transcribeMany(imported, { model, translate: true });
+  if (device === "cuda") {
+    const gpu = gpuState(config);
+    console.log(chalk.dim(`Using GPU acceleration${gpu.name ? ` (${gpu.name})` : ""}.`));
+  }
+  const done = await transcribeMany(imported, { model, translate: true, device, config });
   console.log(chalk.bold(`\nDone. Translated ${done}/${imported.length} imported note(s).`));
 
   return changed;

@@ -11,6 +11,8 @@ import {
   runPlan,
   which,
 } from "../lib/setup.js";
+import { probeGpu, gpuState } from "../lib/gpu.js";
+import { loadConfig, saveConfig } from "../lib/config.js";
 import { prompt, CANCELLED } from "./prompt.js";
 
 /** The two things vno can't transcribe without, in install order. */
@@ -199,11 +201,19 @@ export async function runSetup({ check = false } = {}) {
   await refreshPath();
   await report();
 
-  if (check) return;
+  const config = await loadConfig();
+  reportGpu(config);
+
+  if (check) {
+    // Report-only: the probe is the slow part and it writes to config, so
+    // --check reads back what setup last found rather than re-detecting.
+    return;
+  }
 
   const statuses = await checkDependencies(REQUIRED);
   if (statuses.every((s) => s.found)) {
     console.log(chalk.green("\nEverything vno needs is installed."));
+    await checkGpu(config);
     return;
   }
 
@@ -215,6 +225,7 @@ export async function runSetup({ check = false } = {}) {
       ? chalk.green("\nSetup complete.")
       : chalk.yellow("\nSetup incomplete — vno will ask again next time it needs one of these.")
   );
+  if (ok) await checkGpu(config);
 }
 
 /** Per-command status lines: exactly which binaries were found, and where. */
@@ -230,4 +241,92 @@ async function report() {
       );
     }
   }
+}
+
+/** The cached probe as a status line, in the same shape as the binaries above. */
+function reportGpu(config) {
+  const gpu = gpuState(config);
+  if (gpu.device === null) {
+    console.log(`  ${chalk.dim("?")} ${"gpu".padEnd(8)} ${chalk.dim("not checked yet — run `vno setup`")}`);
+    return;
+  }
+  if (gpu.device !== "cuda") {
+    console.log(`  ${chalk.dim("-")} ${"gpu".padEnd(8)} ${chalk.dim("no CUDA GPU — transcribing on the CPU")}`);
+    return;
+  }
+  const state = gpu.use === false ? chalk.dim("off by choice") : chalk.green("in use");
+  console.log(`  ${chalk.green("✓")} ${"gpu".padEnd(8)} ${chalk.dim(gpu.name || "CUDA")} ${state}`);
+}
+
+/**
+ * The one place the GPU probe runs. It boots Python and imports torch, which
+ * costs seconds - far too slow for the startup check every command does - so
+ * `vno setup` is where "what does this machine have?" gets asked, and the
+ * answer is cached in config for transcribe and the viewer to read.
+ *
+ * Re-probing on every `vno setup` is deliberate: it's the way back after a
+ * driver update, a torch reinstall, or a fallback that cleared the cache.
+ */
+async function checkGpu(config) {
+  console.log(chalk.dim("\nChecking for GPU acceleration (this boots Python once)..."));
+  const result = await probeGpu();
+  const previous = gpuState(config);
+
+  config.gpu = {
+    ...previous,
+    device: result.device,
+    name: result.name,
+    torch: result.torch,
+    probedAt: new Date().toISOString(),
+  };
+
+  if (result.device !== "cuda") {
+    console.log(chalk.dim(`  No CUDA GPU available — transcription runs on the CPU.`));
+    if (result.error) console.log(chalk.dim(`  (${result.error})`));
+    else console.log(chalk.dim("  torch reports no usable CUDA device, so whisper couldn't use one either."));
+    await saveConfig(config);
+    return;
+  }
+
+  console.log(chalk.green(`  Found ${result.name}${result.torch ? ` (torch ${result.torch})` : ""}.`));
+
+  // Asked once and remembered, like auto-translate: `vno setting` flips it.
+  if (previous.use !== null) {
+    console.log(
+      previous.use
+        ? chalk.dim("  GPU acceleration is on. Change it with `vno setting`.")
+        : chalk.dim("  GPU acceleration is off by choice. Turn it on with `vno setting`.")
+    );
+    await saveConfig(config);
+    return;
+  }
+
+  if (!process.stdin.isTTY) {
+    await saveConfig(config);
+    return;
+  }
+
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "use",
+      message: "Use the GPU for transcription? It's several times faster than the CPU.",
+      choices: [
+        { name: "Yes, use the GPU", value: true },
+        { name: "No, stay on the CPU", value: false },
+      ],
+      default: true,
+    },
+  ]);
+  if (answer !== CANCELLED) {
+    config.gpu.use = answer.use;
+    console.log(
+      chalk.dim(
+        answer.use
+          ? "  Remembered: transcription uses the GPU. Change it with `vno setting`."
+          : "  Remembered: transcription stays on the CPU. Change it with `vno setting`."
+      )
+    );
+  }
+  await saveConfig(config);
 }

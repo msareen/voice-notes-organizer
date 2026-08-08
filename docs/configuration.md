@@ -21,7 +21,8 @@ rather than crashing the tool.
   "autoTranslate": null,
   "defaultModel": "turbo",
   "openWhenDone": true,
-  "rememberDeletions": true
+  "rememberDeletions": true,
+  "gpu": { "device": null, "name": null, "torch": null, "use": null, "probedAt": null }
 }
 ```
 
@@ -40,6 +41,7 @@ time.
 | `defaultModel` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
+| `gpu` | on/off only | on/off only | ✅ (detected by `vno setup`) |
 
 ---
 
@@ -128,6 +130,40 @@ The whisper model used for auto-translation, and pre-selected in the
 One of `turbo`, `tiny`, `base`, `small`, `medium`, `large`. Defaults to
 `turbo`. See [Transcription](transcription.md#choosing-a-model) for how to
 choose.
+
+## `gpu`
+
+What [`vno setup`](cli-reference.md#vno-setup-doctor) found out about GPU
+acceleration, and what you want done with it.
+
+```json
+"gpu": {
+  "device": "cuda",
+  "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+  "torch": "2.5.1+cu121",
+  "use": true,
+  "probedAt": "2026-07-26T17:17:54.246Z"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `device` | The probe result. `null` = never checked, `"cuda"` = usable GPU, `"cpu"` = checked, there isn't one |
+| `name` | The card, for display |
+| `torch` | The torch build that answered, so an upgrade is visible |
+| `use` | Your answer. `null` = never asked, `true`/`false` = decided |
+| `probedAt` | When the probe last ran |
+
+The answer that matters is `device === "cuda" && use !== false` — a detected GPU
+is used unless you've said no, since the browser has nowhere to ask at job time.
+
+Detection means booting Python and importing torch, which takes seconds, so it
+happens **only in `vno setup`** and the result is cached here. Nothing depends on
+it: delete the block, or the whole file, and every command still runs on the CPU.
+
+Toggle it from `vno setting` or the UI's Settings dialog; re-detect after a driver
+or torch change by running `vno setup` again. See
+[Transcription](transcription.md#gpu-acceleration).
 
 ## `openWhenDone`
 

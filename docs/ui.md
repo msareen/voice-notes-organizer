@@ -24,7 +24,7 @@ with `vno v`.
 | **Import** | Detect volumes and pull in new recordings — see [Import dialog](#import) |
 | **Transcribe** | Pick takes and run whisper on them — see [Transcribe dialog](#transcribe) |
 | **Cleanup** | Find and delete very short recordings — see [Cleanup dialog](#cleanup) |
-| **Open folder** | Reveals the target folder in Explorer / Finder / your file manager |
+| **Explore** | Opens the target folder in Explorer / Finder / your file manager — the same thing `vno explore` does |
 | **Settings** | The four settings also offered by `vno setting` — see [Settings dialog](#settings) |
 | **Takes / Total** | Number of recordings and their combined running time |
 | **Quit** | Stops the server and ends the CLI session |
@@ -133,13 +133,19 @@ want to keep, and a confirmation before deleting. Matching `.vtt` / `.srt` /
 
 ### Settings
 
-The four settings that are also offered by `vno setting`:
+The settings that are also offered by `vno setting`:
 [`autoTranslate`](configuration.md#autotranslate) (on / off / ask each time),
 [`defaultModel`](configuration.md#defaultmodel),
+[GPU acceleration](configuration.md#gpu),
 [`openWhenDone`](configuration.md#openwhendone), and
 [`rememberDeletions`](configuration.md#rememberdeletions). The **target folder**
 is shown but not editable here — changing it needs a re-scan, so it lives in
 `vno setting`. Changes save as you make them.
+
+The GPU row only appears when a CUDA GPU was found, and only turns it on or off:
+*detecting* one boots Python and torch, which is far too slow for a page load, so
+that's [`vno setup`](cli-reference.md#vno-setup)'s job. Until you've run it, the
+dialog says so. A transcribe job logs which device it used.
 
 Deletes made from this page — both the per-take **Delete** and **Cleanup** —
 are recorded, so importing again won't copy those recordings back off the

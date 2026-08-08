@@ -38,11 +38,12 @@ so anything there is safe to reuse from either side.
 | `lib/sync.js` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
 | `lib/whisper.js` | Probing for whisper and running a transcription |
 | `lib/setup.js` | Finding ffmpeg/whisper/pip on PATH, per-OS install recipes, running them, re-reading PATH |
+| `lib/gpu.js` | Asking torch whether CUDA is usable (once, from `vno setup`), and deciding which device a run uses |
 | `lib/media.js` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.js` | Parse and serialize WebVTT cues |
 | `lib/notes.js` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
 | `cli/progress.js` | The terminal progress bar every slow per-file loop draws through |
-| `lib/open.js` | Opening a folder / revealing a file, per OS |
+| `lib/open.js` | Opening a folder / revealing a file, per OS — behind `vno explore`, the UI's Explore button and `/api/reveal` alike |
 | `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
 
 ## There is no build step
@@ -74,7 +75,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
-| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `openWhenDone` |
+| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `openWhenDone`, `rememberDeletions`, `useGpu` |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
 | `/api/transcript` | PUT | Save an edited transcript (cues or plain text) |
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |

@@ -45,6 +45,7 @@
     "transcribe": "node bin/vno.js transcribe",
     "cleanup": "node bin/vno.js cleanup",
     "visualize": "node bin/vno.js visualize",
+    "explore": "node bin/vno.js explore",
     "setting": "node bin/vno.js setting",
     "setup": "node bin/vno.js setup",
     "config": "node bin/vno.js config",

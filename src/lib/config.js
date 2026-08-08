@@ -36,6 +36,13 @@ function defaultConfig() {
     // files landed in and open the regenerated index.html player. Set to
     // false (or pass --no-open) to keep runs headless.
     openWhenDone: true,
+    // What `vno setup` found out about GPU acceleration, and what the user
+    // wants done with it. `device` is the probe result - null = never probed,
+    // "cuda" = usable GPU, "cpu" = probed and there isn't one. `use` is the
+    // answer to the offer: null = never asked, true/false = decided. Asking
+    // torch costs seconds, which is why it's cached rather than re-checked;
+    // see lib/gpu.js.
+    gpu: { device: null, name: null, torch: null, use: null, probedAt: null },
   };
 }
 
@@ -48,7 +55,15 @@ export async function loadConfig() {
   }
   try {
     const data = await fs.readJson(CONFIG_FILE);
-    return { ...defaultConfig(), ...data, knownMounts: { ...data.knownMounts } };
+    const defaults = defaultConfig();
+    // The nested blocks are merged field by field, so a hand-edited partial
+    // `gpu` (or an older config that predates it) still has every key.
+    return {
+      ...defaults,
+      ...data,
+      knownMounts: { ...data.knownMounts },
+      gpu: { ...defaults.gpu, ...data.gpu },
+    };
   } catch {
     // corrupt config file - back it up and start fresh rather than crash
     await fs.move(CONFIG_FILE, `${CONFIG_FILE}.bak-${Date.now()}`, { overwrite: true });

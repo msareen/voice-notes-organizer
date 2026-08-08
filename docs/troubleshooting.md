@@ -123,11 +123,33 @@ The `.vtt` changed underneath the editor (usually a re-transcribe finished
 while it was open). The save is refused rather than clobbering the newer file.
 Reload the page and redo the edit.
 
+## "Skipping … due to UnicodeEncodeError"
+
+whisper prints each segment as it decodes it, and Python encodes its output with
+the Windows console's codepage — `cp1252` on a Western install, which has no
+Devanagari, CJK, Cyrillic or emoji. The error that raises is caught by whisper's
+own CLI, which skips the file and **still exits 0**, so older versions of vno
+reported "Saved" for a transcript that was never written.
+
+vno now runs whisper with `PYTHONIOENCODING=utf-8`, so this shouldn't happen. If
+you see it running whisper by hand, set the same variable:
+
+```powershell
+$env:PYTHONIOENCODING = "utf-8"
+```
+
+A run that skips a file is reported as a failure now, not a save — and a `.vtt`
+that never appeared is caught even if whisper says nothing at all.
+
 ## Transcription is unbearably slow
 
 Expected on CPU — see [Choosing a model](transcription.md#choosing-a-model).
 Drop to `small` or `base`, or leave a batch running overnight. The first run of
 any model also downloads it (hundreds of MB to ~3 GB), which looks like a hang.
+
+If your machine has an NVIDIA GPU, check vno knows about it: `vno setup` probes
+for one and offers to use it, which is several times faster. See [GPU
+acceleration](transcription.md#gpu-acceleration).
 
 ## `vno` isn't a recognised command
 

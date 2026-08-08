@@ -35,6 +35,46 @@ Models download themselves on first use (a few hundred MB to ~3 GB depending on
 size) and are cached by whisper afterwards. The first run of a new model will
 sit there apparently doing nothing while it downloads — that's expected.
 
+## GPU acceleration
+
+Whisper is PyTorch, so an NVIDIA GPU makes it several times faster than the CPU —
+on the same recording and model, often two to five times, and the gap widens with
+bigger models.
+
+vno doesn't guess. `vno setup` asks torch itself whether a CUDA device is usable,
+which is the only answer worth having: a machine can have an NVIDIA card, a
+current driver, and still be CPU-only because `pip install openai-whisper` pulled
+the CPU build of torch. When one is found, setup names the card and asks once
+whether to use it:
+
+```
+Checking for GPU acceleration (this boots Python once)...
+  Found NVIDIA GeForce RTX 3060 Laptop GPU (torch 2.5.1+cu121).
+? Use the GPU for transcription? It's several times faster than the CPU.
+```
+
+The answer is remembered in [`gpu`](configuration.md#gpu) and every later run
+passes `--device cuda --fp16 True` to whisper. Half precision is the point of a
+GPU — full precision on one is roughly half the speed for no gain — so the two
+travel together, and a CPU run is `--device cpu --fp16 False`.
+
+**CUDA only.** Apple's MPS backend still misses operators whisper needs, and AMD
+ROCm reports itself as CUDA anyway, so it comes along for free where it works.
+
+Because the probe boots Python, it runs **only in `vno setup`**, never as part of
+a normal command. That makes `vno setup` the way to re-detect after a driver
+update or a torch reinstall. Toggle the setting itself from `vno setting` or the
+UI's Settings dialog — no re-probe needed.
+
+If a GPU run fails part-way (a driver update, not enough VRAM for the model), vno
+says so, redoes that file on the CPU, finishes the run on the CPU, and forgets the
+cached probe so the next `vno setup` re-checks:
+
+```
+GPU run failed: RuntimeError: CUDA out of memory.
+Falling back to the CPU for the rest of this run. Re-check it with `vno setup`.
+```
+
 ## Transcribe vs. translate
 
 | | Task | Result |

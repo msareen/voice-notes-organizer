@@ -8,6 +8,7 @@ import { runCleanup, runLedgerCleanup } from "../src/cli/cleanup.js";
 import { runVisualize } from "../src/cli/visualize.js";
 import { runSettings } from "../src/cli/settings.js";
 import { runSetup } from "../src/cli/setup.js";
+import { runExplore } from "../src/cli/explore.js";
 import { configFilePath } from "../src/lib/config.js";
 
 // Single source of truth for the version - a hardcoded copy here silently
@@ -109,6 +110,18 @@ program
   .option("--no-open", "start the server without opening a browser")
   .action(async (opts) => {
     await runVisualize({ open: opts.open, port: parseInt(opts.port, 10) || 0 });
+  });
+
+program
+  .command("explore")
+  .alias("open")
+  .argument(
+    "[file]",
+    "reveal this recording (name, relative path, or absolute path) instead of just opening the target folder"
+  )
+  .description("Open the target folder in your file manager, or reveal one recording in it (alias: open)")
+  .action(async (file) => {
+    await runExplore({ file: file || null });
   });
 
 program

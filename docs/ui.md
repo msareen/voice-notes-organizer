@@ -119,7 +119,7 @@ Below the list: the **whisper model** (defaulting to your
 [`defaultModel`](configuration.md#defaultmodel)) and a **translate to English**
 checkbox. **Start** kicks off the job.
 
-If whisper or ffmpeg isn't on your `PATH`, the dialog says so up front. A web
+If whisper.cpp or ffmpeg isn't installed, the dialog says so up front. A web
 page can't run an installer, so it points you at `vno setup` in a terminal,
 which offers to install what's missing. Starting the job anyway is refused with
 the same message.
@@ -136,16 +136,17 @@ want to keep, and a confirmation before deleting. Matching `.vtt` / `.srt` /
 The settings that are also offered by `vno setting`:
 [`autoTranslate`](configuration.md#autotranslate) (on / off / ask each time),
 [`defaultModel`](configuration.md#defaultmodel),
-[GPU acceleration](configuration.md#gpu),
+[GPU acceleration](configuration.md#accel),
 [`openWhenDone`](configuration.md#openwhendone), and
 [`rememberDeletions`](configuration.md#rememberdeletions). The **target folder**
 is shown but not editable here — changing it needs a re-scan, so it lives in
 `vno setting`. Changes save as you make them.
 
-The GPU row only appears when a CUDA GPU was found, and only turns it on or off:
-*detecting* one boots Python and torch, which is far too slow for a page load, so
-that's [`vno setup`](cli-reference.md#vno-setup)'s job. Until you've run it, the
-dialog says so. A transcribe job logs which device it used.
+The GPU row only appears when an accelerator-capable whisper.cpp build was
+installed, and only turns it on or off: *installing* one is
+[`vno setup`](cli-reference.md#vno-setup)'s job, since the browser can't run
+an installer. Until you've run it, the dialog says so. A transcribe job logs
+which device it used.
 
 Deletes made from this page — both the per-take **Delete** and **Cleanup** —
 are recorded, so importing again won't copy those recordings back off the

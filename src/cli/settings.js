@@ -4,7 +4,7 @@ import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { checkDependencies } from "../lib/setup.js";
-import { gpuState } from "../lib/gpu.js";
+import { accelState } from "../lib/whisper.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runSetup } from "./setup.js";
 
@@ -13,14 +13,15 @@ const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
 const onOffLabel = (value) => (value ? chalk.green("on") : chalk.red("off"));
 
 /**
- * GPU state as one bracketed phrase. The probe is `vno setup`'s job (it costs
- * seconds), so an unprobed machine is reported as such rather than as "off".
+ * Accelerator state as one bracketed phrase. The backend is fixed by
+ * whichever whisper.cpp build `vno setup` installed, so an unbuilt machine
+ * is reported as such rather than as "off".
  */
 function gpuLabel(config) {
-  const gpu = gpuState(config);
-  if (gpu.device === null) return chalk.yellow("not checked");
-  if (gpu.device !== "cuda") return chalk.dim("no GPU on this machine");
-  return gpu.use === false ? chalk.red("off") : chalk.green(`on — ${gpu.name || "CUDA"}`);
+  const accel = accelState(config);
+  if (accel.backend === null) return chalk.yellow("not installed");
+  if (accel.backend === "cpu") return chalk.dim("no accelerator build available");
+  return accel.use === false ? chalk.red("off") : chalk.green(`on — ${accel.name || accel.backend}`);
 }
 
 /** Human-readable state of the three-way auto-translate switch. */
@@ -115,13 +116,13 @@ export async function runSettings() {
         await saveConfig(config);
       }
     } else if (answer.action === "gpu") {
-      const gpu = gpuState(config);
-      if (gpu.device !== "cuda") {
+      const accel = accelState(config);
+      if (accel.backend === null || accel.backend === "cpu") {
         console.log(
           chalk.dim(
-            gpu.device === null
-              ? "Not checked yet — use “Check ffmpeg + whisper” below, which also probes for a GPU."
-              : "No CUDA GPU was found on this machine, so transcription runs on the CPU."
+            accel.backend === null
+              ? "Not installed yet — use “Check ffmpeg + whisper” below, which installs whisper.cpp."
+              : "No accelerator build is available for this machine, so transcription runs on the CPU."
           )
         );
         continue;
@@ -130,16 +131,16 @@ export async function runSettings() {
         {
           type: "list",
           name: "value",
-          message: `Use ${gpu.name || "the GPU"} for transcription?`,
-          default: gpu.use !== false,
+          message: `Use ${accel.name || accel.backend} for transcription?`,
+          default: accel.use !== false,
           choices: [
-            { name: "On — transcribe on the GPU (much faster)", value: true },
+            { name: "On — transcribe on the accelerator (much faster)", value: true },
             { name: "Off — transcribe on the CPU", value: false },
           ],
         },
       ]);
       if (res !== CANCELLED) {
-        config.gpu = { ...gpu, use: res.value };
+        config.accel = { ...accel, use: res.value };
         await saveConfig(config);
       }
     } else if (answer.action === "target") {
@@ -235,8 +236,8 @@ export async function runSettings() {
     } else if (answer.action === "setup") {
       console.log();
       await runSetup();
-      // runSetup writes the GPU probe straight to disk, so the copy held here
-      // is stale - and the next save from this loop would undo it.
+      // runSetup writes the accel state straight to disk, so the copy held
+      // here is stale - and the next save from this loop would undo it.
       config = await loadConfig();
       console.log();
     } else if (answer.action === "path") {

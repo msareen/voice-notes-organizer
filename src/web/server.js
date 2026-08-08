@@ -11,8 +11,7 @@ import { parseCues, serializeCues } from "../lib/vtt.js";
 import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume, findAudioFiles } from "../lib/sync.js";
-import { transcribeFile } from "../lib/whisper.js";
-import { resolveDevice, gpuState, gpuUnasked, isDeviceError, forgetGpuProbe, lastLine } from "../lib/gpu.js";
+import { transcribeFile, resolveAccel, accelState, accelUnasked, isDeviceError, lastLine } from "../lib/whisper.js";
 import { checkDependencies } from "../lib/setup.js";
 import { recordDeletions } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
@@ -250,14 +249,15 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         defaultModel: currentConfig.defaultModel || "turbo",
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
-        // Only the answer is the browser's to change; the probe itself is
-        // `vno setup`'s, since it costs seconds and the page can't run it.
+        // Only the answer is the browser's to change; the backend itself is
+        // fixed by whichever whisper.cpp build `vno setup` installed, since
+        // the page can't run an installer.
         gpu: {
-          checked: gpuState(currentConfig).device !== null,
-          available: gpuState(currentConfig).device === "cuda",
-          name: gpuState(currentConfig).name,
-          use: gpuState(currentConfig).use,
-          active: resolveDevice(currentConfig) === "cuda",
+          checked: accelState(currentConfig).backend !== null,
+          available: accelState(currentConfig).backend !== null && accelState(currentConfig).backend !== "cpu",
+          name: accelState(currentConfig).name,
+          use: accelState(currentConfig).use,
+          active: resolveAccel(currentConfig) !== "cpu",
         },
         configPath: configFilePath(),
       },
@@ -355,10 +355,11 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     }
     if ("openWhenDone" in patch) currentConfig.openWhenDone = Boolean(patch.openWhenDone);
     if ("rememberDeletions" in patch) currentConfig.rememberDeletions = Boolean(patch.rememberDeletions);
-    // `useGpu` and not the whole gpu block: the probe result is server-owned,
-    // so a client can't claim a GPU this machine hasn't got.
+    // `useGpu` and not the whole accel block: the installed backend is
+    // server-owned, so a client can't claim an accelerator this machine
+    // hasn't got.
     if ("useGpu" in patch) {
-      currentConfig.gpu = { ...gpuState(currentConfig), use: Boolean(patch.useGpu) };
+      currentConfig.accel = { ...accelState(currentConfig), use: Boolean(patch.useGpu) };
     }
     await saveConfig(currentConfig);
     console.log(chalk.dim("Settings updated from the browser."));
@@ -509,17 +510,19 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
   /**
    * One job's whisper runs, sharing the device decision across its files.
    *
-   * The page has nowhere to ask at job time, so a GPU the user was never asked
-   * about is used and announced rather than left idle - the Settings dialog is
-   * where they turn it off. A GPU failure mid-job downgrades the rest of the
-   * job to the CPU and forgets the cached probe, so `vno setup` re-detects.
+   * The page has nowhere to ask at job time, so an accelerator the user was
+   * never asked about is used and announced rather than left idle - the
+   * Settings dialog is where they turn it off. A run that fails on the
+   * accelerator downgrades the rest of the job to the CPU; there's nothing to
+   * forget in config, since the backend is fixed by which binary is
+   * installed and re-checking it is free (unlike the old torch probe).
    */
   function whisperRunner({ model, translate }) {
-    let device = resolveDevice(currentConfig);
-    if (device === "cuda") {
-      const gpu = gpuState(currentConfig);
-      jobLog(`Using GPU acceleration${gpu.name ? ` (${gpu.name})` : ""}.`);
-      if (gpuUnasked(currentConfig)) jobLog("Turn this off in Settings if you'd rather stay on the CPU.");
+    let device = resolveAccel(currentConfig);
+    if (device !== "cpu") {
+      const accel = accelState(currentConfig);
+      jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
+      if (accelUnasked(currentConfig)) jobLog("Turn this off in Settings if you'd rather stay on the CPU.");
     }
 
     return async function run(file) {
@@ -527,11 +530,10 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         await transcribeFile(file, { model, translate, device, onOutput: (line) => jobLog(line) });
         return;
       } catch (err) {
-        if (device !== "cuda" || !isDeviceError(err.message)) throw err;
-        jobLog(`GPU run failed: ${lastLine(err.message)}`);
-        jobLog("Falling back to the CPU for the rest of this job. Re-check it with `vno setup`.");
+        if (device === "cpu" || !isDeviceError(err.message)) throw err;
+        jobLog(`Accelerator run failed: ${lastLine(err.message)}`);
+        jobLog("Falling back to the CPU for the rest of this job.");
         device = "cpu";
-        await forgetGpuProbe(currentConfig);
       }
       await transcribeFile(file, { model, translate, device: "cpu", onOutput: (line) => jobLog(line) });
     };

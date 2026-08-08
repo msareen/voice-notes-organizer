@@ -620,13 +620,13 @@
             { label: "Off — transcribe on the CPU", value: "false" }
           ], String(gpu.use !== false));
         } else {
-          // Detecting a GPU means booting Python and torch, which is far too
-          // slow to do from a page load — "vno setup" owns the probe.
+          // The accelerator backend is fixed by whichever whisper.cpp build
+          // "vno setup" installed — the browser can't install anything itself.
           var gh = document.createElement("p");
           gh.className = "hint";
           gh.textContent = gpu.checked
-            ? "GPU acceleration: no CUDA GPU found — transcription runs on the CPU."
-            : "GPU acceleration: run \"vno setup\" in a terminal to check whether this machine has one.";
+            ? "GPU acceleration: no accelerator build available on this machine — transcription runs on the CPU."
+            : "GPU acceleration: run \"vno setup\" in a terminal to install whisper.cpp and check for one.";
           host.appendChild(gh);
         }
 

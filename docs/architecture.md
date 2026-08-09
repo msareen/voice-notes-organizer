@@ -84,6 +84,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/volumes` | GET | Detected volumes plus configured sources |
 | `/api/browse` | GET | List subfolders of a volume, one level |
 | `/api/import` | POST | Start an import job |
+| `/api/upload` | POST | Drag-and-drop: stream one raw audio file to `Dropped/`. Not a job — token comes off the query string, since it's not a JSON body |
 | `/api/cleanup/scan` | GET | Recordings under a duration threshold |
 | `/api/cleanup` | POST | Delete the selected ones |
 

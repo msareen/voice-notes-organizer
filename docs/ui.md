@@ -109,6 +109,14 @@ auto-import them next time** (on by default).
 If nothing is connected, the dialog says so and points at the `sources` config
 option.
 
+**Drag and drop** — dragging audio file(s) from your OS file manager onto the
+page (anywhere, no dialog needed) copies them straight in, landing in a
+`Dropped/` folder next to the per-device ones. Same-name-and-size dedup applies,
+so dropping the same file twice is a no-op; a file matching one you deleted
+through vno is left alone too, same as a normal import. There's no translate
+option here — drop the file, then use Transcribe with `--translate` if you
+want it.
+
 ### Transcribe
 
 Lists every take with a `has transcript` / `no transcript` marker. Untranscribed

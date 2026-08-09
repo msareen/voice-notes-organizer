@@ -10,11 +10,11 @@ import { renderPage } from "./page.js";
 import { parseCues, serializeCues } from "../lib/vtt.js";
 import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
-import { syncVolume, findAudioFiles } from "../lib/sync.js";
+import { syncVolume, findAudioFiles, AUDIO_EXTENSIONS, resolveFlatDest } from "../lib/sync.js";
 import { transcribeFile, resolveAccel, accelState, accelUnasked, isDeviceError, lastLine } from "../lib/whisper.js";
 import { resolveModel } from "../lib/whispercpp.js";
 import { checkDependencies } from "../lib/setup.js";
-import { recordDeletions } from "../lib/ledger.js";
+import { recordDeletions, loadDeletionMatcher } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
 
 const MIME = {
@@ -172,6 +172,12 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     // gating them would mean putting the token in an asset URL, which is worse.
     // An allowlist rather than path juggling, so traversal isn't a question.
     if (route.startsWith("/assets/")) return serveAsset(res, route.slice(8));
+
+    // Dropped-file uploads stream raw bytes, not JSON, and can be well past
+    // readBody's 5MB cap - handled before the generic body read below, with
+    // its own token check off the query string (fetch can't set a header on
+    // a body-carrying request without a CORS preflight round trip here).
+    if (route === "/api/upload" && req.method === "POST") return handleUpload(req, res, url.searchParams);
 
     // Everything below is token-gated. sendBeacon can't set headers, so a
     // token in the JSON body counts too.
@@ -782,6 +788,81 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       jobProgress(job.total, `Imported ${imported.length} new note(s)`);
       await endJob(null);
     })().catch((err) => endJob(err));
+  }
+
+  const DROPPED_DIR_NAME = "Dropped";
+  const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // generous for a single recording
+
+  /**
+   * Drag-and-drop import: the browser POSTs one raw file per request (no
+   * multipart, no job system - this isn't a job, just a copy). Streamed
+   * straight to a temp file so a large recording never sits in memory, then
+   * handed through the same flat-destination dedup `syncVolume` uses so a
+   * file dropped twice doesn't duplicate. Lands in `target/Dropped/`,
+   * alongside the per-device folders regular import creates.
+   */
+  async function handleUpload(req, res, params) {
+    const supplied = req.headers["x-vno-token"] || params.get("t");
+    if (supplied !== token) {
+      req.resume();
+      return sendJson(res, 403, { error: "Invalid session token" });
+    }
+
+    const name = path.basename(String(params.get("name") || "")).trim();
+    const ext = path.extname(name).toLowerCase();
+    if (!name || !AUDIO_EXTENSIONS.has(ext)) {
+      req.resume();
+      return sendJson(res, 400, { error: `Unsupported file type: ${name || "(no name)"}` });
+    }
+
+    const destRoot = path.join(target, DROPPED_DIR_NAME);
+    await fs.ensureDir(destRoot);
+    const tmp = path.join(destRoot, `.upload-${crypto.randomBytes(8).toString("hex")}.tmp`);
+
+    let bytes = 0;
+    let failed = null;
+    await new Promise((resolve) => {
+      const out = fs.createWriteStream(tmp);
+      req.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > MAX_UPLOAD_BYTES) {
+          failed = failed || new Error("File too large");
+          req.destroy();
+        }
+      });
+      req.on("aborted", () => { failed = failed || new Error("Upload interrupted"); });
+      req.on("error", (err) => { failed = failed || err; });
+      out.on("error", (err) => { failed = failed || err; });
+      out.on("close", resolve);
+      req.pipe(out);
+    });
+
+    if (failed || bytes === 0) {
+      await fs.remove(tmp).catch(() => {});
+      return sendJson(res, 400, { error: failed ? failed.message : "Empty upload" });
+    }
+
+    try {
+      const isDeleted = await loadDeletionMatcher(target, { enabled: currentConfig.rememberDeletions !== false });
+      const { dest, skip, wasDeletedBefore } = await resolveFlatDest(destRoot, name, bytes, isDeleted);
+      if (skip) {
+        await fs.remove(tmp);
+        return sendJson(res, 200, { skipped: true, reason: wasDeletedBefore ? "previously deleted" : "already imported" });
+      }
+      await fs.move(tmp, dest, { overwrite: false });
+
+      const rel = path.relative(target, dest).split(path.sep).join("/");
+      const note = await refreshNote(target, dest);
+      notes = notes.filter((n) => n.rel !== rel);
+      notes.push(note);
+      notes.sort((a, b) => (b.dateMs ?? -Infinity) - (a.dateMs ?? -Infinity));
+      broadcast("notes", { count: notes.length });
+      console.log(chalk.dim(`Imported via drag-and-drop: ${rel}`));
+      return sendJson(res, 200, { rel, name: path.basename(dest) });
+    } catch (err) {
+      await fs.remove(tmp).catch(() => {});
+      return sendJson(res, 500, { error: err.message });
+    }
   }
 
   /* -------------------------------- cleanup ------------------------------ */

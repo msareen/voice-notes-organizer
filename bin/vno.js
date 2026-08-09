@@ -27,6 +27,12 @@ const SHORTCUTS = {
   "-t": "transcribe",
 };
 if (SHORTCUTS[process.argv[2]]) {
+  // -v/--v collides with the conventional "print version" flag, so anyone
+  // reaching for that habit gets pointed at the real thing instead of just
+  // silently landing in the browser UI.
+  if (process.argv[2] === "-v" || process.argv[2] === "--v") {
+    console.log(chalk.dim("(-v launches the browser UI here - run `vno --version` to see the installed version.)"));
+  }
   process.argv[2] = SHORTCUTS[process.argv[2]];
 }
 

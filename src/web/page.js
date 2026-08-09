@@ -34,8 +34,8 @@ export function renderPage({ rootLabel, token }) {
     <button class="btn" id="btnSettings">Settings</button>
     <span class="spacer"></span>
     <div class="readout">
-      <div class="stat"><b id="statTakes">—</b><span>Takes</span></div>
-      <div class="stat"><b id="statTotal">—</b><span>Total</span></div>
+      <div class="stat"><b id="statTakes">—</b><span>Recordings</span></div>
+      <div class="stat"><b id="statTotal">—</b><span>Total time</span></div>
     </div>
     <button class="btn danger" id="btnQuit" title="Stop the vno server and close this page">Quit</button>
   </header>

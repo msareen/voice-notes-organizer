@@ -22,7 +22,10 @@ function transcriptPathFor(audioPath) {
  * Returns the number that succeeded. With `translate: true` the transcripts
  * are English translations rather than verbatim transcriptions.
  */
-export async function transcribeMany(files, { model = "turbo", translate = false, device = "cpu" } = {}) {
+export async function transcribeMany(
+  files,
+  { model = "turbo", translate = false, device = "cpu", language = "auto" } = {}
+) {
   const gerund = translate ? "Translating" : "Transcribing";
   const verb = translate ? "translate" : "transcribe";
   let current = device;
@@ -30,7 +33,7 @@ export async function transcribeMany(files, { model = "turbo", translate = false
   for (const f of files) {
     console.log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
     try {
-      await transcribeFile(f, { model, translate, device: current });
+      await transcribeFile(f, { model, translate, device: current, language });
       console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
       continue;
@@ -50,7 +53,7 @@ export async function transcribeMany(files, { model = "turbo", translate = false
     }
 
     try {
-      await transcribeFile(f, { model, translate, device: "cpu" });
+      await transcribeFile(f, { model, translate, device: "cpu", language });
       console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
     } catch (err) {
@@ -262,7 +265,12 @@ export async function runTranscribe({ model, file, filter, translate = false, op
     if (accel.use === null) console.log(chalk.dim("Turn it off any time with `vno setting`."));
   }
 
-  const done = await transcribeMany(selected, { model: chosenModel, translate, device });
+  const done = await transcribeMany(selected, {
+    model: chosenModel,
+    translate,
+    device,
+    language: config.transcribeLanguage || "auto",
+  });
 
   const label = translate ? "Translated" : "Transcribed";
   console.log(chalk.bold(`\nDone. ${label} ${done}/${selected.length} file(s).`));

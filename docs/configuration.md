@@ -20,6 +20,7 @@ rather than crashing the tool.
   "knownMounts": {},
   "autoTranslate": null,
   "defaultModel": "turbo",
+  "transcribeLanguage": "auto",
   "openWhenDone": true,
   "rememberDeletions": true,
   "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
@@ -39,6 +40,7 @@ time.
 | `knownMounts` | reset all | per-volume, on import | ✅ |
 | `autoTranslate` | ✅ | ✅ | ✅ |
 | `defaultModel` | ✅ | ✅ | ✅ |
+| `transcribeLanguage` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
 | `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
@@ -126,6 +128,19 @@ dialog.
 
 The whisper.cpp model used for auto-translation, and pre-selected in the
 `vno transcribe` picker and the UI's transcribe dialog.
+
+## `transcribeLanguage`
+
+The language whisper.cpp is told to expect, as an ISO-639-1 code (`"hi"`,
+`"en"`, ...), or `"auto"` (the default) to let it detect per file.
+
+Worth pinning if you speak two languages whisper.cpp's auto-detect confuses
+for one another — Hindi and Urdu are acoustically close enough that
+auto-detect can flip between them file to file. Setting this to `"hi"` fixes
+that, and still transcribes English words mixed into Hindi speech fine, so
+it also covers a "mostly Hindi with some English" preference. `vno setting`
+offers Hindi/English/auto plus a custom code; the UI's Settings dialog offers
+the same three presets.
 
 One of `turbo`, `tiny`, `base`, `small`, `medium`, `large`. Defaults to
 `turbo`. See [Transcription](transcription.md#choosing-a-model) for how to

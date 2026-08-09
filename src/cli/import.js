@@ -138,7 +138,12 @@ async function maybeAutoTranslate(imported, config) {
     const accel = accelState(config);
     console.log(chalk.dim(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`));
   }
-  const done = await transcribeMany(imported, { model, translate: true, device });
+  const done = await transcribeMany(imported, {
+    model,
+    translate: true,
+    device,
+    language: config.transcribeLanguage || "auto",
+  });
   console.log(chalk.bold(`\nDone. Translated ${done}/${imported.length} imported note(s).`));
 
   return changed;

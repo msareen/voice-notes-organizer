@@ -40,7 +40,14 @@ export async function isWhisperInstalled() {
  */
 export async function transcribeFile(
   filePath,
-  { model = "turbo", translate = false, device = "cpu", threads = null, onOutput = null } = {}
+  {
+    model = "turbo",
+    translate = false,
+    device = "cpu",
+    threads = null,
+    onOutput = null,
+    language = "auto",
+  } = {}
 ) {
   const startedAt = Date.now();
   const outputDir = path.dirname(filePath);
@@ -63,7 +70,9 @@ export async function transcribeFile(
 
   const wavPath = path.join(os.tmpdir(), `vno-whisper-${process.pid}-${Date.now()}.wav`);
   try {
+    announce("Converting to WAV...", onOutput);
     await convertToWav(ffmpeg, filePath, wavPath);
+    announce("Transcribing with whisper.cpp...", onOutput);
     await runWhisperCpp(binary.path, {
       wavPath,
       modelPath,
@@ -72,6 +81,7 @@ export async function transcribeFile(
       threads: threads || Math.max(1, os.cpus().length - 1),
       outputPrefix,
       onOutput,
+      language,
     });
   } finally {
     await fs.remove(wavPath).catch(() => {});
@@ -83,6 +93,17 @@ export async function transcribeFile(
   if (!stats || stats.mtimeMs < startedAt - 1000) {
     throw new Error(`whisper.cpp wrote no transcript for ${path.basename(filePath)}`);
   }
+}
+
+/**
+ * Announces the start of a phase (WAV conversion, then transcription) so a
+ * plain terminal run isn't silent for the whole file - previously the only
+ * feedback was whichever of whisper.cpp's stdout/stderr streams happened to
+ * carry output, so a run could sit with no visible progress at all.
+ */
+function announce(message, onOutput) {
+  if (onOutput) onOutput(message);
+  else console.log(chalk.dim(message));
 }
 
 /** Decodes any input format into the 16kHz mono s16 WAV whisper.cpp requires. */
@@ -108,7 +129,10 @@ function convertToWav(ffmpeg, inputPath, wavPath) {
 // of it just to report a failure would be a needless multi-megabyte retention.
 const MAX_KEPT_OUTPUT = 64 * 1024;
 
-function runWhisperCpp(binaryPath, { wavPath, modelPath, translate, device, threads, outputPrefix, onOutput }) {
+function runWhisperCpp(
+  binaryPath,
+  { wavPath, modelPath, translate, device, threads, outputPrefix, onOutput, language = "auto" }
+) {
   return new Promise((resolve, reject) => {
     const args = [
       "-m",
@@ -116,7 +140,7 @@ function runWhisperCpp(binaryPath, { wavPath, modelPath, translate, device, thre
       "-f",
       wavPath,
       "-l",
-      "auto",
+      language,
       "-ovtt",
       "-of",
       outputPrefix,
@@ -141,8 +165,10 @@ function runWhisperCpp(binaryPath, { wavPath, modelPath, translate, device, thre
       const text = d.toString();
       stderr = (stderr + text).slice(-MAX_KEPT_OUTPUT);
       // whisper.cpp logs backend selection and progress to stderr, so it's
-      // worth surfacing live even though it's also kept for the failure message.
+      // worth surfacing live (same as stdout) even though it's also kept for
+      // the failure message.
       if (onOutput) emitLines(text, onOutput);
+      else process.stdout.write(chalk.dim(text));
     });
     child.on("error", reject);
     child.on("close", (code) => {

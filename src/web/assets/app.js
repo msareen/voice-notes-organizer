@@ -3,6 +3,7 @@
   var NOTES = [];
   var CONFIG = {};
   var MODELS = [];
+  var LANGUAGES = [];
   var WHISPER = true;
   var FFMPEG = true;
   var selectedRel = null;
@@ -580,8 +581,14 @@
   /* ---- Settings ---- */
   document.getElementById("btnSettings").addEventListener("click", openSettings);
 
+  var LANGUAGE_LABELS = {
+    auto: "Auto-detect",
+    hi: "Hindi",
+    en: "English"
+  };
+
   function openSettings() {
-    var autoSel, modelSel, openSel, rememberSel, gpuSel;
+    var autoSel, modelSel, languageSel, openSel, rememberSel, gpuSel;
     modal({
       title: "Settings",
       message: null,
@@ -611,6 +618,14 @@
         modelSel = selectField(host, "Default whisper model",
           MODELS.map(function (m) { return { label: m, value: m }; }),
           CONFIG.defaultModel);
+
+        languageSel = selectField(host, "Transcription language",
+          LANGUAGES.map(function (l) { return { label: LANGUAGE_LABELS[l] || l, value: l }; }),
+          CONFIG.transcribeLanguage || "auto");
+        var lh = document.createElement("p");
+        lh.className = "hint";
+        lh.textContent = "Pin this if auto-detect keeps guessing the wrong language for you (e.g. Hindi heard as Urdu) - Hindi still handles English mixed in fine.";
+        host.appendChild(lh);
 
         var gpu = CONFIG.gpu || {};
         gpuSel = null;
@@ -648,6 +663,7 @@
         var patch = {
           autoTranslate: autoSel.value === "null" ? null : autoSel.value === "true",
           defaultModel: modelSel.value,
+          transcribeLanguage: languageSel.value,
           openWhenDone: openSel.value === "true",
           rememberDeletions: rememberSel.value === "true"
         };
@@ -869,6 +885,7 @@
       NOTES = state.notes;
       CONFIG = state.config;
       MODELS = state.models;
+      LANGUAGES = state.languages || [];
       WHISPER = state.whisper;
       FFMPEG = state.ffmpeg;
       document.getElementById("folderLabel").textContent = CONFIG.rootLabel;

@@ -42,6 +42,20 @@ doing nothing while it downloads — that's expected. See [Installing
 whisper.cpp](#installing-whispercpp) for exactly where they live and how to
 pre-fetch or inspect them with `vno setup --list-models`.
 
+## Pinning the language
+
+whisper.cpp auto-detects the spoken language per file by default. That works
+well in general, but its detector can confuse two acoustically close
+languages — Hindi and Urdu are the classic case — and flip between them from
+one recording to the next.
+
+If that's happening to you, pin
+[`transcribeLanguage`](configuration.md#transcribelanguage) to the language
+you actually speak (`vno setting` → *Transcription language*, or the UI's
+Settings dialog). Setting it to Hindi still transcribes English words mixed
+into Hindi speech correctly, so it also covers a "mostly Hindi with some
+English" preference — you don't need a separate setting for the English bits.
+
 ## Installing whisper.cpp
 
 `vno setup` installs a prebuilt or freshly-built `whisper.cpp` binary,

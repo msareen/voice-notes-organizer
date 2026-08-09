@@ -32,6 +32,10 @@ const MIME = {
 };
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
+// "auto" lets whisper.cpp detect per file; a pinned code is the fix for
+// languages its detector confuses for one another (Hindi/Urdu is the classic
+// case) - see lib/config.js:transcribeLanguage.
+const LANGUAGES = ["auto", "hi", "en"];
 
 // Resolved against this module, not the cwd, since vno is usually installed
 // globally and run from wherever the user happens to be.
@@ -247,6 +251,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         rootLabel: path.basename(target) || "voice notes",
         autoTranslate: currentConfig.autoTranslate ?? null,
         defaultModel: currentConfig.defaultModel || "turbo",
+        transcribeLanguage: currentConfig.transcribeLanguage || "auto",
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
         // Only the answer is the browser's to change; the backend itself is
@@ -262,6 +267,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         configPath: configFilePath(),
       },
       models: MODELS,
+      languages: LANGUAGES,
       ...(await dependencyStatus()),
       job,
     };
@@ -352,6 +358,9 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     if ("autoTranslate" in patch) currentConfig.autoTranslate = patch.autoTranslate;
     if ("defaultModel" in patch && MODELS.includes(patch.defaultModel)) {
       currentConfig.defaultModel = patch.defaultModel;
+    }
+    if ("transcribeLanguage" in patch && LANGUAGES.includes(patch.transcribeLanguage)) {
+      currentConfig.transcribeLanguage = patch.transcribeLanguage;
     }
     if ("openWhenDone" in patch) currentConfig.openWhenDone = Boolean(patch.openWhenDone);
     if ("rememberDeletions" in patch) currentConfig.rememberDeletions = Boolean(patch.rememberDeletions);
@@ -519,6 +528,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
    */
   function whisperRunner({ model, translate }) {
     let device = resolveAccel(currentConfig);
+    const language = currentConfig.transcribeLanguage || "auto";
     if (device !== "cpu") {
       const accel = accelState(currentConfig);
       jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
@@ -527,7 +537,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
 
     return async function run(file) {
       try {
-        await transcribeFile(file, { model, translate, device, onOutput: (line) => jobLog(line) });
+        await transcribeFile(file, { model, translate, device, language, onOutput: (line) => jobLog(line) });
         return;
       } catch (err) {
         if (device === "cpu" || !isDeviceError(err.message)) throw err;
@@ -535,7 +545,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         jobLog("Falling back to the CPU for the rest of this job.");
         device = "cpu";
       }
-      await transcribeFile(file, { model, translate, device: "cpu", onOutput: (line) => jobLog(line) });
+      await transcribeFile(file, { model, translate, device: "cpu", language, onOutput: (line) => jobLog(line) });
     };
   }
 

@@ -26,6 +26,12 @@ function defaultConfig() {
     // Default whisper model used for auto-translation and as the pre-selected
     // choice in the transcribe picker.
     defaultModel: "turbo",
+    // Language whisper.cpp is told to expect, as an ISO-639-1 code, or "auto"
+    // to let it detect per file. Worth pinning for speakers of acoustically
+    // similar languages whisper.cpp's auto-detect confuses (Hindi/Urdu is the
+    // classic case) - forcing "hi" still transcribes code-switched English
+    // fine, so this is also the fix for "mostly Hindi with English mixed in".
+    transcribeLanguage: "auto",
     // Whether recordings deleted through vno (the UI's delete/cleanup, and
     // `vno cleanup`) are remembered in ~/.vno/deleted.json so a later import
     // doesn't copy them back off a device that still has them. Turning this

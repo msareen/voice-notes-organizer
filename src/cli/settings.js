@@ -9,6 +9,14 @@ import { prompt, CANCELLED } from "./prompt.js";
 import { runSetup } from "./setup.js";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
+// "auto" lets whisper.cpp detect per file; a pinned code fixes languages its
+// detector confuses for one another (Hindi/Urdu is the classic case).
+const LANGUAGES = [
+  { name: "Auto-detect", value: "auto" },
+  { name: "Hindi", value: "hi" },
+  { name: "English", value: "en" },
+  { name: "Custom (type a whisper.cpp language code)", value: "custom" },
+];
 
 const onOffLabel = (value) => (value ? chalk.green("on") : chalk.red("off"));
 
@@ -55,6 +63,7 @@ export async function runSettings() {
         choices: [
           { name: `Auto-translate imports  ${chalk.dim("[" )}${autoTranslateLabel(config.autoTranslate)}${chalk.dim("]")}`, value: "autoTranslate" },
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
+          { name: `Transcription language  ${chalk.dim(`[${config.transcribeLanguage || "auto"}]`)}`, value: "language" },
           { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
@@ -113,6 +122,34 @@ export async function runSettings() {
       ]);
       if (res !== CANCELLED) {
         config.defaultModel = res.value;
+        await saveConfig(config);
+      }
+    } else if (answer.action === "language") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "Language whisper.cpp should expect (pin this if auto-detect confuses two languages you speak, e.g. Hindi heard as Urdu)",
+          default: LANGUAGES.some((l) => l.value === config.transcribeLanguage) ? config.transcribeLanguage : "custom",
+          choices: LANGUAGES,
+          loop: false,
+        },
+      ]);
+      if (res !== CANCELLED) {
+        let value = res.value;
+        if (value === "custom") {
+          const custom = await prompt([
+            {
+              type: "input",
+              name: "code",
+              message: "whisper.cpp language code (e.g. hi, en, ur)",
+              default: config.transcribeLanguage && config.transcribeLanguage !== "auto" ? config.transcribeLanguage : "",
+            },
+          ]);
+          if (custom === CANCELLED || !custom.code.trim()) continue;
+          value = custom.code.trim().toLowerCase();
+        }
+        config.transcribeLanguage = value;
         await saveConfig(config);
       }
     } else if (answer.action === "gpu") {

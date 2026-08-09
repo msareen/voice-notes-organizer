@@ -615,14 +615,18 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         try {
           await runWhisper(full);
           done++;
-          jobLog(`Saved ${rel.replace(/\.[^.]+$/, ".vtt")}`);
+          const savedTo = rel.replace(/\.[^.]+$/, ".vtt");
+          jobLog(`Saved ${savedTo}`);
+          console.log(chalk.green(`Saved -> ${savedTo}`));
         } catch (err) {
           jobLog(`FAILED ${rel}: ${err.message}`);
           console.log(chalk.red(`Failed to transcribe ${rel}: ${err.message}`));
         }
         jobProgress(done);
       }
-      jobProgress(done, `${translate ? "Translated" : "Transcribed"} ${done}/${rels.length} file(s)`);
+      const summary = `${translate ? "Translated" : "Transcribed"} ${done}/${rels.length} file(s)`;
+      jobProgress(done, summary);
+      console.log(chalk.cyan(summary));
       await endJob(null);
     })().catch((err) => endJob(err));
   }

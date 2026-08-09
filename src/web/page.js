@@ -18,6 +18,7 @@ export function renderPage({ rootLabel, token }) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Voice Notes · ${folderName}</title>
+<link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>

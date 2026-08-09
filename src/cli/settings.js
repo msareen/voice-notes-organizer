@@ -5,6 +5,7 @@ import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { checkDependencies } from "../lib/setup.js";
 import { accelState } from "../lib/whisper.js";
+import { resolveModel } from "../lib/whispercpp.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runSetup } from "./setup.js";
 
@@ -110,13 +111,21 @@ export async function runSettings() {
         await saveConfig(config);
       }
     } else if (answer.action === "model") {
+      // Marks each option with whether it's already downloaded, so picking one
+      // that isn't doesn't silently kick off a gigabyte download mid-run.
+      const modelChoices = await Promise.all(
+        MODELS.map(async (m) => ({
+          name: `${m}${(await resolveModel(m)) ? chalk.dim(" (downloaded)") : chalk.dim(" (will download)")}`,
+          value: m,
+        }))
+      );
       const res = await prompt([
         {
           type: "list",
           name: "value",
           message: "Default whisper model",
           default: config.defaultModel || "turbo",
-          choices: MODELS,
+          choices: modelChoices,
           loop: false,
         },
       ]);

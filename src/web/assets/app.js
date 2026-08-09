@@ -3,6 +3,7 @@
   var NOTES = [];
   var CONFIG = {};
   var MODELS = [];
+  var MODEL_AVAILABILITY = {};
   var LANGUAGES = [];
   var WHISPER = true;
   var FFMPEG = true;
@@ -298,11 +299,12 @@
     });
   }
 
-  function chip(label, value) {
+  function chip(label, value, valueId) {
     var c = document.createElement("span");
     c.className = "chip";
     c.appendChild(document.createTextNode(label + " "));
     var b = document.createElement("b");
+    if (valueId) b.id = valueId;
     b.textContent = value;
     c.appendChild(b);
     return c;
@@ -360,7 +362,7 @@
     var readout = document.createElement("div");
     readout.className = "readout-line";
     if (note.dateStr) readout.appendChild(chip("REC", note.dateStr + " " + note.timeStr));
-    readout.appendChild(chip("LEN", fmtDur(note.durationSec)));
+    readout.appendChild(chip("LEN", fmtDur(note.durationSec), "lenChipValue"));
     readout.appendChild(chip("SIZE", fmtSize(note.size)));
     readout.appendChild(chip("FMT", extOf(note.name)));
     body.appendChild(readout);
@@ -382,6 +384,32 @@
 
     placeholder.classList.add("hidden");
     body.classList.remove("hidden");
+
+    refreshSelected(rel);
+  }
+
+  /**
+   * The list is built from a cached duration (fast startup on a big library -
+   * see lib/notesCache.js), so it can be stale. Selecting a note is the one
+   * moment worth paying for a fresh ffprobe: rechecks just this file and
+   * patches the displayed duration + transcript in place, without touching
+   * the <audio> element so playback in progress isn't interrupted.
+   */
+  function refreshSelected(rel) {
+    api("/api/notes/refresh", { method: "POST", body: { rel: rel } })
+      .then(function (res) {
+        mergeNote(res.note);
+        renderList();
+        if (selectedRel !== rel) return;
+        var lenChip = document.getElementById("lenChipValue");
+        if (lenChip) lenChip.textContent = fmtDur(res.note.durationSec);
+        var transcriptHost = document.getElementById("transcript");
+        var audio = body.querySelector("audio");
+        if (transcriptHost && audio) renderTranscript(transcriptHost, res.note, audio);
+      })
+      .catch(function () {
+        // A stale cached duration/transcript isn't worth surfacing an error for.
+      });
   }
 
   function showPlaceholder(message) {
@@ -587,6 +615,16 @@
     en: "English"
   };
 
+  // Marks each model option with whether it's already downloaded, so picking
+  // one that isn't doesn't silently kick off a gigabyte download.
+  function modelOptions() {
+    return MODELS.map(function (m) {
+      var known = Object.prototype.hasOwnProperty.call(MODEL_AVAILABILITY, m);
+      var tag = known ? (MODEL_AVAILABILITY[m] ? "downloaded" : "will download") : "";
+      return { label: tag ? m + " (" + tag + ")" : m, value: m };
+    });
+  }
+
   function openSettings() {
     var autoSel, modelSel, languageSel, openSel, rememberSel, gpuSel;
     modal({
@@ -616,7 +654,7 @@
         ], String(CONFIG.autoTranslate));
 
         modelSel = selectField(host, "Default whisper model",
-          MODELS.map(function (m) { return { label: m, value: m }; }),
+          modelOptions(),
           CONFIG.defaultModel);
 
         languageSel = selectField(host, "Transcription language",
@@ -885,6 +923,7 @@
       NOTES = state.notes;
       CONFIG = state.config;
       MODELS = state.models;
+      MODEL_AVAILABILITY = state.modelAvailability || {};
       LANGUAGES = state.languages || [];
       WHISPER = state.whisper;
       FFMPEG = state.ffmpeg;
@@ -1020,7 +1059,7 @@
           };
         }));
         modelSel = selectField(host, "Whisper model",
-          MODELS.map(function (m) { return { label: m, value: m }; }),
+          modelOptions(),
           CONFIG.defaultModel);
         translateChk = checkbox(host, "Translate to English instead of a verbatim transcript", false);
       },

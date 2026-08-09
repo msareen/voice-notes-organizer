@@ -5,6 +5,7 @@ import { loadConfig } from "../lib/config.js";
 import { findAudioFiles } from "../lib/sync.js";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
 import { transcribeFile, resolveAccel, accelState, isDeviceError, lastLine } from "../lib/whisper.js";
+import { resolveModel } from "../lib/whispercpp.js";
 import { ensureDependencies } from "./setup.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
 import { prompt, CANCELLED } from "./prompt.js";
@@ -241,12 +242,21 @@ export async function runTranscribe({ model, file, filter, translate = false, op
 
   let chosenModel = model;
   if (!chosenModel) {
+    // Marks each option with whether it's already downloaded, so picking one
+    // that isn't doesn't silently kick off a gigabyte download mid-run.
+    const modelNames = ["turbo", "tiny", "base", "small", "medium", "large"];
+    const choices = await Promise.all(
+      modelNames.map(async (m) => ({
+        name: `${m}${(await resolveModel(m)) ? chalk.dim(" (downloaded)") : chalk.dim(" (will download)")}`,
+        value: m,
+      }))
+    );
     const answer = await prompt([
       {
         type: "list",
         name: "model",
         message: "Whisper model to use (Esc to quit)",
-        choices: ["turbo", "tiny", "base", "small", "medium", "large"],
+        choices,
         default: config.defaultModel || "turbo",
         loop: false,
       },

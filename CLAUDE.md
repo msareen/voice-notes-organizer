@@ -74,8 +74,11 @@ was deleted, so those recordings import again if the device still has them.
 ### `vno visualize` (`v`, `--v`)
 Serves the browser UI on loopback and blocks until the tab closes, the page's Quit
 button is used, or Ctrl+C. Everything the CLI does is available in the page. Building
-the note model up front costs an ffprobe per recording, so a progress bar (count +
-current folder) runs until the server is up, then clears itself.
+the note model up front needs an ffprobe per recording for duration, but that's cached
+on disk keyed by size+mtime (`lib/notesCache.js`), so only new or changed files pay for
+it after the first run — a progress bar (count + current folder) still runs until the
+server is up, then clears itself, since a cold run or a large delta can still take a
+moment.
 
 | Flag | Effect |
 | --- | --- |
@@ -214,9 +217,17 @@ before changing the API surface.
   even on an accelerator-capable build. A failure mid-run just retries that
   file (and the rest of the run) on the CPU — there's nothing to invalidate
   in config, since re-checking the backend is free.
-- **Notes are cached in the server closure.** Building the model costs an ffprobe per
-  file, so it is rebuilt only when something changes it, then broadcast over SSE
-  (`refreshNotes()`).
+- **Notes are cached in the server closure, and durations are cached again on disk.**
+  The in-memory `notes` array is rebuilt only when something changes it, then broadcast
+  over SSE (`refreshNotes()`). Within a rebuild, `buildNotes` (`lib/notes.js`) skips the
+  ffprobe duration call for any file whose size+mtime match what's recorded in
+  `lib/notesCache.js` (`~/.vno/notes-cache/<hash of target>.json`) — the only thing worth
+  caching, since it's the one field that costs a process spawn rather than a stat or a
+  small file read. Selecting a note in the browser calls `POST /api/notes/refresh`
+  (`refreshNote` in `lib/notes.js`), which bypasses the cache for that one file — a
+  single ffprobe — updates the shared note object in place, and patches the disk cache,
+  so a file changed outside vno doesn't show stale data indefinitely without forcing a
+  full rescan.
 - **One job at a time.** `guardJob()` returns `409 Busy` for a second start. Job output
   streams line-by-line to the page log.
 - **A zero exit code still gets a freshness check.** whisper.cpp's exit code is

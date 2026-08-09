@@ -75,10 +75,11 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
-| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `openWhenDone`, `rememberDeletions`, `useGpu` |
+| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `useGpu` |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
 | `/api/transcript` | PUT | Save an edited transcript (cues or plain text) |
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |
+| `/api/notes/refresh` | POST | Recheck one note against disk (bypasses the duration cache) |
 | `/api/transcribe` | POST | Start a transcription job |
 | `/api/volumes` | GET | Detected volumes plus configured sources |
 | `/api/browse` | GET | List subfolders of a volume, one level |
@@ -92,8 +93,13 @@ folder and rejects anything that escapes it.
 
 ## Design notes worth knowing before you change things
 
-- **Notes are cached.** Building the model costs an ffprobe per file, so it's
-  rebuilt only when something actually changes it, then broadcast over SSE.
+- **Notes are cached, twice.** The in-memory model is rebuilt only when
+  something actually changes it, then broadcast over SSE. Within a rebuild,
+  the slow part (an ffprobe per file for duration) is itself cached on disk
+  keyed by size+mtime (`lib/notesCache.js`), so only new or changed files pay
+  for it. Selecting a note in the browser triggers `POST /api/notes/refresh`,
+  a one-file recheck that bypasses the cache, so a file changed outside vno
+  doesn't show stale data until the next full rebuild.
 - **One job at a time.** A second start returns `409 Busy`. Jobs stream their
   output line by line to the page's log panel; the last 200 lines are kept.
 - **Dependency probing never runs the thing it's checking for.** `lib/setup.js`

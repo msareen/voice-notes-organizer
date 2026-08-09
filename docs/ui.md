@@ -136,6 +136,7 @@ want to keep, and a confirmation before deleting. Matching `.vtt` / `.srt` /
 The settings that are also offered by `vno setting`:
 [`autoTranslate`](configuration.md#autotranslate) (on / off / ask each time),
 [`defaultModel`](configuration.md#defaultmodel),
+[`transcribeLanguage`](configuration.md#transcribelanguage),
 [GPU acceleration](configuration.md#accel),
 [`openWhenDone`](configuration.md#openwhendone), and
 [`rememberDeletions`](configuration.md#rememberdeletions). The **target folder**

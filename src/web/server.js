@@ -5,13 +5,14 @@ import { URL } from "node:url";
 import fs from "fs-extra";
 import chalk from "chalk";
 import { saveConfig, configFilePath } from "../lib/config.js";
-import { buildNotes, readTranscript, findTranscript, TRANSCRIPT_EXTS } from "../lib/notes.js";
+import { buildNotes, readTranscript, findTranscript, TRANSCRIPT_EXTS, refreshNote } from "../lib/notes.js";
 import { renderPage } from "./page.js";
 import { parseCues, serializeCues } from "../lib/vtt.js";
 import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume, findAudioFiles } from "../lib/sync.js";
 import { transcribeFile, resolveAccel, accelState, accelUnasked, isDeviceError, lastLine } from "../lib/whisper.js";
+import { resolveModel } from "../lib/whispercpp.js";
 import { checkDependencies } from "../lib/setup.js";
 import { recordDeletions } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
@@ -43,6 +44,7 @@ const ASSET_DIR = new URL("./assets/", import.meta.url);
 const ASSETS = {
   "app.css": "text/css; charset=utf-8",
   "app.js": "text/javascript; charset=utf-8",
+  "icon.svg": "image/svg+xml",
 };
 
 /**
@@ -212,6 +214,9 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       case "/api/notes/delete POST":
         return deleteNote(res, body);
 
+      case "/api/notes/refresh POST":
+        return refreshNoteRoute(res, body);
+
       case "/api/transcribe POST":
         return startTranscribe(res, body);
 
@@ -243,6 +248,16 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     return { ffmpeg: ffmpeg.found, whisper: whisper.found };
   }
 
+  // Whether each model is already downloaded, so the picker can say so rather
+  // than the user finding out only once a transcribe job starts downloading
+  // a gigabyte in the background. Cheap: resolveModel only stats + reads a
+  // 4-byte header per candidate path, no network.
+  async function modelAvailability() {
+    const availability = {};
+    for (const m of MODELS) availability[m] = (await resolveModel(m)) !== null;
+    return availability;
+  }
+
   async function stateResponse() {
     return {
       notes,
@@ -267,6 +282,7 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         configPath: configFilePath(),
       },
       models: MODELS,
+      modelAvailability: await modelAvailability(),
       languages: LANGUAGES,
       ...(await dependencyStatus()),
       job,
@@ -422,6 +438,23 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
 
     Object.assign(note, await readTranscript(audio));
     console.log(chalk.dim(`Transcript saved from the browser: ${body.rel}`));
+    return sendJson(res, 200, { note });
+  }
+
+  /**
+   * The startup scan trusts a cached duration keyed by size+mtime (fast on a
+   * big library - see lib/notes.js:buildNotes), which can go stale if a file
+   * was replaced without vno noticing. Selecting a note in the browser calls
+   * this to recheck just that one file - a single ffprobe, not a full rescan -
+   * and patches the shared `notes` array in place via the same object
+   * reference `noteFor` hands out elsewhere.
+   */
+  async function refreshNoteRoute(res, body) {
+    const note = noteFor(body.rel);
+    if (!note) return sendJson(res, 404, { error: "Unknown note" });
+    const audio = resolveInside(body.rel);
+    if (!audio) return sendJson(res, 400, { error: "Path outside the target folder" });
+    Object.assign(note, await refreshNote(target, audio));
     return sendJson(res, 200, { note });
   }
 

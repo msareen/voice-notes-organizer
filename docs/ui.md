@@ -63,7 +63,7 @@ exists.
 
 | Button | What it does |
 | --- | --- |
-| **Open file location** | Reveals the file in Explorer / Finder, selected |
+| **Open file location** | Opens the file's containing folder in Explorer / Finder |
 | **Transcribe** / **Re-transcribe** | Opens the transcribe dialog for just this take |
 | **Edit transcript** | Opens the in-page editor (below) |
 | **Delete** | Deletes the audio *and* its transcript sidecars, after a confirmation |

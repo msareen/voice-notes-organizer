@@ -343,13 +343,13 @@ Explorer on Windows, Finder on macOS, whatever `xdg-open` picks on Linux.
 
 ```bash
 vno explore                   # open the target folder
-vno explore 250810_1328       # open its folder with that recording selected
+vno explore 250810_1328       # open the folder that recording lives in
 vno open 250810_1328.mp3      # same thing
 ```
 
 | Argument | Effect |
 | --- | --- |
-| `[file]` | Reveal this recording with the file selected, instead of just opening the target folder. Resolved like `-f` elsewhere: absolute path, path relative to the target, a bare filename with or without its extension, or a unique substring |
+| `[file]` | Open this recording's containing folder instead of the target folder. Resolved like `-f` elsewhere: absolute path, path relative to the target, a bare filename with or without its extension, or a unique substring |
 
 The path is printed before the window opens, so you still have something to
 copy if your desktop has no file manager to hand. Naming a file that matches
@@ -357,8 +357,11 @@ nothing — or matches several recordings — prints the same explanation
 `transcribe -f` and `cleanup -f` do, and exits non-zero without opening
 anything.
 
-Linux has no portable "select this file" verb, so there `vno explore <file>`
-opens the containing folder without highlighting the file.
+`vno explore <file>` opens the containing folder rather than highlighting the
+file itself — selecting a specific item depends on the file manager building
+shell context info for it, which a broken or unreachable third-party shell
+extension (cloud-sync tools are common offenders) can make fail silently on
+some machines, so it's dropped in favor of something that always works.
 
 The browser UI has the same thing on its **Explore** button, plus a `⧉` on each
 device group and *Open file location* on each take.

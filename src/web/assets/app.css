@@ -54,8 +54,8 @@ body {
 }
 .spacer { flex: 1 1 auto; min-width: 0; }
 .readout { display: flex; gap: 22px; font-family: var(--mono); }
-.readout .stat { text-align: right; line-height: 1.15; }
-.readout .stat b { display: block; font-size: .95rem; font-weight: 600; color: var(--amber); }
+.readout .stat { display: flex; align-items: baseline; gap: 6px; }
+.readout .stat b { font-size: .95rem; font-weight: 600; color: var(--amber); }
 .readout .stat span {
   font-size: .58rem; letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
 }
@@ -252,6 +252,18 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .toast.err { border-color: rgba(255,82,82,.55); color: var(--rec); }
 .toast.ok { border-color: rgba(105,201,126,.5); }
+
+/* ---- Drag-and-drop import overlay ---- */
+.dropzone {
+  position: fixed; inset: 0; z-index: 50; pointer-events: none;
+  background: rgba(20,17,16,.82);
+  display: flex; align-items: center; justify-content: center;
+}
+.dropzone-msg {
+  border: 2px dashed var(--amber-line); border-radius: 14px;
+  padding: 34px 48px; font-family: var(--mono); font-size: .9rem;
+  letter-spacing: .04em; color: var(--amber); background: var(--amber-soft);
+}
 
 /* ---- Job strip: live progress for import / transcribe / cleanup ---- */
 .jobstrip {

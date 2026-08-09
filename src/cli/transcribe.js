@@ -4,8 +4,8 @@ import chalk from "chalk";
 import { loadConfig } from "../lib/config.js";
 import { findAudioFiles } from "../lib/sync.js";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
-import { transcribeFile } from "../lib/whisper.js";
-import { resolveDevice, gpuState, isDeviceError, forgetGpuProbe, lastLine } from "../lib/gpu.js";
+import { transcribeFile, resolveAccel, accelState, isDeviceError, lastLine } from "../lib/whisper.js";
+import { resolveModel } from "../lib/whispercpp.js";
 import { ensureDependencies } from "./setup.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
 import { prompt, CANCELLED } from "./prompt.js";
@@ -22,11 +22,11 @@ function transcriptPathFor(audioPath) {
  * interactive `transcribe` command and the auto-translate step of `import`.
  * Returns the number that succeeded. With `translate: true` the transcripts
  * are English translations rather than verbatim transcriptions.
- *
- * `config` is only needed so a GPU that stops working mid-run can be forgotten;
- * without it the run still falls back to the CPU, it just re-learns nothing.
  */
-export async function transcribeMany(files, { model = "turbo", translate = false, device = "cpu", config = null } = {}) {
+export async function transcribeMany(
+  files,
+  { model = "turbo", translate = false, device = "cpu", language = "auto" } = {}
+) {
   const gerund = translate ? "Translating" : "Transcribing";
   const verb = translate ? "translate" : "transcribe";
   let current = device;
@@ -34,26 +34,27 @@ export async function transcribeMany(files, { model = "turbo", translate = false
   for (const f of files) {
     console.log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
     try {
-      await transcribeFile(f, { model, translate, device: current });
+      await transcribeFile(f, { model, translate, device: current, language });
       console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
       continue;
     } catch (err) {
-      // A GPU that the cached probe says works can still fail here - a driver
-      // update, a reinstalled torch, or simply not enough VRAM for this model.
-      // Finishing the run on the CPU beats failing every remaining file.
-      if (current !== "cuda" || !isDeviceError(err.message)) {
+      // An accelerator build can still fail at runtime - a driver update, or
+      // simply not enough VRAM for this model. Finishing the run on the CPU
+      // beats failing every remaining file. Nothing to "forget": unlike the
+      // old torch probe, the backend is fixed by which binary was installed
+      // and re-checking it costs nothing, so there's no cache to invalidate.
+      if (current === "cpu" || !isDeviceError(err.message)) {
         console.log(chalk.red(`Failed to ${verb} ${path.basename(f)}: ${err.message}`));
         continue;
       }
-      console.log(chalk.yellow(`GPU run failed: ${lastLine(err.message)}`));
-      console.log(chalk.yellow("Falling back to the CPU for the rest of this run. Re-check it with `vno setup`."));
+      console.log(chalk.yellow(`Accelerator run failed: ${lastLine(err.message)}`));
+      console.log(chalk.yellow("Falling back to the CPU for the rest of this run."));
       current = "cpu";
-      if (config) await forgetGpuProbe(config);
     }
 
     try {
-      await transcribeFile(f, { model, translate, device: "cpu" });
+      await transcribeFile(f, { model, translate, device: "cpu", language });
       console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
     } catch (err) {
@@ -241,12 +242,21 @@ export async function runTranscribe({ model, file, filter, translate = false, op
 
   let chosenModel = model;
   if (!chosenModel) {
+    // Marks each option with whether it's already downloaded, so picking one
+    // that isn't doesn't silently kick off a gigabyte download mid-run.
+    const modelNames = ["turbo", "tiny", "base", "small", "medium", "large"];
+    const choices = await Promise.all(
+      modelNames.map(async (m) => ({
+        name: `${m}${(await resolveModel(m)) ? chalk.dim(" (downloaded)") : chalk.dim(" (will download)")}`,
+        value: m,
+      }))
+    );
     const answer = await prompt([
       {
         type: "list",
         name: "model",
         message: "Whisper model to use (Esc to quit)",
-        choices: ["turbo", "tiny", "base", "small", "medium", "large"],
+        choices,
         default: config.defaultModel || "turbo",
         loop: false,
       },
@@ -258,14 +268,19 @@ export async function runTranscribe({ model, file, filter, translate = false, op
     chosenModel = answer.model;
   }
 
-  const device = resolveDevice(config);
-  if (device === "cuda") {
-    const gpu = gpuState(config);
-    console.log(chalk.dim(`\nUsing GPU acceleration${gpu.name ? ` (${gpu.name})` : ""}.`));
-    if (gpu.use === null) console.log(chalk.dim("Turn it off any time with `vno setting`."));
+  const device = resolveAccel(config);
+  if (device !== "cpu") {
+    const accel = accelState(config);
+    console.log(chalk.dim(`\nUsing accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`));
+    if (accel.use === null) console.log(chalk.dim("Turn it off any time with `vno setting`."));
   }
 
-  const done = await transcribeMany(selected, { model: chosenModel, translate, device, config });
+  const done = await transcribeMany(selected, {
+    model: chosenModel,
+    translate,
+    device,
+    language: config.transcribeLanguage || "auto",
+  });
 
   const label = translate ? "Translated" : "Transcribed";
   console.log(chalk.bold(`\nDone. ${label} ${done}/${selected.length} file(s).`));

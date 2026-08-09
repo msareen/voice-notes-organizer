@@ -5,10 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `vno` — a local-first CLI + browser UI that imports voice recordings off removable
-volumes (Sony-style recorders, SD cards), transcribes them with the local `whisper`
-CLI, and lets you play/edit them in a browser. Everything runs on the user's machine;
-there is no server, database, or account. Transcripts are plain `.vtt` files written
-next to the audio.
+volumes (Sony-style recorders, SD cards), transcribes them with a local
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) binary, and lets you
+play/edit them in a browser. Everything runs on the user's machine; there is
+no server, database, account, Python, or PyTorch. Transcripts are plain
+`.vtt` files written next to the audio.
 
 ## Commands
 
@@ -21,7 +22,7 @@ node bin/vno.js               # import (default command)
 node bin/vno.js visualize     # browser UI; also `v` / `--v`
 node bin/vno.js transcribe    # also `t` / `--t`
 node bin/vno.js cleanup --dry-run
-node bin/vno.js setup         # check/install ffmpeg + whisper; also `doctor`
+node bin/vno.js setup         # check/install ffmpeg + whisper.cpp; also `doctor`
 node bin/vno.js config        # prints ~/.vno/config.json path
 ```
 
@@ -44,16 +45,16 @@ Ends by opening the UI when anything was imported.
 | `--no-open` | Don't launch the UI when the run finishes |
 
 ### `vno transcribe` (`t`, `--t`)
-Runs whisper over selected recordings, writing one `.vtt` next to each audio file.
-With no `-f`, opens a searchable picker (type to filter, `Space` toggles, `Ctrl+A`
-all, `Enter` confirms) listing only untranscribed files.
+Runs whisper.cpp over selected recordings, writing one `.vtt` next to each audio
+file. With no `-f`, opens a searchable picker (type to filter, `Space` toggles,
+`Ctrl+A` all, `Enter` confirms) listing only untranscribed files.
 
 | Flag | Effect |
 | --- | --- |
 | `-m, --model <model>` | `turbo` (default), `tiny`, `base`, `small`, `medium`, `large` |
 | `-f, --file [name]` | Transcribe one named file directly. **Bare `-f`** instead opens the picker over *every* file, including already-transcribed ones |
 | `-s, --filter <text>` | Pre-filter the picker by name or recorded date |
-| `--translate` | whisper's translate task (any language → English) instead of verbatim |
+| `--translate` | whisper.cpp's translate task (any language → English) instead of verbatim |
 | `--no-open` | Don't launch the UI when the run finishes |
 
 ### `vno cleanup`
@@ -73,8 +74,11 @@ was deleted, so those recordings import again if the device still has them.
 ### `vno visualize` (`v`, `--v`)
 Serves the browser UI on loopback and blocks until the tab closes, the page's Quit
 button is used, or Ctrl+C. Everything the CLI does is available in the page. Building
-the note model up front costs an ffprobe per recording, so a progress bar (count +
-current folder) runs until the server is up, then clears itself.
+the note model up front needs an ffprobe per recording for duration, but that's cached
+on disk keyed by size+mtime (`lib/notesCache.js`), so only new or changed files pay for
+it after the first run — a progress bar (count + current folder) still runs until the
+server is up, then clears itself, since a cold run or a large delta can still take a
+moment.
 
 | Flag | Effect |
 | --- | --- |
@@ -96,16 +100,30 @@ remember-deletions, plus resets for remembered volumes and the deletion ledger.
 Esc exits.
 
 ### `vno setup` (`doctor`)
-Reports whether `ffmpeg`, `ffprobe` and `whisper` are on PATH (with resolved
-paths) and offers to install what's missing via the machine's own package manager
-— winget/choco/scoop, brew/port, apt/dnf/yum/pacman/zypper/apk — with whisper from
-pip, Python first if there is none, and pipx as the fallback when the system Python
-is externally managed. Nothing installs without a confirmation. It's also the only
-place the CUDA probe runs, and where the offer to use a GPU is made.
+Reports whether `ffmpeg`/`ffprobe` are on PATH and whisper.cpp is installed
+(with resolved paths), and offers to install what's missing: ffmpeg via the
+machine's own package manager (winget/choco/scoop, brew/port,
+apt/dnf/yum/pacman/zypper/apk), whisper.cpp per-platform — `brew install
+whisper-cpp` on macOS (Metal automatically); on Windows, a GitHub release zip
+with a CUDA build matched to the driver's supported CUDA runtime (via
+`nvidia-smi`'s header, not a toolkit check — see `lib/whispercpp.js:detectAccelCandidate`)
+if there's an NVIDIA GPU, a BLAS-accelerated CPU build otherwise (no Vulkan
+asset exists, so non-NVIDIA GPUs get no acceleration); on Linux, a prebuilt
+CPU tarball, or a `cmake` source build if there's an NVIDIA GPU (no prebuilt
+Linux CUDA asset). If whisper.cpp isn't installed and neither `--local` nor
+`--global` was passed, asks where: local, global, or a path to one already
+installed (`registerExternalBinary`, never copied into place). Nothing
+installs without a confirmation. Also fetches the default model set (`small`
++ `large-v3-turbo`) into `whisper-cpp/models/`, and reports (with an offer to
+delete) leftover `~/.cache/whisper/*.pt` files from a prior Python whisper
+install.
 
 | Flag | Effect |
 | --- | --- |
-| `--check` | Report only; never offer to install, never re-probe the GPU |
+| `--check` | Report only; installs and downloads nothing |
+| `--local` / `--global` | Install whisper.cpp beside this vno install or under the user's home directory, without asking |
+| `--model <name>` | Fetch just this model instead of the defaults |
+| `--list-models` | Print the model inventory and exit |
 
 ### `vno config`
 Prints the path to `~/.vno/config.json`.
@@ -151,9 +169,12 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
 - `src/cli/*` — one module per command, each exporting `run<Command>()`. `import.js`
   ends by handing off to `runVisualize()`, so `vno` blocks until the browser tab closes.
 - `src/lib/*` — domain logic and OS access: config, volume detection, the flat copy,
-  whisper, ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
-  `setup.js` (PATH lookup + per-OS install recipes for ffmpeg/whisper/Python) and
-  `gpu.js` (the CUDA probe and the device decision).
+  ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
+  `setup.js` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.js`
+  (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
+  model resolution/download/validation) and `whisper.js` (resolving the installed
+  binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
+  the binary, the accel-state helpers that replaced `gpu.js`).
 - `src/web/server.js` — the whole HTTP server: token gate, JSON API, SSE job stream,
   range-request media streaming. `page.js` emits the HTML shell and nothing else.
 - `src/web/assets/app.js` — the entire client, ~1200 lines of plain ES5-flavoured JS
@@ -168,38 +189,53 @@ before changing the API surface.
   server's `resolveInside()` converts it back to an absolute path and refuses anything
   escaping the target folder. Never build a filesystem path from client input any
   other way.
-- **External tools are detected by looking them up on PATH, never by running
-  them.** `lib/setup.js:which()` scans PATH itself (PATHEXT-aware, `lstat` so
-  Windows App Execution Aliases resolve). Running `whisper --help` boots Python and
-  torch and costs seconds, which is why the old probe had to be memoised; a lookup
-  is free, so the check runs at the start of every command that shells out and on
-  every `/api/state` with no cache to invalidate. It also resolves exactly the way
-  `spawn` will. `lib/setup.js` never prompts — the offer-and-install flow is
-  `cli/setup.js:ensureDependencies()`, which `transcribe`, `cleanup`'s duration
-  scan and import's auto-translate all call before starting work. The browser
-  can't install anything, so the page reports and points at `vno setup`.
-- **The GPU probe runs in `vno setup` and nowhere else.** `lib/gpu.js:probeGpu()`
-  boots Python to ask `torch.cuda.is_available()` — the only trustworthy answer,
-  since an NVIDIA card plus a CPU-only torch wheel is a common combination — which
-  costs seconds and so can never sit on a hot path the way the PATH lookup does.
-  The result is cached in `config.gpu` and, like the deletion ledger, is never
-  load-bearing: delete it and everything still runs on the CPU. `resolveDevice()`
-  is the single place the "use it unless the user said no" rule lives, because the
-  browser has nowhere to ask at job time. A GPU failure mid-run falls back to the
-  CPU and clears the cache so the next `vno setup` re-detects. `--device` and
-  `--fp16` are passed together and explicitly: fp16 is the point of a GPU and a
-  warning on a CPU.
-- **Notes are cached in the server closure.** Building the model costs an ffprobe per
-  file, so it is rebuilt only when something changes it, then broadcast over SSE
-  (`refreshNotes()`).
+- **External tools are detected by looking them up, never by running them.**
+  `lib/setup.js:which()` scans PATH itself (PATHEXT-aware, `lstat` so Windows
+  App Execution Aliases resolve), used for ffmpeg. `lib/whispercpp.js:resolveBinary()`
+  does the equivalent for whisper.cpp: checks the vendored `whisper-cpp/bin/`
+  in both install roots (local beside this vno install, global under the
+  user's home directory), then PATH under any of its binary names
+  (`whisper-cpp`, `whisper-cli`, `whisper-cli.exe`). Both are directory scans,
+  never executions, so the check runs at the start of every command that
+  shells out and on every `/api/state` with no cache to invalidate — and it
+  resolves exactly the way `spawn` will. `lib/setup.js`/`lib/whispercpp.js`
+  never prompt — the offer-and-install flow is `cli/setup.js:ensureDependencies()`,
+  which `transcribe`, `cleanup`'s duration scan and import's auto-translate all
+  call before starting work. The browser can't install anything, so the page
+  reports and points at `vno setup`.
+- **The accelerator backend is fixed at install time, not probed at
+  runtime.** Unlike the old Python/PyTorch path (which needed a slow torch
+  probe to answer "is CUDA usable?" because a CPU-only torch wheel was a
+  common trap), whisper.cpp's backend (CUDA/Metal/CPU — no Vulkan asset
+  exists, so non-NVIDIA GPUs get no acceleration) is baked into which binary
+  `vno setup` installed — recorded in `install.json`, read back
+  by `cli/setup.js:checkAccel()` into `config.accel`, which costs nothing and
+  so runs on every `vno setup`, not gated behind a slow-path flag.
+  `lib/whisper.js:resolveAccel()` is the single place the "use it unless the
+  user said no" rule lives, because the browser has nowhere to ask at job
+  time; `resolveAccel(config) !== "cpu"` decides, and `-ng` forces the CPU
+  even on an accelerator-capable build. A failure mid-run just retries that
+  file (and the rest of the run) on the CPU — there's nothing to invalidate
+  in config, since re-checking the backend is free.
+- **Notes are cached in the server closure, and durations are cached again on disk.**
+  The in-memory `notes` array is rebuilt only when something changes it, then broadcast
+  over SSE (`refreshNotes()`). Within a rebuild, `buildNotes` (`lib/notes.js`) skips the
+  ffprobe duration call for any file whose size+mtime match what's recorded in
+  `lib/notesCache.js` (`~/.vno/notes-cache/<hash of target>.json`) — the only thing worth
+  caching, since it's the one field that costs a process spawn rather than a stat or a
+  small file read. Selecting a note in the browser calls `POST /api/notes/refresh`
+  (`refreshNote` in `lib/notes.js`), which bypasses the cache for that one file — a
+  single ffprobe — updates the shared note object in place, and patches the disk cache,
+  so a file changed outside vno doesn't show stale data indefinitely without forcing a
+  full rescan.
 - **One job at a time.** `guardJob()` returns `409 Busy` for a second start. Job output
   streams line-by-line to the page log.
-- **whisper exiting 0 doesn't mean it transcribed anything.** Its CLI catches
-  per-file errors, prints `Skipping <file> due to ...` and carries on, so
-  `transcribeFile` checks for that line *and* for a freshly written `.vtt` before
-  resolving. The usual cause was Python encoding stdout with the Windows console
-  codepage and choking on non-Latin script, which is why the child runs with
-  `PYTHONIOENCODING=utf-8`.
+- **A zero exit code still gets a freshness check.** whisper.cpp's exit code is
+  reliable (unlike the old Python whisper, which could exit 0 having silently
+  skipped a file over a Windows console encoding bug — gone now that there's
+  no Python in the pipeline), but `transcribeFile` still verifies the `.vtt`
+  exists and is newer than when the run started before resolving, belt and
+  braces.
 - **Timed transcript saves never touch timings.** The editor sends text only; the
   server re-reads cues off disk and merges. A cue-count mismatch is a `409`.
 - **Imports are idempotent** by name + size (`resolveFlatDest`). Files land flat, one
@@ -242,7 +278,8 @@ before changing the API surface.
   the same events into job log lines and title updates — which is the whole reason
   `lib/` can't do the printing itself. `lib/sync.js:reporter()` wraps the callback so
   a display bug can never fail the work. Adding a new slow loop? Report, don't print.
-- Child processes (`whisper`, `ffprobe`, `pip`) always pass `windowsHide: true`.
+- Child processes (whisper.cpp, ffmpeg, ffprobe, `cmake`/`git` for a Linux
+  source build) always pass `windowsHide: true`.
 - Comments in this codebase explain *why* a non-obvious choice was made, not what the
   line does. Match that when adding code.
 - Cross-platform matters: macOS, Windows and Linux are all supported paths in

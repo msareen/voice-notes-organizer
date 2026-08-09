@@ -5,16 +5,16 @@ import { URL } from "node:url";
 import fs from "fs-extra";
 import chalk from "chalk";
 import { saveConfig, configFilePath } from "../lib/config.js";
-import { buildNotes, readTranscript, findTranscript, TRANSCRIPT_EXTS } from "../lib/notes.js";
+import { buildNotes, readTranscript, findTranscript, TRANSCRIPT_EXTS, refreshNote } from "../lib/notes.js";
 import { renderPage } from "./page.js";
 import { parseCues, serializeCues } from "../lib/vtt.js";
 import { openPath, revealInFolder } from "../lib/open.js";
 import { detectVolumes } from "../lib/volumes.js";
-import { syncVolume, findAudioFiles } from "../lib/sync.js";
-import { transcribeFile } from "../lib/whisper.js";
-import { resolveDevice, gpuState, gpuUnasked, isDeviceError, forgetGpuProbe, lastLine } from "../lib/gpu.js";
+import { syncVolume, findAudioFiles, AUDIO_EXTENSIONS, resolveFlatDest } from "../lib/sync.js";
+import { transcribeFile, resolveAccel, accelState, accelUnasked, isDeviceError, lastLine } from "../lib/whisper.js";
+import { resolveModel } from "../lib/whispercpp.js";
 import { checkDependencies } from "../lib/setup.js";
-import { recordDeletions } from "../lib/ledger.js";
+import { recordDeletions, loadDeletionMatcher } from "../lib/ledger.js";
 import { getDurationSeconds } from "../lib/media.js";
 
 const MIME = {
@@ -33,6 +33,10 @@ const MIME = {
 };
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
+// "auto" lets whisper.cpp detect per file; a pinned code is the fix for
+// languages its detector confuses for one another (Hindi/Urdu is the classic
+// case) - see lib/config.js:transcribeLanguage.
+const LANGUAGES = ["auto", "hi", "en"];
 
 // Resolved against this module, not the cwd, since vno is usually installed
 // globally and run from wherever the user happens to be.
@@ -40,6 +44,7 @@ const ASSET_DIR = new URL("./assets/", import.meta.url);
 const ASSETS = {
   "app.css": "text/css; charset=utf-8",
   "app.js": "text/javascript; charset=utf-8",
+  "icon.svg": "image/svg+xml",
 };
 
 /**
@@ -168,6 +173,12 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     // An allowlist rather than path juggling, so traversal isn't a question.
     if (route.startsWith("/assets/")) return serveAsset(res, route.slice(8));
 
+    // Dropped-file uploads stream raw bytes, not JSON, and can be well past
+    // readBody's 5MB cap - handled before the generic body read below, with
+    // its own token check off the query string (fetch can't set a header on
+    // a body-carrying request without a CORS preflight round trip here).
+    if (route === "/api/upload" && req.method === "POST") return handleUpload(req, res, url.searchParams);
+
     // Everything below is token-gated. sendBeacon can't set headers, so a
     // token in the JSON body counts too.
     const body = req.method === "GET" || req.method === "HEAD" ? {} : await readBody(req);
@@ -209,6 +220,9 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       case "/api/notes/delete POST":
         return deleteNote(res, body);
 
+      case "/api/notes/refresh POST":
+        return refreshNoteRoute(res, body);
+
       case "/api/transcribe POST":
         return startTranscribe(res, body);
 
@@ -240,6 +254,16 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     return { ffmpeg: ffmpeg.found, whisper: whisper.found };
   }
 
+  // Whether each model is already downloaded, so the picker can say so rather
+  // than the user finding out only once a transcribe job starts downloading
+  // a gigabyte in the background. Cheap: resolveModel only stats + reads a
+  // 4-byte header per candidate path, no network.
+  async function modelAvailability() {
+    const availability = {};
+    for (const m of MODELS) availability[m] = (await resolveModel(m)) !== null;
+    return availability;
+  }
+
   async function stateResponse() {
     return {
       notes,
@@ -248,20 +272,24 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         rootLabel: path.basename(target) || "voice notes",
         autoTranslate: currentConfig.autoTranslate ?? null,
         defaultModel: currentConfig.defaultModel || "turbo",
+        transcribeLanguage: currentConfig.transcribeLanguage || "auto",
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
-        // Only the answer is the browser's to change; the probe itself is
-        // `vno setup`'s, since it costs seconds and the page can't run it.
+        // Only the answer is the browser's to change; the backend itself is
+        // fixed by whichever whisper.cpp build `vno setup` installed, since
+        // the page can't run an installer.
         gpu: {
-          checked: gpuState(currentConfig).device !== null,
-          available: gpuState(currentConfig).device === "cuda",
-          name: gpuState(currentConfig).name,
-          use: gpuState(currentConfig).use,
-          active: resolveDevice(currentConfig) === "cuda",
+          checked: accelState(currentConfig).backend !== null,
+          available: accelState(currentConfig).backend !== null && accelState(currentConfig).backend !== "cpu",
+          name: accelState(currentConfig).name,
+          use: accelState(currentConfig).use,
+          active: resolveAccel(currentConfig) !== "cpu",
         },
         configPath: configFilePath(),
       },
       models: MODELS,
+      modelAvailability: await modelAvailability(),
+      languages: LANGUAGES,
       ...(await dependencyStatus()),
       job,
     };
@@ -353,12 +381,16 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     if ("defaultModel" in patch && MODELS.includes(patch.defaultModel)) {
       currentConfig.defaultModel = patch.defaultModel;
     }
+    if ("transcribeLanguage" in patch && LANGUAGES.includes(patch.transcribeLanguage)) {
+      currentConfig.transcribeLanguage = patch.transcribeLanguage;
+    }
     if ("openWhenDone" in patch) currentConfig.openWhenDone = Boolean(patch.openWhenDone);
     if ("rememberDeletions" in patch) currentConfig.rememberDeletions = Boolean(patch.rememberDeletions);
-    // `useGpu` and not the whole gpu block: the probe result is server-owned,
-    // so a client can't claim a GPU this machine hasn't got.
+    // `useGpu` and not the whole accel block: the installed backend is
+    // server-owned, so a client can't claim an accelerator this machine
+    // hasn't got.
     if ("useGpu" in patch) {
-      currentConfig.gpu = { ...gpuState(currentConfig), use: Boolean(patch.useGpu) };
+      currentConfig.accel = { ...accelState(currentConfig), use: Boolean(patch.useGpu) };
     }
     await saveConfig(currentConfig);
     console.log(chalk.dim("Settings updated from the browser."));
@@ -412,6 +444,23 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
 
     Object.assign(note, await readTranscript(audio));
     console.log(chalk.dim(`Transcript saved from the browser: ${body.rel}`));
+    return sendJson(res, 200, { note });
+  }
+
+  /**
+   * The startup scan trusts a cached duration keyed by size+mtime (fast on a
+   * big library - see lib/notes.js:buildNotes), which can go stale if a file
+   * was replaced without vno noticing. Selecting a note in the browser calls
+   * this to recheck just that one file - a single ffprobe, not a full rescan -
+   * and patches the shared `notes` array in place via the same object
+   * reference `noteFor` hands out elsewhere.
+   */
+  async function refreshNoteRoute(res, body) {
+    const note = noteFor(body.rel);
+    if (!note) return sendJson(res, 404, { error: "Unknown note" });
+    const audio = resolveInside(body.rel);
+    if (!audio) return sendJson(res, 400, { error: "Path outside the target folder" });
+    Object.assign(note, await refreshNote(target, audio));
     return sendJson(res, 200, { note });
   }
 
@@ -509,31 +558,33 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
   /**
    * One job's whisper runs, sharing the device decision across its files.
    *
-   * The page has nowhere to ask at job time, so a GPU the user was never asked
-   * about is used and announced rather than left idle - the Settings dialog is
-   * where they turn it off. A GPU failure mid-job downgrades the rest of the
-   * job to the CPU and forgets the cached probe, so `vno setup` re-detects.
+   * The page has nowhere to ask at job time, so an accelerator the user was
+   * never asked about is used and announced rather than left idle - the
+   * Settings dialog is where they turn it off. A run that fails on the
+   * accelerator downgrades the rest of the job to the CPU; there's nothing to
+   * forget in config, since the backend is fixed by which binary is
+   * installed and re-checking it is free (unlike the old torch probe).
    */
   function whisperRunner({ model, translate }) {
-    let device = resolveDevice(currentConfig);
-    if (device === "cuda") {
-      const gpu = gpuState(currentConfig);
-      jobLog(`Using GPU acceleration${gpu.name ? ` (${gpu.name})` : ""}.`);
-      if (gpuUnasked(currentConfig)) jobLog("Turn this off in Settings if you'd rather stay on the CPU.");
+    let device = resolveAccel(currentConfig);
+    const language = currentConfig.transcribeLanguage || "auto";
+    if (device !== "cpu") {
+      const accel = accelState(currentConfig);
+      jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
+      if (accelUnasked(currentConfig)) jobLog("Turn this off in Settings if you'd rather stay on the CPU.");
     }
 
     return async function run(file) {
       try {
-        await transcribeFile(file, { model, translate, device, onOutput: (line) => jobLog(line) });
+        await transcribeFile(file, { model, translate, device, language, onOutput: (line) => jobLog(line) });
         return;
       } catch (err) {
-        if (device !== "cuda" || !isDeviceError(err.message)) throw err;
-        jobLog(`GPU run failed: ${lastLine(err.message)}`);
-        jobLog("Falling back to the CPU for the rest of this job. Re-check it with `vno setup`.");
+        if (device === "cpu" || !isDeviceError(err.message)) throw err;
+        jobLog(`Accelerator run failed: ${lastLine(err.message)}`);
+        jobLog("Falling back to the CPU for the rest of this job.");
         device = "cpu";
-        await forgetGpuProbe(currentConfig);
       }
-      await transcribeFile(file, { model, translate, device: "cpu", onOutput: (line) => jobLog(line) });
+      await transcribeFile(file, { model, translate, device: "cpu", language, onOutput: (line) => jobLog(line) });
     };
   }
 
@@ -570,14 +621,18 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         try {
           await runWhisper(full);
           done++;
-          jobLog(`Saved ${rel.replace(/\.[^.]+$/, ".vtt")}`);
+          const savedTo = rel.replace(/\.[^.]+$/, ".vtt");
+          jobLog(`Saved ${savedTo}`);
+          console.log(chalk.green(`Saved -> ${savedTo}`));
         } catch (err) {
           jobLog(`FAILED ${rel}: ${err.message}`);
           console.log(chalk.red(`Failed to transcribe ${rel}: ${err.message}`));
         }
         jobProgress(done);
       }
-      jobProgress(done, `${translate ? "Translated" : "Transcribed"} ${done}/${rels.length} file(s)`);
+      const summary = `${translate ? "Translated" : "Transcribed"} ${done}/${rels.length} file(s)`;
+      jobProgress(done, summary);
+      console.log(chalk.cyan(summary));
       await endJob(null);
     })().catch((err) => endJob(err));
   }
@@ -733,6 +788,81 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       jobProgress(job.total, `Imported ${imported.length} new note(s)`);
       await endJob(null);
     })().catch((err) => endJob(err));
+  }
+
+  const DROPPED_DIR_NAME = "Dropped";
+  const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // generous for a single recording
+
+  /**
+   * Drag-and-drop import: the browser POSTs one raw file per request (no
+   * multipart, no job system - this isn't a job, just a copy). Streamed
+   * straight to a temp file so a large recording never sits in memory, then
+   * handed through the same flat-destination dedup `syncVolume` uses so a
+   * file dropped twice doesn't duplicate. Lands in `target/Dropped/`,
+   * alongside the per-device folders regular import creates.
+   */
+  async function handleUpload(req, res, params) {
+    const supplied = req.headers["x-vno-token"] || params.get("t");
+    if (supplied !== token) {
+      req.resume();
+      return sendJson(res, 403, { error: "Invalid session token" });
+    }
+
+    const name = path.basename(String(params.get("name") || "")).trim();
+    const ext = path.extname(name).toLowerCase();
+    if (!name || !AUDIO_EXTENSIONS.has(ext)) {
+      req.resume();
+      return sendJson(res, 400, { error: `Unsupported file type: ${name || "(no name)"}` });
+    }
+
+    const destRoot = path.join(target, DROPPED_DIR_NAME);
+    await fs.ensureDir(destRoot);
+    const tmp = path.join(destRoot, `.upload-${crypto.randomBytes(8).toString("hex")}.tmp`);
+
+    let bytes = 0;
+    let failed = null;
+    await new Promise((resolve) => {
+      const out = fs.createWriteStream(tmp);
+      req.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > MAX_UPLOAD_BYTES) {
+          failed = failed || new Error("File too large");
+          req.destroy();
+        }
+      });
+      req.on("aborted", () => { failed = failed || new Error("Upload interrupted"); });
+      req.on("error", (err) => { failed = failed || err; });
+      out.on("error", (err) => { failed = failed || err; });
+      out.on("close", resolve);
+      req.pipe(out);
+    });
+
+    if (failed || bytes === 0) {
+      await fs.remove(tmp).catch(() => {});
+      return sendJson(res, 400, { error: failed ? failed.message : "Empty upload" });
+    }
+
+    try {
+      const isDeleted = await loadDeletionMatcher(target, { enabled: currentConfig.rememberDeletions !== false });
+      const { dest, skip, wasDeletedBefore } = await resolveFlatDest(destRoot, name, bytes, isDeleted);
+      if (skip) {
+        await fs.remove(tmp);
+        return sendJson(res, 200, { skipped: true, reason: wasDeletedBefore ? "previously deleted" : "already imported" });
+      }
+      await fs.move(tmp, dest, { overwrite: false });
+
+      const rel = path.relative(target, dest).split(path.sep).join("/");
+      const note = await refreshNote(target, dest);
+      notes = notes.filter((n) => n.rel !== rel);
+      notes.push(note);
+      notes.sort((a, b) => (b.dateMs ?? -Infinity) - (a.dateMs ?? -Infinity));
+      broadcast("notes", { count: notes.length });
+      console.log(chalk.dim(`Imported via drag-and-drop: ${rel}`));
+      return sendJson(res, 200, { rel, name: path.basename(dest) });
+    } catch (err) {
+      await fs.remove(tmp).catch(() => {});
+      return sendJson(res, 500, { error: err.message });
+    }
   }
 
   /* -------------------------------- cleanup ------------------------------ */

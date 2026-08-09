@@ -27,6 +27,12 @@ const SHORTCUTS = {
   "-t": "transcribe",
 };
 if (SHORTCUTS[process.argv[2]]) {
+  // -v/--v collides with the conventional "print version" flag, so anyone
+  // reaching for that habit gets pointed at the real thing instead of just
+  // silently landing in the browser UI.
+  if (process.argv[2] === "-v" || process.argv[2] === "--v") {
+    console.log(chalk.dim("(-v launches the browser UI here - run `vno --version` to see the installed version.)"));
+  }
   process.argv[2] = SHORTCUTS[process.argv[2]];
 }
 
@@ -138,11 +144,20 @@ program
   .command("setup")
   .alias("doctor")
   .description(
-    "Check that ffmpeg and whisper are installed and offer to install what's missing (alias: doctor)"
+    "Check that ffmpeg and whisper.cpp are installed and offer to install what's missing (alias: doctor)"
   )
   .option("--check", "only report what's installed; never offer to install anything")
+  .option("--local", "install whisper.cpp beside this vno install, without asking")
+  .option("--global", "install whisper.cpp under the user's home directory, without asking")
+  .option("--model <name>", "fetch just this model instead of the defaults")
+  .option("--list-models", "print the model inventory and exit; installs nothing")
   .action(async (opts) => {
-    await runSetup({ check: Boolean(opts.check) });
+    await runSetup({
+      check: Boolean(opts.check),
+      mode: opts.global ? "global" : opts.local ? "local" : null,
+      model: opts.model || null,
+      listModelsOnly: Boolean(opts.listModels),
+    });
   });
 
 program

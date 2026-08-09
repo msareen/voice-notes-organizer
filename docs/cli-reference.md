@@ -8,12 +8,12 @@ Everything here works unlinked too, as `node bin/vno.js <command>`.
 | Command | Aliases | What it does |
 | --- | --- | --- |
 | [`vno import`](#vno-import) | `vno` (default) | Detect volumes and import new recordings |
-| [`vno transcribe`](#vno-transcribe) | `vno t`, `vno --t`, `vno -t` | Transcribe or translate recordings with whisper |
+| [`vno transcribe`](#vno-transcribe) | `vno t`, `vno --t`, `vno -t` | Transcribe or translate recordings with whisper.cpp |
 | [`vno visualize`](#vno-visualize) | `vno v`, `vno --v`, `vno -v` | Launch the browser UI |
 | [`vno cleanup`](#vno-cleanup) | — | Delete very short recordings |
 | [`vno explore`](#vno-explore) | `vno open` | Open the target folder in Explorer / Finder |
 | [`vno setting`](#vno-setting) | `vno settings` | Interactive settings wizard |
-| [`vno setup`](#vno-setup) | `vno doctor` | Check ffmpeg + whisper, install what's missing |
+| [`vno setup`](#vno-setup) | `vno doctor` | Check ffmpeg + whisper.cpp, install what's missing |
 | [`vno config`](#vno-config) | — | Print the config file path |
 
 ---
@@ -77,8 +77,8 @@ The CLI then stays up serving that page until you close the tab.
 Aliases: `vno t`, `vno --t`, `vno -t`.
 
 Lists audio files in the target folder that don't have a transcript yet, lets
-you pick which to transcribe, and runs `whisper` on each. One file is written
-next to the audio: a timed `.vtt` (`note.m4a` → `note.vtt`).
+you pick which to transcribe, and runs whisper.cpp on each. One file is
+written next to the audio: a timed `.vtt` (`note.m4a` → `note.vtt`).
 
 ### The picker
 
@@ -107,7 +107,7 @@ a `.vtt`. Nothing is pre-selected in this mode (a reflex `Enter` would
 otherwise overwrite everything), and selecting a marked row asks for
 confirmation.
 
-> Whisper writes straight over the old file, so **hand-edits made in the
+> whisper.cpp writes straight over the old file, so **hand-edits made in the
 > transcript editor are lost** when you re-transcribe.
 
 Naming a file directly (`-f 250810_1328`) also re-transcribes it, without the
@@ -118,10 +118,10 @@ picker.
 | `-m, --model <name>` | Model to use: `turbo`, `tiny`, `base`, `small`, `medium`, `large`. Skips the prompt |
 | `-f, --file [name]` | Transcribe one specific file without the picker — full path, path relative to the target, bare filename (with or without extension), or a unique substring. **Passing `-f` with no value** switches the picker into re-transcribe mode |
 | `-s, --filter <text>` | Pre-seed the picker's live filter |
-| `--translate` | Produce an English translation (whisper's translate task) instead of a verbatim transcript |
+| `--translate` | Produce an English translation (whisper.cpp's translate task) instead of a verbatim transcript |
 | `--no-open` | Don't launch the browser UI when the run finishes |
 
-Before anything else it checks that `ffmpeg` and `whisper` are on your `PATH`,
+Before anything else it checks that `ffmpeg` and whisper.cpp are installed,
 and offers to install whichever is missing — the same check [`vno
 setup`](#vno-setup) runs. The check happens up front, not after you've picked
 files, because the picker shows durations that need `ffprobe`.
@@ -232,12 +232,12 @@ hand-editing `config.json`:
 
 - whether imports **auto-translate** (on / off / ask each time)
 - the default **whisper model**
-- **GPU acceleration** on or off (detecting one is `vno setup`'s job — this only
-  flips what was found)
+- **GPU acceleration** on or off (installing whisper.cpp with a matching
+  backend is `vno setup`'s job — this only flips what was found)
 - the **target** import folder
 - whether finished runs **launch the browser UI**
 - **forget all remembered volume choices**
-- **check ffmpeg + whisper** and install what's missing (runs [`vno
+- **check ffmpeg + whisper.cpp** and install what's missing (runs [`vno
   setup`](#vno-setup); the menu line shows the current state)
 
 Arrow keys to pick a setting, `Esc` to exit; changes save as you make them. Most
@@ -249,31 +249,37 @@ of these are also editable from the [UI's Settings dialog](ui.md#settings).
 
 Alias: `vno doctor`.
 
-Reports whether `ffmpeg`, `ffprobe` and `whisper` are on your `PATH` — with the
+Reports whether `ffmpeg`, `ffprobe` and whisper.cpp are installed — with the
 resolved path of each — then offers to install whatever is missing.
 
 ```bash
 vno setup
-vno setup --check     # report only, never offer to install
+vno setup --check         # report only, never offer to install
+vno setup --global        # install whisper.cpp under your home directory instead of beside vno
+vno setup --model small   # fetch just this model instead of the defaults
+vno setup --list-models   # print the model inventory and exit; installs nothing
 ```
 
 | Flag | Effect |
 | --- | --- |
-| `--check` | Print the status and stop. Installs nothing, asks nothing, doesn't re-probe the GPU |
+| `--check` | Print the status and stop. Installs and downloads nothing |
+| `--local` | Install whisper.cpp beside this vno install, without asking |
+| `--global` | Install whisper.cpp under `~/.whisper-cpp` (`%LOCALAPPDATA%\whisper-cpp` on Windows), without asking |
+| `--model <name>` | Fetch just this model instead of the default set (`small` + `turbo`) |
+| `--list-models` | Print the model inventory and exit |
 
-Once everything is installed, setup also asks torch whether this machine has a
-usable CUDA GPU, and offers to use it — see [GPU
-acceleration](transcription.md#gpu-acceleration). That probe boots Python, so it
-lives here and nowhere else; running `vno setup` again is how you re-detect after
-a driver or torch change. `--check` prints the last result instead.
+If whisper.cpp isn't installed and neither `--local` nor `--global` was
+passed, vno asks: install it locally, install it globally, or **point at one
+you already have** — a path to the binary itself, or to a folder containing
+it (searched for `whisper-cpp`, `whisper-cli` or `whisper-cli.exe`). Pointing
+at an existing install never copies anything; the path is recorded in
+`install.json` and used from wherever it is. You're also asked whether that
+build has GPU acceleration, since vno has no way to know without you telling
+it — "yes, or not sure" tries it and falls back to the CPU automatically if
+it fails.
 
-```
-  ✓ whisper  C:\Python312\Scripts\whisper.EXE
-  ✓ gpu      NVIDIA GeForce RTX 3060 Laptop GPU in use
-```
-
-Installs go through whatever package manager you already have, first match
-wins:
+ffmpeg installs through whatever package manager you already have on the
+machine, first match wins:
 
 | Platform | Tried in this order |
 | --- | --- |
@@ -281,23 +287,43 @@ wins:
 | macOS | Homebrew → MacPorts |
 | Linux | apt → dnf → yum → pacman → zypper → apk → Homebrew |
 
-Whisper always installs with `pip install -U openai-whisper` (`pip3`, `pip`, or
-`python -m pip`, whichever exists). If there's no Python at all, vno offers to
-install that first, through the same package manager. On a distro whose Python
-refuses to be installed into (Debian/Ubuntu's "externally managed
-environment"), it offers `pipx install openai-whisper` instead.
+whisper.cpp installs per-platform, not through a package manager (except on
+macOS, where Homebrew *is* the install): Homebrew on macOS; on Windows, a
+release zip with a CUDA build matched to your driver's supported CUDA
+runtime if you have an NVIDIA GPU, a BLAS-accelerated CPU build otherwise; on
+Linux, a prebuilt CPU binary, or a `cmake` source build if you have an
+NVIDIA GPU (there's no prebuilt Linux CUDA asset). See [Installing
+whisper.cpp](transcription.md#installing-whispercpp) for exactly what that
+does and where things land.
 
-**Nothing is installed without you confirming it.** You always see the exact
-command first, and can choose to run it yourself instead. Where a system
-package manager needs root, the command is prefixed with `sudo` — so you may be
-asked for your password; on Windows you may get a UAC prompt. In a
+```
+  ✓ whisper.cpp  D:\code\voice-note-organizer\whisper-cpp\bin\whisper-cli.exe
+  ✓ accel        NVIDIA GeForce RTX 3060 Laptop GPU in use
+```
+
+Because whisper.cpp's accelerator backend (CUDA/Metal/CPU) is fixed by
+which binary got installed, checking it costs nothing and happens on every
+`vno setup`, not just the first — unlike the old torch probe, there's no slow
+path to gate behind `--check`. Re-run `vno setup` after adding a GPU (or
+changing drivers) to pick up a better backend.
+
+**Nothing is installed without you confirming it.** You always see what's
+about to happen first, and can choose to do it yourself instead. Where a
+system package manager needs root, the command is prefixed with `sudo` — so
+you may be asked for your password; on Windows you may get a UAC prompt. In a
 non-interactive shell (a pipe, CI) vno prints the command and stops rather than
 asking a question nobody can answer.
 
 Afterwards vno re-reads your `PATH` — from the registry on Windows, and by
-adding the usual install directories elsewhere — so a freshly installed tool is
-usable in the same run instead of after a terminal restart. If it still isn't
-visible, vno says so rather than pretending it worked.
+adding the usual install directories elsewhere — so a freshly installed
+ffmpeg is usable in the same run instead of after a terminal restart. If it
+still isn't visible, vno says so rather than pretending it worked. (whisper.cpp
+itself is vendored under `whisper-cpp/bin/`, not put on `PATH`, so this
+doesn't apply to it.)
+
+If it finds leftover model files from the old Python whisper install
+(`~/.cache/whisper/*.pt` — often several gigabytes), it reports them and asks
+before deleting; whisper.cpp can't use them, so there's no reason to keep them.
 
 **This check runs by itself.** `vno transcribe`, `vno cleanup`'s duration scan,
 and an import that auto-translates all run it before starting work, so a
@@ -317,13 +343,13 @@ Explorer on Windows, Finder on macOS, whatever `xdg-open` picks on Linux.
 
 ```bash
 vno explore                   # open the target folder
-vno explore 250810_1328       # open its folder with that recording selected
+vno explore 250810_1328       # open the folder that recording lives in
 vno open 250810_1328.mp3      # same thing
 ```
 
 | Argument | Effect |
 | --- | --- |
-| `[file]` | Reveal this recording with the file selected, instead of just opening the target folder. Resolved like `-f` elsewhere: absolute path, path relative to the target, a bare filename with or without its extension, or a unique substring |
+| `[file]` | Open this recording's containing folder instead of the target folder. Resolved like `-f` elsewhere: absolute path, path relative to the target, a bare filename with or without its extension, or a unique substring |
 
 The path is printed before the window opens, so you still have something to
 copy if your desktop has no file manager to hand. Naming a file that matches
@@ -331,8 +357,11 @@ nothing — or matches several recordings — prints the same explanation
 `transcribe -f` and `cleanup -f` do, and exits non-zero without opening
 anything.
 
-Linux has no portable "select this file" verb, so there `vno explore <file>`
-opens the containing folder without highlighting the file.
+`vno explore <file>` opens the containing folder rather than highlighting the
+file itself — selecting a specific item depends on the file manager building
+shell context info for it, which a broken or unreachable third-party shell
+extension (cloud-sync tools are common offenders) can make fail silently on
+some machines, so it's dropped in favor of something that always works.
 
 The browser UI has the same thing on its **Explore** button, plus a `⧉` on each
 device group and *Open file location* on each take.

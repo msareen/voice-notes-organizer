@@ -20,7 +20,7 @@ src/
     setup.js   prompt.js  searchableCheckbox.js  progress.js
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.js  notes.js  sync.js  media.js  vtt.js
-    volumes.js  whisper.js  setup.js  open.js  ledger.js
+    volumes.js  whisper.js  whispercpp.js  setup.js  open.js  ledger.js
   web/               the browser UI behind `vno visualize`
     server.js        HTTP server: session token, JSON API, SSE job stream
     page.js          the HTML shell, and nothing else
@@ -36,9 +36,9 @@ so anything there is safe to reuse from either side.
 | `lib/config.js` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
 | `lib/volumes.js` | Per-OS removable-volume detection |
 | `lib/sync.js` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
-| `lib/whisper.js` | Probing for whisper and running a transcription |
-| `lib/setup.js` | Finding ffmpeg/whisper/pip on PATH, per-OS install recipes, running them, re-reading PATH |
-| `lib/gpu.js` | Asking torch whether CUDA is usable (once, from `vno setup`), and deciding which device a run uses |
+| `lib/whisper.js` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
+| `lib/whispercpp.js` | Installing whisper.cpp itself: `install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
+| `lib/setup.js` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.js` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.js` | Parse and serialize WebVTT cues |
 | `lib/notes.js` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
@@ -71,18 +71,20 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/` | GET | The page. Token required as `?t=` |
 | `/assets/{app.css,app.js}` | GET | Static assets. **Not** token-gated, by design |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
-| `/api/state` | GET | Notes, config, model list, `ffmpeg`/`whisper` availability, current job |
+| `/api/state` | GET | Notes, config, model list, `ffmpeg`/whisper.cpp availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
-| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `openWhenDone`, `rememberDeletions`, `useGpu` |
+| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `useGpu` |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
 | `/api/transcript` | PUT | Save an edited transcript (cues or plain text) |
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |
+| `/api/notes/refresh` | POST | Recheck one note against disk (bypasses the duration cache) |
 | `/api/transcribe` | POST | Start a transcription job |
 | `/api/volumes` | GET | Detected volumes plus configured sources |
 | `/api/browse` | GET | List subfolders of a volume, one level |
 | `/api/import` | POST | Start an import job |
+| `/api/upload` | POST | Drag-and-drop: stream one raw audio file to `Dropped/`. Not a job — token comes off the query string, since it's not a JSON body |
 | `/api/cleanup/scan` | GET | Recordings under a duration threshold |
 | `/api/cleanup` | POST | Delete the selected ones |
 
@@ -92,18 +94,24 @@ folder and rejects anything that escapes it.
 
 ## Design notes worth knowing before you change things
 
-- **Notes are cached.** Building the model costs an ffprobe per file, so it's
-  rebuilt only when something actually changes it, then broadcast over SSE.
+- **Notes are cached, twice.** The in-memory model is rebuilt only when
+  something actually changes it, then broadcast over SSE. Within a rebuild,
+  the slow part (an ffprobe per file for duration) is itself cached on disk
+  keyed by size+mtime (`lib/notesCache.js`), so only new or changed files pay
+  for it. Selecting a note in the browser triggers `POST /api/notes/refresh`,
+  a one-file recheck that bypasses the cache, so a file changed outside vno
+  doesn't show stale data until the next full rebuild.
 - **One job at a time.** A second start returns `409 Busy`. Jobs stream their
   output line by line to the page's log panel; the last 200 lines are kept.
-- **Dependency probing is a PATH lookup, never an execution.** `lib/setup.js`
-  scans `PATH` (honouring `PATHEXT`, and `lstat` so Windows App Execution
-  Aliases resolve) instead of running `whisper --help`, which boots Python and
-  torch and costs whole seconds. That's what makes the check affordable at the
-  start of every command and on every `/api/state`, with nothing to memoise or
-  invalidate — an install done in another terminal shows up on the next
-  refresh. It's also the same resolution `spawn` will do, so it predicts the
-  real outcome.
+- **Dependency probing never runs the thing it's checking for.** `lib/setup.js`
+  scans `PATH` for ffmpeg (honouring `PATHEXT`, and `lstat` so Windows App
+  Execution Aliases resolve); `lib/whispercpp.js:resolveBinary` checks the
+  vendored `whisper-cpp/bin/` in both install roots, then PATH. Both are
+  directory scans, not executions, which is what makes the check affordable
+  at the start of every command and on every `/api/state`, with nothing to
+  memoise or invalidate — an install done in another terminal shows up on the
+  next refresh. It's also the same resolution `spawn` will do, so it predicts
+  the real outcome.
 - **`lib/setup.js` decides, `cli/setup.js` asks.** Detection and install
   recipes are pure lib code; every prompt and every "shall I run this?" lives
   in the CLI module, which is what keeps the browser path able to use the

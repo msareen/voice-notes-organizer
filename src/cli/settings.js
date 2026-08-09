@@ -4,23 +4,33 @@ import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { checkDependencies } from "../lib/setup.js";
-import { gpuState } from "../lib/gpu.js";
+import { accelState } from "../lib/whisper.js";
+import { resolveModel } from "../lib/whispercpp.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runSetup } from "./setup.js";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
+// "auto" lets whisper.cpp detect per file; a pinned code fixes languages its
+// detector confuses for one another (Hindi/Urdu is the classic case).
+const LANGUAGES = [
+  { name: "Auto-detect", value: "auto" },
+  { name: "Hindi", value: "hi" },
+  { name: "English", value: "en" },
+  { name: "Custom (type a whisper.cpp language code)", value: "custom" },
+];
 
 const onOffLabel = (value) => (value ? chalk.green("on") : chalk.red("off"));
 
 /**
- * GPU state as one bracketed phrase. The probe is `vno setup`'s job (it costs
- * seconds), so an unprobed machine is reported as such rather than as "off".
+ * Accelerator state as one bracketed phrase. The backend is fixed by
+ * whichever whisper.cpp build `vno setup` installed, so an unbuilt machine
+ * is reported as such rather than as "off".
  */
 function gpuLabel(config) {
-  const gpu = gpuState(config);
-  if (gpu.device === null) return chalk.yellow("not checked");
-  if (gpu.device !== "cuda") return chalk.dim("no GPU on this machine");
-  return gpu.use === false ? chalk.red("off") : chalk.green(`on — ${gpu.name || "CUDA"}`);
+  const accel = accelState(config);
+  if (accel.backend === null) return chalk.yellow("not installed");
+  if (accel.backend === "cpu") return chalk.dim("no accelerator build available");
+  return accel.use === false ? chalk.red("off") : chalk.green(`on — ${accel.name || accel.backend}`);
 }
 
 /** Human-readable state of the three-way auto-translate switch. */
@@ -54,6 +64,7 @@ export async function runSettings() {
         choices: [
           { name: `Auto-translate imports  ${chalk.dim("[" )}${autoTranslateLabel(config.autoTranslate)}${chalk.dim("]")}`, value: "autoTranslate" },
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
+          { name: `Transcription language  ${chalk.dim(`[${config.transcribeLanguage || "auto"}]`)}`, value: "language" },
           { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
@@ -100,13 +111,21 @@ export async function runSettings() {
         await saveConfig(config);
       }
     } else if (answer.action === "model") {
+      // Marks each option with whether it's already downloaded, so picking one
+      // that isn't doesn't silently kick off a gigabyte download mid-run.
+      const modelChoices = await Promise.all(
+        MODELS.map(async (m) => ({
+          name: `${m}${(await resolveModel(m)) ? chalk.dim(" (downloaded)") : chalk.dim(" (will download)")}`,
+          value: m,
+        }))
+      );
       const res = await prompt([
         {
           type: "list",
           name: "value",
           message: "Default whisper model",
           default: config.defaultModel || "turbo",
-          choices: MODELS,
+          choices: modelChoices,
           loop: false,
         },
       ]);
@@ -114,14 +133,42 @@ export async function runSettings() {
         config.defaultModel = res.value;
         await saveConfig(config);
       }
+    } else if (answer.action === "language") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "Language whisper.cpp should expect (pin this if auto-detect confuses two languages you speak, e.g. Hindi heard as Urdu)",
+          default: LANGUAGES.some((l) => l.value === config.transcribeLanguage) ? config.transcribeLanguage : "custom",
+          choices: LANGUAGES,
+          loop: false,
+        },
+      ]);
+      if (res !== CANCELLED) {
+        let value = res.value;
+        if (value === "custom") {
+          const custom = await prompt([
+            {
+              type: "input",
+              name: "code",
+              message: "whisper.cpp language code (e.g. hi, en, ur)",
+              default: config.transcribeLanguage && config.transcribeLanguage !== "auto" ? config.transcribeLanguage : "",
+            },
+          ]);
+          if (custom === CANCELLED || !custom.code.trim()) continue;
+          value = custom.code.trim().toLowerCase();
+        }
+        config.transcribeLanguage = value;
+        await saveConfig(config);
+      }
     } else if (answer.action === "gpu") {
-      const gpu = gpuState(config);
-      if (gpu.device !== "cuda") {
+      const accel = accelState(config);
+      if (accel.backend === null || accel.backend === "cpu") {
         console.log(
           chalk.dim(
-            gpu.device === null
-              ? "Not checked yet — use “Check ffmpeg + whisper” below, which also probes for a GPU."
-              : "No CUDA GPU was found on this machine, so transcription runs on the CPU."
+            accel.backend === null
+              ? "Not installed yet — use “Check ffmpeg + whisper” below, which installs whisper.cpp."
+              : "No accelerator build is available for this machine, so transcription runs on the CPU."
           )
         );
         continue;
@@ -130,16 +177,16 @@ export async function runSettings() {
         {
           type: "list",
           name: "value",
-          message: `Use ${gpu.name || "the GPU"} for transcription?`,
-          default: gpu.use !== false,
+          message: `Use ${accel.name || accel.backend} for transcription?`,
+          default: accel.use !== false,
           choices: [
-            { name: "On — transcribe on the GPU (much faster)", value: true },
+            { name: "On — transcribe on the accelerator (much faster)", value: true },
             { name: "Off — transcribe on the CPU", value: false },
           ],
         },
       ]);
       if (res !== CANCELLED) {
-        config.gpu = { ...gpu, use: res.value };
+        config.accel = { ...accel, use: res.value };
         await saveConfig(config);
       }
     } else if (answer.action === "target") {
@@ -235,8 +282,8 @@ export async function runSettings() {
     } else if (answer.action === "setup") {
       console.log();
       await runSetup();
-      // runSetup writes the GPU probe straight to disk, so the copy held here
-      // is stale - and the next save from this loop would undo it.
+      // runSetup writes the accel state straight to disk, so the copy held
+      // here is stale - and the next save from this loop would undo it.
       config = await loadConfig();
       console.log();
     } else if (answer.action === "path") {

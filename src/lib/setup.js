@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import fs from "fs-extra";
+import { WHISPERCPP_REPO, WHISPERCPP_VERSION } from "./whispercpp.js";
 
 /**
  * The external programs vno shells out to, and how to find them.
@@ -20,14 +21,9 @@ export const DEPENDENCIES = {
     usedFor: "decoding audio for whisper and reading recording durations",
   },
   whisper: {
-    label: "whisper",
-    commands: ["whisper"],
-    usedFor: "transcribing and translating recordings",
-  },
-  python: {
-    label: "Python (pip)",
+    label: "whisper.cpp",
     commands: [],
-    usedFor: "installing whisper, which ships as a Python package",
+    usedFor: "transcribing and translating recordings",
   },
 };
 
@@ -45,9 +41,10 @@ function pathExtensions() {
 /**
  * Resolves a command against PATH without running it.
  *
- * Probing by execution (`whisper --help`) costs seconds - it boots Python and
- * torch - which is far too slow to do at the start of every command. A
- * directory scan is instant, so the startup check can be unconditional.
+ * Probing by execution costs real time on some tools (the old Python whisper
+ * booted an interpreter just to answer `--help`), which is far too slow to do
+ * at the start of every command. A directory scan is instant, so the startup
+ * check can be unconditional.
  */
 export async function which(command) {
   if (!command) return null;
@@ -80,9 +77,21 @@ export async function checkDependency(name) {
   const meta = DEPENDENCIES[name];
   if (!meta) throw new Error(`Unknown dependency "${name}"`);
 
-  if (name === "python") {
-    const pip = await resolvePip();
-    return { name, label: meta.label, usedFor: meta.usedFor, found: Boolean(pip), missing: [], pip };
+  if (name === "whisper") {
+    // whisper.cpp isn't found on PATH the way ffmpeg is - it's usually
+    // vendored under whisper-cpp/bin/ by `vno setup`. Imported lazily to
+    // avoid a static import cycle (lib/whispercpp.js itself uses which() and
+    // runStep() from this module).
+    const { resolveBinary } = await import("./whispercpp.js");
+    const binary = await resolveBinary({});
+    return {
+      name,
+      label: meta.label,
+      usedFor: meta.usedFor,
+      found: Boolean(binary),
+      missing: binary ? [] : ["whisper-cli"],
+      path: binary?.path || null,
+    };
   }
 
   const missing = [];
@@ -194,126 +203,38 @@ function ffmpegSteps(managerId) {
   }
 }
 
-/** How to install Python + pip, which whisper's install needs. */
-function pythonSteps(managerId) {
-  switch (managerId) {
-    case "winget":
-      return [
-        step("winget", [
-          "install",
-          "--id",
-          "Python.Python.3.12",
-          "-e",
-          "--source",
-          "winget",
-          "--accept-package-agreements",
-          "--accept-source-agreements",
-        ]),
-      ];
-    case "choco":
-      return [step("choco", ["install", "python", "-y"])];
-    case "scoop":
-      return [step("scoop", ["install", "python"])];
-    case "brew":
-      return [step("brew", ["install", "python"])];
-    case "port":
-      return [step("port", ["install", "python312", "py312-pip"])];
-    case "apt":
-      return [step("apt-get", ["update"]), step("apt-get", ["install", "-y", "python3-pip"])];
-    case "dnf":
-      return [step("dnf", ["install", "-y", "python3-pip"])];
-    case "yum":
-      return [step("yum", ["install", "-y", "python3-pip"])];
-    case "pacman":
-      return [step("pacman", ["-S", "--noconfirm", "python-pip"])];
-    case "zypper":
-      return [step("zypper", ["install", "-y", "python3-pip"])];
-    case "apk":
-      return [step("apk", ["add", "py3-pip"])];
-    default:
-      return null;
-  }
-}
-
 // Managers whose own installs are per-user or self-elevating, so prefixing
 // sudo would be wrong (Homebrew actively refuses to run as root).
 const SELF_ELEVATING = new Set(["winget", "choco", "scoop", "brew"]);
 
 /**
- * Resolves how to invoke pip. Spellings differ per platform and install
- * method, and `python -m pip` works where a bare `pip` shim was never created,
- * so try the plain commands first and fall back to the module form.
- */
-export async function resolvePip() {
-  for (const command of ["pip3", "pip"]) {
-    const found = await which(command);
-    if (found) return { command, args: [] };
-  }
-  for (const command of isWindows ? ["python", "py", "python3"] : ["python3", "python"]) {
-    const found = await which(command);
-    if (found) return { command, args: ["-m", "pip"] };
-  }
-  return null;
-}
-
-/**
  * Builds the install plan for one dependency on this machine, or null when we
- * have nothing to drive (no known package manager, no Python for whisper).
- * `null` isn't a failure - the caller falls back to `manualHelp()`.
+ * have nothing to drive (no known package manager). `null` isn't a failure -
+ * the caller falls back to `manualHelp()`.
+ *
+ * whisper.cpp isn't built here: its install is per-platform binary/source
+ * acquisition (brew formula, GitHub release zip, cmake build), not a package
+ * manager one-liner - see `lib/whispercpp.js:installWhisperCpp`.
  */
 export async function buildInstallPlan(name) {
-  const manager = await detectPackageManager();
-  const sudo = await needsSudo();
+  if (name !== "ffmpeg") throw new Error(`Unknown dependency "${name}"`);
 
+  const manager = await detectPackageManager();
+  if (!manager) return null;
+
+  const sudo = await needsSudo();
   const withPrivileges = (steps, managerId) => {
     if (!sudo || SELF_ELEVATING.has(managerId)) return steps;
     return steps.map((s) => step("sudo", [s.command, ...s.args]));
   };
 
-  if (name === "ffmpeg" || name === "python") {
-    if (!manager) return null;
-    const steps = name === "ffmpeg" ? ffmpegSteps(manager.id) : pythonSteps(manager.id);
-    if (!steps) return null;
-    return {
-      dependency: name,
-      via: manager.label,
-      steps: withPrivileges(steps, manager.id),
-      note: noteFor(name, manager.id),
-    };
-  }
-
-  if (name === "whisper") {
-    const pip = await resolvePip();
-    if (!pip) return null; // caller installs Python first, then asks again
-    return {
-      dependency: "whisper",
-      via: `${pip.command}${pip.args.length ? " -m pip" : ""}`,
-      steps: [step(pip.command, [...pip.args, "install", "-U", "openai-whisper"])],
-      note: null,
-    };
-  }
-
-  throw new Error(`Unknown dependency "${name}"`);
-}
-
-/**
- * A pip install can fail on Debian/Ubuntu (and Homebrew Python) because the
- * interpreter is marked externally managed - a policy refusal, not a broken
- * install, and one with two different fixes. Recognised from the output so the
- * caller can say which applies instead of just "install failed".
- */
-export function isExternallyManagedError(output) {
-  return /externally[- ]managed[- ]environment/i.test(output || "");
-}
-
-/** Fallback pip install through pipx, which sidesteps an externally managed Python. */
-export async function buildPipxPlan() {
-  if (!(await which("pipx"))) return null;
+  const steps = ffmpegSteps(manager.id);
+  if (!steps) return null;
   return {
-    dependency: "whisper",
-    via: "pipx",
-    steps: [step("pipx", ["install", "openai-whisper"])],
-    note: "pipx puts whisper in its own environment, which the system Python allows.",
+    dependency: name,
+    via: manager.label,
+    steps: withPrivileges(steps, manager.id),
+    note: noteFor(name, manager.id),
   };
 }
 
@@ -347,15 +268,20 @@ export function manualHelp(name) {
     ];
   }
   if (name === "whisper") {
+    if (platform === "darwin") {
+      return ["brew install whisper-cpp", "…or get Homebrew first from https://brew.sh"];
+    }
+    if (platform === "win32") {
+      return [
+        `Download a release zip from https://github.com/${WHISPERCPP_REPO}/releases/tag/${WHISPERCPP_VERSION}`,
+        "…and extract it (keeping every .dll beside whisper-cli.exe) into the location `vno setup` reports",
+      ];
+    }
     return [
-      "pip install -U openai-whisper",
-      "…or pipx install openai-whisper if your Python is externally managed",
+      `git clone --depth 1 --branch ${WHISPERCPP_VERSION} https://github.com/${WHISPERCPP_REPO}`,
+      "cmake -B build -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON for an NVIDIA GPU",
+      "cmake --build build -j --config Release",
     ];
-  }
-  if (name === "python") {
-    if (platform === "win32") return ["winget install --id Python.Python.3.12 -e"];
-    if (platform === "darwin") return ["brew install python"];
-    return ["sudo apt-get install python3-pip   # or your distro's equivalent"];
   }
   return [];
 }
@@ -366,11 +292,11 @@ export function manualHelp(name) {
  * (not line-buffered) so a trailing prompt like "Password:" actually shows up,
  * while still being collected for the caller to inspect afterwards.
  */
-export function runStep({ command, args }, { onOutput = null } = {}) {
+export function runStep({ command, args, cwd }, { onOutput = null } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"], windowsHide: true });
+      child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"], windowsHide: true, cwd });
     } catch (err) {
       resolve({ ok: false, output: err.message });
       return;
@@ -402,14 +328,16 @@ export async function runPlan(plan, { onOutput = null, onStep = null } = {}) {
 }
 
 /**
- * Re-reads PATH after an install so the freshly installed binary is usable in
+ * Re-reads PATH after an install so a freshly installed ffmpeg is usable in
  * this same run. A child process inherits PATH as it was at launch, so without
  * this an install always ends in "restart your terminal" - which is a poor end
- * to `vno t` that just installed what it needed.
+ * to `vno t` that just installed what it needed. (whisper.cpp itself doesn't
+ * go through PATH - it's vendored into whisper-cpp/bin/ and resolved directly
+ * by `lib/whispercpp.js:resolveBinary`, so this only ever matters for ffmpeg.)
  *
  * Windows keeps the real PATH in the registry, so we ask it for the current
  * value. Elsewhere it's enough to add the handful of directories package
- * managers and pip install into, when they exist and aren't already listed.
+ * managers install into, when they exist and aren't already listed.
  */
 export async function refreshPath() {
   const before = process.env.PATH || "";
@@ -423,15 +351,11 @@ export async function refreshPath() {
       }
     }
   } else {
-    const home = os.homedir();
     const candidates = [
       "/opt/homebrew/bin", // Apple silicon Homebrew
       "/usr/local/bin",
       "/home/linuxbrew/.linuxbrew/bin",
       "/opt/local/bin", // MacPorts
-      path.join(home, ".local", "bin"), // pip --user, pipx
-      path.join(home, "Library", "Python", "3.12", "bin"),
-      path.join(home, "Library", "Python", "3.11", "bin"),
     ];
     for (const dir of candidates) {
       if (containsDir(process.env.PATH, dir)) continue;

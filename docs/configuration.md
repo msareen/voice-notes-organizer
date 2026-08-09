@@ -20,9 +20,10 @@ rather than crashing the tool.
   "knownMounts": {},
   "autoTranslate": null,
   "defaultModel": "turbo",
+  "transcribeLanguage": "auto",
   "openWhenDone": true,
   "rememberDeletions": true,
-  "gpu": { "device": null, "name": null, "torch": null, "use": null, "probedAt": null }
+  "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
 }
 ```
 
@@ -39,9 +40,10 @@ time.
 | `knownMounts` | reset all | per-volume, on import | ✅ |
 | `autoTranslate` | ✅ | ✅ | ✅ |
 | `defaultModel` | ✅ | ✅ | ✅ |
+| `transcribeLanguage` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
-| `gpu` | on/off only | on/off only | ✅ (detected by `vno setup`) |
+| `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
 
 ---
 
@@ -111,7 +113,7 @@ See [Import & sync](import-and-sync.md) for the detection rules.
 ## `autoTranslate`
 
 Whether freshly imported notes are auto-translated to English on import, using
-whisper's translate task.
+whisper.cpp's translate task.
 
 | Value | Behaviour |
 | --- | --- |
@@ -124,45 +126,59 @@ dialog.
 
 ## `defaultModel`
 
-The whisper model used for auto-translation, and pre-selected in the
+The whisper.cpp model used for auto-translation, and pre-selected in the
 `vno transcribe` picker and the UI's transcribe dialog.
+
+## `transcribeLanguage`
+
+The language whisper.cpp is told to expect, as an ISO-639-1 code (`"hi"`,
+`"en"`, ...), or `"auto"` (the default) to let it detect per file.
+
+Worth pinning if you speak two languages whisper.cpp's auto-detect confuses
+for one another — Hindi and Urdu are acoustically close enough that
+auto-detect can flip between them file to file. Setting this to `"hi"` fixes
+that, and still transcribes English words mixed into Hindi speech fine, so
+it also covers a "mostly Hindi with some English" preference. `vno setting`
+offers Hindi/English/auto plus a custom code; the UI's Settings dialog offers
+the same three presets.
 
 One of `turbo`, `tiny`, `base`, `small`, `medium`, `large`. Defaults to
 `turbo`. See [Transcription](transcription.md#choosing-a-model) for how to
 choose.
 
-## `gpu`
+## `accel`
 
-What [`vno setup`](cli-reference.md#vno-setup-doctor) found out about GPU
-acceleration, and what you want done with it.
+What [`vno setup`](cli-reference.md#vno-setup-doctor) installed for
+whisper.cpp's accelerator backend, and what you want done with it.
 
 ```json
-"gpu": {
-  "device": "cuda",
+"accel": {
+  "backend": "cuda",
   "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
-  "torch": "2.5.1+cu121",
   "use": true,
-  "probedAt": "2026-07-26T17:17:54.246Z"
+  "resolvedAt": "2026-07-26T17:17:54.246Z"
 }
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `device` | The probe result. `null` = never checked, `"cuda"` = usable GPU, `"cpu"` = checked, there isn't one |
-| `name` | The card, for display |
-| `torch` | The torch build that answered, so an upgrade is visible |
+| `backend` | What `vno setup` installed. `null` = whisper.cpp not installed yet, `"cpu"` = installed, no accelerator build available, `"cuda"`/`"metal"`/`"vulkan"` = installed with that backend |
+| `name` | The card, for display (not set for Metal, which doesn't need naming) |
 | `use` | Your answer. `null` = never asked, `true`/`false` = decided |
-| `probedAt` | When the probe last ran |
+| `resolvedAt` | When `vno setup` last recorded this |
 
-The answer that matters is `device === "cuda" && use !== false` — a detected GPU
-is used unless you've said no, since the browser has nowhere to ask at job time.
+The answer that matters is `backend !== "cpu" && backend !== null && use !== false`
+— an accelerator-capable install is used unless you've said no, since the
+browser has nowhere to ask at job time.
 
-Detection means booting Python and importing torch, which takes seconds, so it
-happens **only in `vno setup`** and the result is cached here. Nothing depends on
-it: delete the block, or the whole file, and every command still runs on the CPU.
+Unlike the old torch probe, this never needs re-checking on a hot path: the
+backend is fixed by which whisper.cpp binary got installed, and reading
+`install.json` back is free. Nothing depends on this block being present:
+delete it, or the whole file, and every command still runs (falling back to
+the CPU until the next `vno setup`).
 
-Toggle it from `vno setting` or the UI's Settings dialog; re-detect after a driver
-or torch change by running `vno setup` again. See
+Toggle it from `vno setting` or the UI's Settings dialog; re-install with a
+different backend (e.g. after adding a GPU) by running `vno setup` again. See
 [Transcription](transcription.md#gpu-acceleration).
 
 ## `openWhenDone`

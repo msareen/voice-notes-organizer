@@ -1,9 +1,9 @@
 # Troubleshooting
 
-## `whisper` or `ffmpeg` isn't found
+## `whisper.cpp` or `ffmpeg` isn't found
 
 ```
-ffmpeg and whisper aren't on your PATH, and transcribing needs them.
+ffmpeg and whisper.cpp aren't on your PATH, and transcribing needs them.
 ```
 
 Run:
@@ -12,26 +12,17 @@ Run:
 vno setup
 ```
 
-It reports which of `ffmpeg`, `ffprobe` and `whisper` are missing and offers to
-install them with your machine's package manager. The commands it offers are in
-the [CLI reference](cli-reference.md#vno-setup) if you'd rather run them
-yourself. You don't have to remember to run it — `vno transcribe`, `vno
+It reports which of `ffmpeg`, `ffprobe` and `whisper.cpp` are missing and
+offers to install them — ffmpeg with your machine's package manager,
+whisper.cpp per-platform (Homebrew on macOS; a CUDA-matched or BLAS-CPU
+release zip on Windows; a prebuilt CPU binary, or a `cmake` source build if
+you have an NVIDIA GPU, on Linux; see [Installing
+whisper.cpp](transcription.md#installing-whispercpp)). The commands it offers
+are in the [CLI reference](cli-reference.md#vno-setup) if you'd rather run
+them yourself. You don't have to remember to run it — `vno transcribe`, `vno
 cleanup` and auto-translating imports all run the same check first.
 
 ## `vno setup` installed it, but vno still can't find it
-
-vno re-reads your `PATH` after installing (from the registry on Windows, plus
-the usual install directories elsewhere), but some installers put things
-somewhere else entirely. **Open a new terminal** and try again.
-
-**On Windows**, `pip` installs `whisper.exe` into your Python `Scripts`
-directory — e.g. `C:\Users\<you>\AppData\Local\Programs\Python\Python312\Scripts`
-or `C:\PythonXX\Scripts`. If `whisper` still isn't found, add that folder to
-your `PATH` and restart your shell. Find it with:
-
-```powershell
-python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
-```
 
 Check what vno itself resolves, and where:
 
@@ -39,16 +30,31 @@ Check what vno itself resolves, and where:
 vno setup --check
 ```
 
-## pip refuses to install whisper: "externally-managed-environment"
+whisper.cpp is vendored into `whisper-cpp/bin/` (local or global, see
+[Installing whisper.cpp](transcription.md#installing-whispercpp)) rather than
+put on your system `PATH`, so a new terminal shouldn't be necessary — but if
+`vno setup --check` still shows it missing right after a successful install,
+something wrote the binary somewhere unexpected. The install log `vno setup`
+printed says exactly where it put it; check `install.json` in that
+`whisper-cpp/` folder for the recorded path.
 
-Debian, Ubuntu and Homebrew's Python won't let `pip` install into the system
-interpreter. `vno setup` spots this and offers `pipx install openai-whisper`
-instead, which puts whisper in its own environment. If you don't have pipx:
+**On Windows**, every `.dll` the release zip shipped has to stay beside
+`whisper-cli.exe` — if you moved or copied just the `.exe` out of
+`whisper-cpp/bin/`, it won't start. Re-run `vno setup` to re-extract the zip
+cleanly rather than patching the folder by hand.
 
-```bash
-sudo apt-get install pipx    # or: brew install pipx
-pipx install openai-whisper
+## A model isn't found
+
 ```
+The "small" model isn't installed. Run `vno setup --model small` to download it.
+```
+
+Models live in `whisper-cpp/models/` as `ggml-<name>.bin` files. Run
+`vno setup --list-models` to see what's present, where, and whether each one
+validates (size and header check) — a file that fails validation is treated
+as absent and gets deleted and re-downloaded on the next `vno setup`. Point
+`WHISPER_MODEL_PATH` at a file or directory to use a model from somewhere
+else entirely (a shared network location, one you downloaded by hand).
 
 ## Durations show as `?`
 
@@ -123,32 +129,20 @@ The `.vtt` changed underneath the editor (usually a re-transcribe finished
 while it was open). The save is refused rather than clobbering the newer file.
 Reload the page and redo the edit.
 
-## "Skipping … due to UnicodeEncodeError"
-
-whisper prints each segment as it decodes it, and Python encodes its output with
-the Windows console's codepage — `cp1252` on a Western install, which has no
-Devanagari, CJK, Cyrillic or emoji. The error that raises is caught by whisper's
-own CLI, which skips the file and **still exits 0**, so older versions of vno
-reported "Saved" for a transcript that was never written.
-
-vno now runs whisper with `PYTHONIOENCODING=utf-8`, so this shouldn't happen. If
-you see it running whisper by hand, set the same variable:
-
-```powershell
-$env:PYTHONIOENCODING = "utf-8"
-```
-
-A run that skips a file is reported as a failure now, not a save — and a `.vtt`
-that never appeared is caught even if whisper says nothing at all.
-
 ## Transcription is unbearably slow
 
-Expected on CPU — see [Choosing a model](transcription.md#choosing-a-model).
-Drop to `small` or `base`, or leave a batch running overnight. The first run of
-any model also downloads it (hundreds of MB to ~3 GB), which looks like a hang.
+Expected on CPU, though whisper.cpp is several times faster than the old
+Python implementation on the same hardware — see [Choosing a
+model](transcription.md#choosing-a-model). Drop to `small` or `base`, or leave
+a batch running overnight. The first run of any model also downloads it
+(hundreds of MB to ~1.6 GB), which looks like a hang.
 
-If your machine has an NVIDIA GPU, check vno knows about it: `vno setup` probes
-for one and offers to use it, which is several times faster. See [GPU
+If your machine has an NVIDIA GPU or is a Mac, check vno knows about it:
+`vno setup` installs a build matched to it (CUDA on NVIDIA, Metal
+automatically on Apple silicon) and offers to use it, which is several times
+faster. AMD and Intel GPUs on Windows/Linux aren't accelerated — whisper.cpp
+ships no Vulkan build — so those fall back to a BLAS-accelerated CPU build,
+still faster than plain CPU but not GPU-fast. See [GPU
 acceleration](transcription.md#gpu-acceleration).
 
 ## `vno` isn't a recognised command

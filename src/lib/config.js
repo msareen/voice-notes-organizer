@@ -26,6 +26,12 @@ function defaultConfig() {
     // Default whisper model used for auto-translation and as the pre-selected
     // choice in the transcribe picker.
     defaultModel: "turbo",
+    // Language whisper.cpp is told to expect, as an ISO-639-1 code, or "auto"
+    // to let it detect per file. Worth pinning for speakers of acoustically
+    // similar languages whisper.cpp's auto-detect confuses (Hindi/Urdu is the
+    // classic case) - forcing "hi" still transcribes code-switched English
+    // fine, so this is also the fix for "mostly Hindi with English mixed in".
+    transcribeLanguage: "auto",
     // Whether recordings deleted through vno (the UI's delete/cleanup, and
     // `vno cleanup`) are remembered in ~/.vno/deleted.json so a later import
     // doesn't copy them back off a device that still has them. Turning this
@@ -36,13 +42,15 @@ function defaultConfig() {
     // files landed in and open the regenerated index.html player. Set to
     // false (or pass --no-open) to keep runs headless.
     openWhenDone: true,
-    // What `vno setup` found out about GPU acceleration, and what the user
-    // wants done with it. `device` is the probe result - null = never probed,
-    // "cuda" = usable GPU, "cpu" = probed and there isn't one. `use` is the
-    // answer to the offer: null = never asked, true/false = decided. Asking
-    // torch costs seconds, which is why it's cached rather than re-checked;
-    // see lib/gpu.js.
-    gpu: { device: null, name: null, torch: null, use: null, probedAt: null },
+    // What `vno setup` installed for whisper.cpp's accelerator backend, and
+    // what the user wants done with it. `backend` is fixed by which binary
+    // got installed - null = not installed yet, "cpu" = installed but no
+    // accelerator build available, "cuda"/"metal"/"vulkan" = installed with
+    // that backend. `use` is the answer to the offer: null = never asked,
+    // true/false = decided. Unlike the old torch probe this never needs
+    // re-checking on a hot path, since the backend can't change without a
+    // fresh `vno setup`; see lib/whisper.js:accelState.
+    accel: { backend: null, name: null, use: null, resolvedAt: null },
   };
 }
 
@@ -57,13 +65,18 @@ export async function loadConfig() {
     const data = await fs.readJson(CONFIG_FILE);
     const defaults = defaultConfig();
     // The nested blocks are merged field by field, so a hand-edited partial
-    // `gpu` (or an older config that predates it) still has every key.
-    return {
+    // `accel` (or an older config that predates it) still has every key. A
+    // stale `gpu` block from before this migration is dropped rather than
+    // migrated - it's a cached torch probe result, meaningless once
+    // transcription runs through whisper.cpp instead.
+    const merged = {
       ...defaults,
       ...data,
       knownMounts: { ...data.knownMounts },
-      gpu: { ...defaults.gpu, ...data.gpu },
+      accel: { ...defaults.accel, ...data.accel },
     };
+    delete merged.gpu;
+    return merged;
   } catch {
     // corrupt config file - back it up and start fresh rather than crash
     await fs.move(CONFIG_FILE, `${CONFIG_FILE}.bak-${Date.now()}`, { overwrite: true });

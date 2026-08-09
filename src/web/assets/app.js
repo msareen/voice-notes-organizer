@@ -3,6 +3,8 @@
   var NOTES = [];
   var CONFIG = {};
   var MODELS = [];
+  var MODEL_AVAILABILITY = {};
+  var LANGUAGES = [];
   var WHISPER = true;
   var FFMPEG = true;
   var selectedRel = null;
@@ -48,6 +50,86 @@
     toastTimer = setTimeout(function () { el.remove(); }, kind === "err" ? 6000 : 2600);
   }
   function fail(err) { toast(String(err.message || err), "err"); }
+
+  /* ---- Drag-and-drop import: drop audio files anywhere on the page. Each
+     file is POSTed raw (no multipart) to /api/upload, which streams it
+     straight to disk - see server.js:handleUpload. ---- */
+  var AUDIO_EXT_RE = /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|wma|aiff|amr|3gp)$/i;
+  (function () {
+    var overlay = null;
+    var dragDepth = 0;
+
+    function hasFiles(e) {
+      var types = e.dataTransfer && e.dataTransfer.types;
+      return !!types && Array.prototype.indexOf.call(types, "Files") !== -1;
+    }
+    function showOverlay() {
+      if (overlay) return;
+      overlay = document.createElement("div");
+      overlay.className = "dropzone";
+      overlay.innerHTML = '<div class="dropzone-msg">Drop audio files to import</div>';
+      document.body.appendChild(overlay);
+    }
+    function hideOverlay() {
+      dragDepth = 0;
+      if (overlay) { overlay.remove(); overlay = null; }
+    }
+
+    window.addEventListener("dragenter", function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      showOverlay();
+    });
+    window.addEventListener("dragover", function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+    });
+    window.addEventListener("dragleave", function (e) {
+      if (!hasFiles(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) hideOverlay();
+    });
+    window.addEventListener("drop", function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      hideOverlay();
+      if (!alive) return fail(new Error("vno server stopped - reload the page"));
+      uploadDropped(Array.prototype.slice.call(e.dataTransfer.files || []));
+    });
+  })();
+
+  function uploadDropped(files) {
+    var audio = files.filter(function (f) { return AUDIO_EXT_RE.test(f.name); });
+    var skippedType = files.length - audio.length;
+    if (!audio.length) return toast("No audio files in that drop", "err");
+
+    toast("Importing " + audio.length + " file(s)…");
+    var i = 0, imported = 0, skipped = 0, failed = 0;
+
+    function next() {
+      if (i >= audio.length) {
+        var msg = "Imported " + imported + " file(s)" +
+          (skipped ? ", " + skipped + " already there" : "") +
+          (failed ? ", " + failed + " failed" : "") +
+          (skippedType ? ", " + skippedType + " skipped (not audio)" : "");
+        return toast(msg, failed ? "err" : "ok");
+      }
+      var file = audio[i++];
+      var url = "/api/upload?name=" + encodeURIComponent(file.name) + "&t=" + encodeURIComponent(TOKEN);
+      fetch(url, { method: "POST", headers: { "X-VNO-Token": TOKEN }, body: file })
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (out) {
+            if (!res.ok) throw new Error(out.error || ("HTTP " + res.status));
+            return out;
+          });
+        })
+        .then(function (out) { if (out && out.skipped) skipped++; else imported++; })
+        .catch(function () { failed++; })
+        .then(next);
+    }
+    next();
+  }
 
   /* ---- Draggable divider: resize the takes list ---- */
   (function () {
@@ -297,11 +379,12 @@
     });
   }
 
-  function chip(label, value) {
+  function chip(label, value, valueId) {
     var c = document.createElement("span");
     c.className = "chip";
     c.appendChild(document.createTextNode(label + " "));
     var b = document.createElement("b");
+    if (valueId) b.id = valueId;
     b.textContent = value;
     c.appendChild(b);
     return c;
@@ -359,7 +442,7 @@
     var readout = document.createElement("div");
     readout.className = "readout-line";
     if (note.dateStr) readout.appendChild(chip("REC", note.dateStr + " " + note.timeStr));
-    readout.appendChild(chip("LEN", fmtDur(note.durationSec)));
+    readout.appendChild(chip("LEN", fmtDur(note.durationSec), "lenChipValue"));
     readout.appendChild(chip("SIZE", fmtSize(note.size)));
     readout.appendChild(chip("FMT", extOf(note.name)));
     body.appendChild(readout);
@@ -381,6 +464,32 @@
 
     placeholder.classList.add("hidden");
     body.classList.remove("hidden");
+
+    refreshSelected(rel);
+  }
+
+  /**
+   * The list is built from a cached duration (fast startup on a big library -
+   * see lib/notesCache.js), so it can be stale. Selecting a note is the one
+   * moment worth paying for a fresh ffprobe: rechecks just this file and
+   * patches the displayed duration + transcript in place, without touching
+   * the <audio> element so playback in progress isn't interrupted.
+   */
+  function refreshSelected(rel) {
+    api("/api/notes/refresh", { method: "POST", body: { rel: rel } })
+      .then(function (res) {
+        mergeNote(res.note);
+        renderList();
+        if (selectedRel !== rel) return;
+        var lenChip = document.getElementById("lenChipValue");
+        if (lenChip) lenChip.textContent = fmtDur(res.note.durationSec);
+        var transcriptHost = document.getElementById("transcript");
+        var audio = body.querySelector("audio");
+        if (transcriptHost && audio) renderTranscript(transcriptHost, res.note, audio);
+      })
+      .catch(function () {
+        // A stale cached duration/transcript isn't worth surfacing an error for.
+      });
   }
 
   function showPlaceholder(message) {
@@ -580,8 +689,24 @@
   /* ---- Settings ---- */
   document.getElementById("btnSettings").addEventListener("click", openSettings);
 
+  var LANGUAGE_LABELS = {
+    auto: "Auto-detect",
+    hi: "Hindi",
+    en: "English"
+  };
+
+  // Marks each model option with whether it's already downloaded, so picking
+  // one that isn't doesn't silently kick off a gigabyte download.
+  function modelOptions() {
+    return MODELS.map(function (m) {
+      var known = Object.prototype.hasOwnProperty.call(MODEL_AVAILABILITY, m);
+      var tag = known ? (MODEL_AVAILABILITY[m] ? "downloaded" : "will download") : "";
+      return { label: tag ? m + " (" + tag + ")" : m, value: m };
+    });
+  }
+
   function openSettings() {
-    var autoSel, modelSel, openSel, rememberSel, gpuSel;
+    var autoSel, modelSel, languageSel, openSel, rememberSel, gpuSel;
     modal({
       title: "Settings",
       message: null,
@@ -609,8 +734,16 @@
         ], String(CONFIG.autoTranslate));
 
         modelSel = selectField(host, "Default whisper model",
-          MODELS.map(function (m) { return { label: m, value: m }; }),
+          modelOptions(),
           CONFIG.defaultModel);
+
+        languageSel = selectField(host, "Transcription language",
+          LANGUAGES.map(function (l) { return { label: LANGUAGE_LABELS[l] || l, value: l }; }),
+          CONFIG.transcribeLanguage || "auto");
+        var lh = document.createElement("p");
+        lh.className = "hint";
+        lh.textContent = "Pin this if auto-detect keeps guessing the wrong language for you (e.g. Hindi heard as Urdu) - Hindi still handles English mixed in fine.";
+        host.appendChild(lh);
 
         var gpu = CONFIG.gpu || {};
         gpuSel = null;
@@ -620,13 +753,13 @@
             { label: "Off — transcribe on the CPU", value: "false" }
           ], String(gpu.use !== false));
         } else {
-          // Detecting a GPU means booting Python and torch, which is far too
-          // slow to do from a page load — "vno setup" owns the probe.
+          // The accelerator backend is fixed by whichever whisper.cpp build
+          // "vno setup" installed — the browser can't install anything itself.
           var gh = document.createElement("p");
           gh.className = "hint";
           gh.textContent = gpu.checked
-            ? "GPU acceleration: no CUDA GPU found — transcription runs on the CPU."
-            : "GPU acceleration: run \"vno setup\" in a terminal to check whether this machine has one.";
+            ? "GPU acceleration: no accelerator build available on this machine — transcription runs on the CPU."
+            : "GPU acceleration: run \"vno setup\" in a terminal to install whisper.cpp and check for one.";
           host.appendChild(gh);
         }
 
@@ -648,6 +781,7 @@
         var patch = {
           autoTranslate: autoSel.value === "null" ? null : autoSel.value === "true",
           defaultModel: modelSel.value,
+          transcribeLanguage: languageSel.value,
           openWhenDone: openSel.value === "true",
           rememberDeletions: rememberSel.value === "true"
         };
@@ -869,6 +1003,8 @@
       NOTES = state.notes;
       CONFIG = state.config;
       MODELS = state.models;
+      MODEL_AVAILABILITY = state.modelAvailability || {};
+      LANGUAGES = state.languages || [];
       WHISPER = state.whisper;
       FFMPEG = state.ffmpeg;
       document.getElementById("folderLabel").textContent = CONFIG.rootLabel;
@@ -1003,7 +1139,7 @@
           };
         }));
         modelSel = selectField(host, "Whisper model",
-          MODELS.map(function (m) { return { label: m, value: m }; }),
+          modelOptions(),
           CONFIG.defaultModel);
         translateChk = checkbox(host, "Translate to English instead of a verbatim transcript", false);
       },

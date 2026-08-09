@@ -146,8 +146,11 @@ export async function syncVolume(volume, target, { rememberDeletions = true, onP
  * `isDeleted` applies the same name+size test to the deletion ledger, so an
  * empty slot that's empty *because the user deleted that recording* stays
  * empty instead of being refilled from the device.
+ *
+ * Exported so the browser's drag-and-drop upload can reuse the same
+ * dedup/collision logic outside of a full `syncVolume` walk.
  */
-async function resolveFlatDest(destRoot, base, srcSize, isDeleted = () => false) {
+export async function resolveFlatDest(destRoot, base, srcSize, isDeleted = () => false) {
   const ext = path.extname(base);
   const stem = base.slice(0, base.length - ext.length);
   for (let n = 1; ; n++) {

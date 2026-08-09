@@ -58,8 +58,8 @@ effect on disk immediately.
 - **Fix what whisper got wrong** — an in-page editor with one box per line.
   Your edits never disturb the timings.
 - **Full toolbar** — import, transcribe, cleanup, explore and settings, all
-  without leaving the page. Long jobs show a progress bar and stream whisper's
-  live output into a log panel.
+  without leaving the page. Long jobs show a progress bar and stream
+  whisper.cpp's live output into a log panel.
 - **Private by construction** — bound to `127.0.0.1` on a random port behind a
   single-use session token. Close the tab and the CLI exits.
 
@@ -73,9 +73,12 @@ shortcut.
 ### 1. Prerequisites
 
 - **Node.js 18+** (or [Bun](https://bun.sh)) to run the CLI.
-- **Python 3.8+ with `pip`** — needed to install Whisper (transcription).
-- **ffmpeg** on your `PATH` — Whisper uses it to read audio, and `vno cleanup`
-  uses `ffprobe` (shipped with ffmpeg) to measure durations.
+- **ffmpeg** on your `PATH` — whisper.cpp needs it to decode audio into the
+  16kHz mono WAV it accepts, and `vno cleanup` uses `ffprobe` (shipped with
+  ffmpeg) to measure durations.
+- On Linux, building whisper.cpp from source needs `cmake`, `git` and a C++
+  compiler already on the machine — `vno setup` tells you the exact command if
+  any are missing. No Python, no PyTorch, on any platform.
 
 ### 2. Install it
 
@@ -93,16 +96,22 @@ npx @msareen/voice-notes-organizer v        # ...or any other command
 To update later, `npm update -g @msareen/voice-notes-organizer`; to remove it,
 `npm uninstall -g @msareen/voice-notes-organizer`.
 
-### 3. Install ffmpeg and Whisper
+### 3. Install ffmpeg and whisper.cpp
 
 ```bash
 vno setup
 ```
 
-Checks `ffmpeg`, `ffprobe` and `whisper`, and offers to install whatever is
-missing using your machine's own package manager — winget/Chocolatey/Scoop on
-Windows, Homebrew/MacPorts on macOS, apt/dnf/pacman/zypper/apk on Linux — with
-Whisper coming from `pip` (and Python itself if you don't have it yet).
+Checks `ffmpeg`/`ffprobe` and whisper.cpp, and offers to install whatever is
+missing: ffmpeg using your machine's own package manager
+(winget/Chocolatey/Scoop on Windows, Homebrew/MacPorts on macOS,
+apt/dnf/pacman/zypper/apk on Linux), whisper.cpp per-platform — Homebrew on
+macOS (Metal-accelerated automatically on Apple silicon); on Windows, a
+prebuilt release zip with a CUDA build matched to your driver if you have an
+NVIDIA GPU, a BLAS-accelerated CPU build otherwise; on Linux, a prebuilt CPU
+binary, or a `cmake` source build if you have an NVIDIA GPU (no prebuilt
+Linux CUDA asset exists). It then fetches the default model set (`small` +
+`turbo`) into `whisper-cpp/models/`.
 
 You don't have to remember to run it: `vno transcribe`, `vno cleanup` and an
 import that auto-translates all run the same check first, and offer the same
@@ -111,21 +120,18 @@ it. `vno setup --check` reports and installs nothing.
 
 Prefer to do it yourself:
 
-| OS | ffmpeg | Whisper |
+| OS | ffmpeg | whisper.cpp |
 | --- | --- | --- |
-| macOS | `brew install ffmpeg` | `pip install -U openai-whisper` |
-| Windows | `winget install --id Gyan.FFmpeg -e` | `pip install -U openai-whisper` |
-| Linux (Debian/Ubuntu) | `sudo apt install ffmpeg` | `pip install -U openai-whisper` |
+| macOS | `brew install ffmpeg` | `brew install whisper-cpp` |
+| Windows | `winget install --id Gyan.FFmpeg -e` | download a [release zip](https://github.com/ggml-org/whisper.cpp/releases) |
+| Linux (Debian/Ubuntu) | `sudo apt install ffmpeg` | `git clone` + `cmake` build — see [Transcription](docs/transcription.md#installing-whispercpp) |
 
-Verify with `ffmpeg -version`, `ffprobe -version` and `whisper --help`.
+Verify with `ffmpeg -version`, `ffprobe -version` and `vno setup --check`.
 
-> *Whisper is slow — but it is free.* Transcription runs on your own machine,
-> so expect to wait; a long recording on a big model can take longer than the
-> recording itself.
-
-> **Windows note:** `pip` installs `whisper.exe` into your Python `Scripts`
-> directory (e.g. `C:\PythonXX\Scripts`). If `whisper` isn't found after
-> install, add that folder to your `PATH` and restart your shell.
+> *Transcription is slow — but it is free.* It runs on your own machine, so
+> expect to wait; a long recording on a big model can take a while, though
+> whisper.cpp is several times faster than the old Python implementation on
+> the same hardware.
 
 ---
 
@@ -141,7 +147,7 @@ Verify with `ffmpeg -version`, `ffprobe -version` and `whisper --help`.
 | `vno cleanup ledger` | — | Forget which recordings you deleted, so they import again |
 | `vno explore [file]` | `vno open` | Open the target folder in Explorer / Finder, or reveal one recording |
 | `vno setting` | `vno settings` | Interactive wizard for the common settings |
-| `vno setup` | `vno doctor` | Check ffmpeg + whisper, offer to install what's missing |
+| `vno setup` | `vno doctor` | Check ffmpeg + whisper.cpp, offer to install what's missing |
 | `vno config` | — | Print the path to the config file |
 
 A few things worth knowing up front:
@@ -160,8 +166,8 @@ A few things worth knowing up front:
   buttons remove files, always behind a confirmation. Import and transcribe
   never delete anything.
 - **Missing tools are caught before the work starts.** Any command that needs
-  ffmpeg or whisper checks for them first and offers the install, so you never
-  get halfway through and stall. Nothing installs without your say-so.
+  ffmpeg or whisper.cpp checks for them first and offers the install, so you
+  never get halfway through and stall. Nothing installs without your say-so.
 
 📖 **[Full CLI reference →](docs/cli-reference.md)** — every flag, in detail.
 
@@ -180,7 +186,7 @@ Settings live in one global per-user file — `~/.vno/config.json`. Run
   "autoTranslate": null,
   "defaultModel": "turbo",
   "openWhenDone": true,
-  "gpu": { "device": null, "use": null }
+  "accel": { "backend": null, "use": null }
 }
 ```
 
@@ -192,7 +198,7 @@ Settings live in one global per-user file — `~/.vno/config.json`. Run
 | `autoTranslate` | Translate imports to English — `true` / `false` / `null` (ask once) |
 | `defaultModel` | Whisper model: `turbo`, `tiny`, `base`, `small`, `medium`, `large` |
 | `openWhenDone` | Whether finished runs launch the browser UI |
-| `gpu` | What `vno setup` found out about GPU acceleration, and whether to use it |
+| `accel` | What `vno setup` installed for GPU acceleration, and whether to use it |
 
 Most of these are editable from `vno setting` or the UI's Settings dialog — you
 shouldn't need to touch the file.

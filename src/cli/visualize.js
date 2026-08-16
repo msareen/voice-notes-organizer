@@ -1,7 +1,7 @@
 import fs from "fs-extra";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.js";
-import { startServer } from "../web/server.js";
+import { startServer } from "../web/server/index.js";
 import { openPath } from "../lib/open.js";
 import { createProgressBar } from "./progress.js";
 

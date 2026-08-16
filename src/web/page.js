@@ -63,7 +63,7 @@ export function renderPage({ rootLabel, token }) {
 </div>
 
 <script>window.__VNO_TOKEN = ${JSON.stringify(token)};</script>
-<script src="/assets/app.js"></script>
+<script type="module" src="/assets/app.js"></script>
 </body>
 </html>
 `;

@@ -22,9 +22,18 @@ src/
     config.js  notes.js  sync.js  media.js  vtt.js
     volumes.js  whisper.js  whispercpp.js  setup.js  open.js  ledger.js
   web/               the browser UI behind `vno visualize`
-    server.js        HTTP server: session token, JSON API, SSE job stream
+    server/          HTTP server: session token, JSON API, SSE job stream
+      index.js       bootstraps http.Server, builds ctx, dispatches routes
+      context.js     the shared ctx: notes/config/job state + helpers
+      assets.js  media.js  events.js
+      routes/        one module per route group (state, settings, notes,
+                      transcribe, import, cleanup)
     page.js          the HTML shell, and nothing else
-    assets/          app.css and app.js, served as plain static files
+    assets/          app.css and app.js (the client entry), plus:
+      js/            state.js  dom.js  api.js  format.js  widgets.js
+                      list.js  deck.js  jobs.js  actions.js  deps.js  models.js
+                      divider.js  dragdrop.js
+      js/panels/     settings.js  import.js  transcribe.js  cleanup.js
 ```
 
 **Dependencies run one way:** `bin/` → `cli/` → `lib/`, with `web/` reaching
@@ -48,12 +57,17 @@ so anything there is safe to reuse from either side.
 
 ## There is no build step
 
-`assets/app.css` and `assets/app.js` are read from disk on **each request**, so
-a browser reload is enough to see a UI edit — no restart. Changes to
-`server.js` or anything in `lib/` do need a restart.
+`assets/app.css`, `assets/app.js` and every module under `assets/js/` are read
+from disk on **each request**, so a browser reload is enough to see a UI edit
+— no restart. Changes to anything in `web/server/` or `lib/` do need a
+restart.
 
-The client script is plain ES5-flavoured JavaScript with no bundler, no
-framework and no dependencies. Keep it that way.
+The client is plain ES5-flavoured JavaScript loaded as native ES modules
+(`<script type="module">`) — no bundler, no framework and no dependencies,
+just the browser resolving `import`/`export` directly off disk. Keep it that
+way: a new client file just needs an `import` from whichever module uses it,
+and `server/assets.js` serves anything under `assets/` by extension, so no
+server change is needed either.
 
 The session token is the one thing not in the assets: `page.js` inlines it into
 the HTML, so it never travels in an asset URL — which is also why the two asset
@@ -69,7 +83,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | Route | Method | Purpose |
 | --- | --- | --- |
 | `/` | GET | The page. Token required as `?t=` |
-| `/assets/{app.css,app.js}` | GET | Static assets. **Not** token-gated, by design |
+| `/assets/*` | GET | Static assets (app.css, app.js, assets/js/**). **Not** token-gated, by design |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
 | `/api/state` | GET | Notes, config, model list, `ffmpeg`/whisper.cpp availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |

@@ -118,10 +118,10 @@ finishes first. Use **Quit** in the header to end it deliberately.
 
 ## A UI edit doesn't show up
 
-There's no build step: `app.css` and `app.js` are read from disk per request,
-so a **browser reload** is enough. If it's still stale, hard-reload
-(`Ctrl`/`Cmd`+`Shift`+`R`). Only changes to `server.js` or anything in `lib/`
-need a restart.
+There's no build step: `app.css`, `app.js` and every module under `assets/js/`
+are read from disk per request, so a **browser reload** is enough. If it's
+still stale, hard-reload (`Ctrl`/`Cmd`+`Shift`+`R`). Only changes to
+`web/server/` or anything in `lib/` need a restart.
 
 ## "Transcript changed on disk — reload and try again"
 

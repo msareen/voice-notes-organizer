@@ -1,5 +1,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { URL } from "node:url";
 import fs from "fs-extra";
@@ -234,6 +235,9 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
 
       case "/api/browse GET":
         return browse(res, url.searchParams);
+
+      case "/api/browse-fs GET":
+        return browseFs(res, url.searchParams);
 
       case "/api/import POST":
         return startImport(res, body);
@@ -714,6 +718,39 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       // unreadable directory - report it as empty rather than failing outright
     }
     return sendJson(res, 200, { root, current, sub: sub.join("/"), folders });
+  }
+
+  // Unlike browse() above, this isn't confined to a detected volume - source
+  // folders can be anywhere on disk, and a browser can't hand back a real
+  // filesystem path from its own directory picker, so the tree walk happens
+  // here instead. No path given means "list drives/roots".
+  async function browseFs(res, params) {
+    const raw = params.get("path");
+    if (!raw) {
+      return sendJson(res, 200, { current: null, parent: null, folders: await fsRoots(), sep: path.sep });
+    }
+    const current = path.resolve(raw);
+    let folders;
+    try {
+      folders = (await fs.readdir(current, { withFileTypes: true }))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      return sendJson(res, 400, { error: "Can't read that folder" });
+    }
+    const up = path.dirname(current);
+    return sendJson(res, 200, { current, parent: up !== current ? up : null, folders, sep: path.sep });
+  }
+
+  async function fsRoots() {
+    if (os.platform() !== "win32") return ["/"];
+    const roots = [];
+    for (const code of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+      const drive = `${code}:\\`;
+      if (await fs.pathExists(drive)) roots.push(drive);
+    }
+    return roots;
   }
 
   async function startImport(res, body) {

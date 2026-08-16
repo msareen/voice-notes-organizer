@@ -712,7 +712,7 @@
       title: "Settings",
       message: null,
       confirmLabel: "Save",
-      wide: true,
+      panel: true,
       build: function (host) {
         var grid = document.createElement("div");
         grid.className = "settings-grid";
@@ -833,6 +833,12 @@
           pathInput.style.minWidth = "220px";
           row.appendChild(pathInput);
 
+          row.appendChild(button("Browse…", "", function () {
+            browseFsFolders(pathInput.value.trim() || null, function (chosen) {
+              pathInput.value = chosen;
+            });
+          }, "Pick a folder on this computer"));
+
           var chipsWrap = document.createElement("div");
           chipsWrap.className = "ext-chips";
           chipsWrap.title = "Which audio file types to pick up from this folder";
@@ -928,9 +934,9 @@
   /* ---- Modal ---- */
   function modal(spec) {
     var backdrop = document.createElement("div");
-    backdrop.className = "backdrop";
+    backdrop.className = "backdrop" + (spec.panel ? " panel" : "");
     var box = document.createElement("div");
-    box.className = "modal" + (spec.wide ? " wide" : "");
+    box.className = "modal" + (spec.panel ? " panel" : spec.wide ? " wide" : "");
     backdrop.appendChild(box);
 
     var h = document.createElement("h3");
@@ -1411,6 +1417,69 @@
       row.addEventListener("click", onClick);
       return row;
     }
+  }
+
+  // General-purpose folder browser for source folders, which - unlike volume
+  // subfolders above - can live anywhere on disk. Browsers can't hand a real
+  // filesystem path back from window.showDirectoryPicker(), so this walks the
+  // tree server-side instead, starting from the drive/root list.
+  function browseFsFolders(currentPath, onPick, closePrev) {
+    api("/api/browse-fs" + (currentPath ? "?path=" + encodeURIComponent(currentPath) : ""))
+      .then(function (res) {
+        var level = modal({
+          title: "Choose a folder",
+          message: null,
+          confirmLabel: "Use this folder",
+          build: function (host) {
+            var crumb = document.createElement("div");
+            crumb.className = "crumb";
+            crumb.textContent = res.current || "Drives";
+            host.appendChild(crumb);
+
+            var box = document.createElement("div");
+            box.className = "picklist";
+            if (res.parent) {
+              box.appendChild(fsFolderRow(".. (up one level)", function () {
+                browseFsFolders(res.parent, onPick, level.close);
+              }));
+            } else if (res.current) {
+              box.appendChild(fsFolderRow(".. (all drives)", function () {
+                browseFsFolders(null, onPick, level.close);
+              }));
+            }
+            if (!res.folders.length) {
+              var none = document.createElement("div");
+              none.className = "pick";
+              none.textContent = "(no subfolders)";
+              box.appendChild(none);
+            }
+            res.folders.forEach(function (name) {
+              box.appendChild(fsFolderRow(name, function () {
+                var next = res.current
+                  ? res.current + (res.current.slice(-1) === res.sep ? "" : res.sep) + name
+                  : name;
+                browseFsFolders(next, onPick, level.close);
+              }));
+            });
+            host.appendChild(box);
+          },
+          onConfirm: function () {
+            if (!res.current) throw new Error("Pick a drive or folder first");
+            onPick(res.current);
+          }
+        });
+        if (closePrev) closePrev();
+      })
+      .catch(fail);
+  }
+
+  function fsFolderRow(label, onClick) {
+    var row = document.createElement("div");
+    row.className = "pick";
+    row.style.cursor = "pointer";
+    row.textContent = label;
+    row.addEventListener("click", onClick);
+    return row;
   }
 
   // "*" (or empty/legacy) means "any audio file" - shown as every extension

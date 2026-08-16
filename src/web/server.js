@@ -211,6 +211,9 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       case "/api/settings POST":
         return sendJson(res, 200, { config: await patchSettings(body) });
 
+      case "/api/sources POST":
+        return saveSources(res, body);
+
       case "/api/reveal POST":
         return reveal(res, body);
 
@@ -275,6 +278,8 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         transcribeLanguage: currentConfig.transcribeLanguage || "auto",
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
+        sources: currentConfig.sources || [],
+        audioExtensions: Array.from(AUDIO_EXTENSIONS).sort(),
         // Only the answer is the browser's to change; the backend itself is
         // fixed by whichever whisper.cpp build `vno setup` installed, since
         // the page can't run an installer.
@@ -395,6 +400,25 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     await saveConfig(currentConfig);
     console.log(chalk.dim("Settings updated from the browser."));
     return (await stateResponse()).config;
+  }
+
+  // `sources` is array-shaped, so it's replaced wholesale here rather than
+  // through patchSettings's flat `if (key in patch)` scalar guards.
+  async function saveSources(res, body) {
+    const list = Array.isArray(body.sources) ? body.sources : [];
+    for (const s of list) {
+      if (!s || typeof s.path !== "string" || !s.path.trim()) {
+        return sendJson(res, 400, { error: "Every source needs a folder path" });
+      }
+    }
+    currentConfig.sources = list.map((s) => ({
+      path: s.path.trim(),
+      pattern: (s.pattern || "*").trim() || "*",
+      deleteAfterImport: Boolean(s.deleteAfterImport),
+    }));
+    await saveConfig(currentConfig);
+    console.log(chalk.dim("Source folders updated from the browser."));
+    return sendJson(res, 200, { config: (await stateResponse()).config });
   }
 
   /* ------------------------- per-note file actions ----------------------- */
@@ -650,14 +674,16 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
       known: currentConfig.knownMounts?.[v.id] || null,
     }));
 
-    for (const sourcePath of currentConfig.sources || []) {
-      if (!(await fs.pathExists(sourcePath))) continue;
+    for (const source of currentConfig.sources || []) {
+      if (!(await fs.pathExists(source.path))) continue;
       found.push({
-        id: `source:${sourcePath.toLowerCase()}`,
-        name: path.basename(sourcePath) || "source",
-        mountPath: sourcePath,
+        id: `source:${source.path.toLowerCase()}`,
+        name: path.basename(source.path) || "source",
+        mountPath: source.path,
         sizeBytes: null,
         isManualSource: true,
+        pattern: source.pattern,
+        deleteAfterImport: source.deleteAfterImport,
         known: null,
       });
     }
@@ -716,6 +742,8 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
           name: volume.name,
           destName: volume.name,
           mountPath: subdir ? path.join(volume.mountPath, subdir) : volume.mountPath,
+          pattern: volume.pattern,
+          deleteAfterImport: volume.deleteAfterImport,
         };
         // syncVolume reports rather than prints, so the copy shows up in the
         // page's log and title instead of the terminal it can't see. One
@@ -739,7 +767,8 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
           imported.push(...result.copiedFiles);
           jobLog(
             `"${volume.name}": ${result.copied} copied, ${result.skipped} already up to date` +
-              (result.suppressed > 0 ? `, ${result.suppressed} previously deleted (left alone)` : "")
+              (result.suppressed > 0 ? `, ${result.suppressed} previously deleted (left alone)` : "") +
+              (result.deleted > 0 ? `, ${result.deleted} removed from source` : "")
           );
           if (!volume.isManualSource && request.remember !== false) {
             currentConfig.knownMounts[volume.id] = {

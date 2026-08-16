@@ -18,18 +18,45 @@ export const AUDIO_EXTENSIONS = new Set([
 ]);
 
 /**
+ * Translates a "*"/"?" wildcard pattern into a case-insensitive matcher against
+ * a bare filename. "*" matches any run of characters, "?" matches exactly one;
+ * everything else is matched literally. Comma-separated patterns match if any
+ * one of them does (e.g. "*.mp3,*.wav" — how the UI's multi-select extension
+ * picker expresses "several of these"). No existing glob dependency in this
+ * repo, and this is the only place that needs one, so it isn't worth adding one.
+ */
+export function matchGlob(pattern, filename) {
+  return pattern
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .some((p) => {
+      const escaped = p.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+      return new RegExp(`^${escaped}$`, "i").test(filename);
+    });
+}
+
+/**
  * Every audio file under `root`, depth-first. The walk itself is slow enough to
  * be worth reporting on a large or network-backed folder, so `onProgress` gets
  * a `{ phase: "scan", dir, found }` per directory entered - `dir` relative to
  * `root`. See `reporter` for why the callback can't break the walk.
+ *
+ * `pattern` (a "*"/"?" wildcard) filters by filename instead of the default
+ * audio-extension check when given and isn't "*" - used by manually configured
+ * source folders that want to restrict what's picked up (see lib/config.js).
  */
-export async function findAudioFiles(root, { onProgress } = {}) {
+export async function findAudioFiles(root, { onProgress, pattern } = {}) {
   const results = [];
-  await walk(root, results, root, reporter(onProgress));
+  const matches =
+    pattern && pattern !== "*"
+      ? (name) => matchGlob(pattern, name)
+      : (name) => AUDIO_EXTENSIONS.has(path.extname(name).toLowerCase());
+  await walk(root, results, root, reporter(onProgress), matches);
   return results;
 }
 
-async function walk(dir, results, root, report) {
+async function walk(dir, results, root, report, matches) {
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -41,8 +68,8 @@ async function walk(dir, results, root, report) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walk(full, results, root, report);
-    } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      await walk(full, results, root, report, matches);
+    } else if (entry.isFile() && matches(entry.name)) {
       results.push(full);
     }
   }
@@ -76,6 +103,21 @@ export function reporter(onProgress) {
  * recordings previously deleted through vno are left alone instead of being
  * copied back; they're counted separately from ordinary already-there skips.
  *
+ * `volume.pattern`, when set, restricts the walk to filenames matching that
+ * "*"/"?" wildcard instead of the default audio-extension check - only ever
+ * set on manually configured source folders, never on detected volumes.
+ *
+ * `volume.deleteAfterImport`, when true, removes the source file once it's
+ * either freshly copied in or found to already match the destination (a
+ * duplicate re-drop of an already-imported file) - also source-folder-only.
+ * A file the ledger *suppresses* (the user deliberately deleted this exact
+ * target path before) is left alone instead: silently deleting the source's
+ * only remaining copy of something the user chose not to import would be
+ * wrong. A copy that throws also leaves the source alone. This is the one
+ * place `syncVolume` deletes anything - every other caller (detected
+ * removable volumes) never sets the flag, so "nothing is ever deleted from
+ * the device" still holds for actual hardware.
+ *
  * Displaying any of this is the caller's job - the terminal draws a progress
  * bar from `onProgress`, the browser turns the same events into job log lines.
  * That's why nothing here prints: the two callers need different output, and
@@ -96,10 +138,13 @@ export async function syncVolume(volume, target, { rememberDeletions = true, onP
     report({ phase: "log", message: `Flattened ${flattened} previously nested file(s) in ${destRoot}.` });
   }
 
-  const files = (await findAudioFiles(volume.mountPath, { onProgress })).sort((a, b) => a.localeCompare(b));
+  const files = (await findAudioFiles(volume.mountPath, { onProgress, pattern: volume.pattern })).sort((a, b) =>
+    a.localeCompare(b)
+  );
   let copied = 0;
   let skipped = 0;
   let suppressed = 0;
+  let deleted = 0;
   const copiedFiles = [];
   let done = 0;
 
@@ -117,13 +162,18 @@ export async function syncVolume(volume, target, { rememberDeletions = true, onP
       const srcSize = (await fs.stat(src)).size;
       const { dest, skip, wasDeletedBefore } = await resolveFlatDest(destRoot, label, srcSize, isDeleted);
       if (skip) {
-        if (wasDeletedBefore) suppressed++;
-        else skipped++;
+        if (wasDeletedBefore) {
+          suppressed++;
+        } else {
+          skipped++;
+          if (volume.deleteAfterImport) deleted += await tryDeleteSource(src, label, report);
+        }
         continue;
       }
       await fs.copy(src, dest, { overwrite: true });
       copied++;
       copiedFiles.push(dest);
+      if (volume.deleteAfterImport) deleted += await tryDeleteSource(src, label, report);
     } catch (err) {
       report({ phase: "log", level: "warn", message: `Failed to copy ${label}: ${err.message}` });
     } finally {
@@ -133,7 +183,18 @@ export async function syncVolume(volume, target, { rememberDeletions = true, onP
 
   report({ phase: "work", done, total: files.length, dir: "", name: "" });
 
-  return { destRoot, copied, skipped, suppressed, total: files.length, copiedFiles };
+  return { destRoot, copied, skipped, suppressed, deleted, total: files.length, copiedFiles };
+}
+
+/** Best-effort source removal after a successful import copy; failures are logged, not thrown. */
+async function tryDeleteSource(src, label, report) {
+  try {
+    await fs.remove(src);
+    return 1;
+  } catch (err) {
+    report({ phase: "log", level: "warn", message: `Imported ${label} but couldn't delete it from the source: ${err.message}` });
+    return 0;
+  }
 }
 
 /**

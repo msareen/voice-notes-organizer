@@ -19,18 +19,20 @@ export async function runImport({ open } = {}) {
   const config = await loadConfig();
   const volumes = await detectVolumes();
 
-  for (const sourcePath of config.sources || []) {
-    if (await fs.pathExists(sourcePath)) {
-      // Manually configured in config.json - trusted by definition, so it
-      // always syncs without the new-volume prompt.
+  for (const source of config.sources || []) {
+    if (await fs.pathExists(source.path)) {
+      // Manually configured in config.json/`vno setting`/the UI - trusted by
+      // definition, so it always syncs without the new-volume prompt.
       volumes.push({
-        name: path.basename(sourcePath) || "source",
-        mountPath: sourcePath,
-        id: `source:${sourcePath.toLowerCase()}`,
+        name: path.basename(source.path) || "source",
+        mountPath: source.path,
+        id: `source:${source.path.toLowerCase()}`,
         isManualSource: true,
+        pattern: source.pattern,
+        deleteAfterImport: source.deleteAfterImport,
       });
     } else {
-      console.log(chalk.yellow(`Configured source folder does not exist: ${sourcePath}`));
+      console.log(chalk.yellow(`Configured source folder does not exist: ${source.path}`));
     }
   }
 
@@ -268,7 +270,9 @@ async function syncCopy(volume, config) {
   console.log(
     `Synced "${volume.name}": ${chalk.green(result.copied + " copied")}, ${chalk.dim(
       result.skipped + " already up to date"
-    )}${result.suppressed > 0 ? `, ${chalk.dim(result.suppressed + " previously deleted")}` : ""} -> ${result.destRoot}`
+    )}${result.suppressed > 0 ? `, ${chalk.dim(result.suppressed + " previously deleted")}` : ""}${
+      result.deleted > 0 ? `, ${chalk.dim(result.deleted + " removed from source")}` : ""
+    } -> ${result.destRoot}`
   );
 
   if (result.suppressed > 0) {

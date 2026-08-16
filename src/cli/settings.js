@@ -41,6 +41,116 @@ function autoTranslateLabel(value) {
 }
 
 /**
+ * Add/edit/remove manually configured source folders — e.g. wherever a
+ * phone's Quick Share/Quick Send drops files. Mutates `config.sources` in
+ * place and saves after every change, mirroring the rest of this wizard.
+ */
+async function manageSources(config) {
+  while (true) {
+    const sources = config.sources || [];
+    const choices = sources.map((s, i) => ({
+      name: `${s.path}  ${chalk.dim(`[pattern ${s.pattern || "*"}${s.deleteAfterImport ? ", deletes after import" : ""}]`)}`,
+      value: `edit:${i}`,
+    }));
+
+    const answer = await prompt([
+      {
+        type: "list",
+        name: "action",
+        message: "Source folders (Esc to go back)",
+        choices: [
+          ...choices,
+          new inquirer.Separator(),
+          { name: "Add a folder", value: "add" },
+          { name: "Done", value: "done" },
+        ],
+      },
+    ]);
+
+    if (answer === CANCELLED || answer.action === "done") return;
+
+    if (answer.action === "add") {
+      const entry = await promptSourceEntry(null);
+      if (entry) {
+        config.sources = [...sources, entry];
+        await saveConfig(config);
+      }
+      continue;
+    }
+
+    const [, idxStr] = answer.action.split(":");
+    const idx = Number(idxStr);
+    const existing = sources[idx];
+
+    const editAnswer = await prompt([
+      {
+        type: "list",
+        name: "action",
+        message: existing.path,
+        choices: [
+          { name: "Edit", value: "edit" },
+          { name: "Remove", value: "remove" },
+          { name: "Back", value: "back" },
+        ],
+      },
+    ]);
+    if (editAnswer === CANCELLED || editAnswer.action === "back") continue;
+
+    if (editAnswer.action === "remove") {
+      config.sources = sources.filter((_, i) => i !== idx);
+      await saveConfig(config);
+      continue;
+    }
+
+    const entry = await promptSourceEntry(existing);
+    if (entry) {
+      config.sources = sources.map((s, i) => (i === idx ? entry : s));
+      await saveConfig(config);
+    }
+  }
+}
+
+/** Prompts for one source folder's path/pattern/delete-after-import; returns null on cancel. */
+async function promptSourceEntry(existing) {
+  const pathRes = await prompt([
+    {
+      type: "input",
+      name: "value",
+      message: "Folder path (absolute)",
+      default: existing ? existing.path : undefined,
+    },
+  ]);
+  if (pathRes === CANCELLED || !pathRes.value.trim()) return null;
+  const folder = path.resolve(pathRes.value.trim());
+
+  const patternRes = await prompt([
+    {
+      type: "input",
+      name: "value",
+      message: 'Filename pattern ("*"/"?" wildcard, e.g. "VN*.m4a" — "*" = any audio file)',
+      default: existing ? existing.pattern || "*" : "*",
+    },
+  ]);
+  if (patternRes === CANCELLED) return null;
+
+  const deleteRes = await prompt([
+    {
+      type: "list",
+      name: "value",
+      message: "Delete files from this folder once they're safely imported?",
+      default: existing ? Boolean(existing.deleteAfterImport) : false,
+      choices: [
+        { name: "No — keep them here (a real archive folder)", value: false },
+        { name: "Yes — this is a disposable landing folder (e.g. Quick Share)", value: true },
+      ],
+    },
+  ]);
+  if (deleteRes === CANCELLED) return null;
+
+  return { path: folder, pattern: patternRes.value.trim() || "*", deleteAfterImport: deleteRes.value };
+}
+
+/**
  * Interactive wizard for the handful of "direct switches" a user is most
  * likely to want to flip without hand-editing config.json: whether imports
  * auto-translate, the default whisper model, the target folder, and resetting
@@ -69,6 +179,7 @@ export async function runSettings() {
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
           { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
+          { name: `Source folders  ${chalk.dim(`[${(config.sources || []).length} configured]`)}`, value: "sources" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
           { name: `Forget deleted recordings (clear the ledger)  ${chalk.dim(`[${ledger.forTarget} remembered]`)}`, value: "resetLedger" },
           {
@@ -240,6 +351,8 @@ export async function runSettings() {
           console.log(chalk.dim("The existing ledger is kept but ignored. Remove it with `vno cleanup ledger`."));
         }
       }
+    } else if (answer.action === "sources") {
+      await manageSources(config);
     } else if (answer.action === "resetLedger") {
       if (!ledger.exists) {
         console.log(chalk.dim(`No deletion ledger yet (${ledger.path}).`));

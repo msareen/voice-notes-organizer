@@ -707,48 +707,46 @@
 
   function openSettings() {
     var autoSel, modelSel, languageSel, openSel, rememberSel, gpuSel;
+    var sourceRows = [];
     modal({
       title: "Settings",
       message: null,
       confirmLabel: "Save",
+      wide: true,
       build: function (host) {
-        var pathField = document.createElement("div");
-        pathField.className = "field";
-        var pl = document.createElement("label");
-        pl.textContent = "Target folder";
-        pathField.appendChild(pl);
-        var pv = document.createElement("div");
-        pv.className = "path";
-        pv.textContent = CONFIG.target;
-        pathField.appendChild(pv);
-        var ph = document.createElement("p");
-        ph.className = "hint";
-        ph.textContent = "Change this with \"vno setting\" — moving it needs a re-scan.";
-        pathField.appendChild(ph);
-        host.appendChild(pathField);
+        var grid = document.createElement("div");
+        grid.className = "settings-grid";
+        host.appendChild(grid);
 
-        autoSel = selectField(host, "Auto-translate imports", [
+        var transcriptionCol = document.createElement("div");
+        transcriptionCol.className = "settings-col";
+        var th = document.createElement("h4");
+        th.textContent = "Transcription";
+        transcriptionCol.appendChild(th);
+        grid.appendChild(transcriptionCol);
+
+        autoSel = selectField(transcriptionCol, "Auto-translate imports", [
           { label: "On — always translate imports", value: "true" },
           { label: "Off — never translate on import", value: "false" },
           { label: "Ask each time", value: "null" }
         ], String(CONFIG.autoTranslate));
 
-        modelSel = selectField(host, "Default whisper model",
+        modelSel = selectField(transcriptionCol, "Default whisper model",
           modelOptions(),
           CONFIG.defaultModel);
 
-        languageSel = selectField(host, "Transcription language",
+        languageSel = selectField(transcriptionCol, "Transcription language",
           LANGUAGES.map(function (l) { return { label: LANGUAGE_LABELS[l] || l, value: l }; }),
           CONFIG.transcribeLanguage || "auto");
         var lh = document.createElement("p");
         lh.className = "hint";
         lh.textContent = "Pin this if auto-detect keeps guessing the wrong language for you (e.g. Hindi heard as Urdu) - Hindi still handles English mixed in fine.";
-        host.appendChild(lh);
+        transcriptionCol.appendChild(lh);
 
         var gpu = CONFIG.gpu || {};
         gpuSel = null;
         if (gpu.available) {
-          gpuSel = selectField(host, "GPU acceleration", [
+          gpuSel = selectField(transcriptionCol, "GPU acceleration", [
             { label: "On — transcribe on " + (gpu.name || "the GPU"), value: "true" },
             { label: "Off — transcribe on the CPU", value: "false" }
           ], String(gpu.use !== false));
@@ -760,22 +758,125 @@
           gh.textContent = gpu.checked
             ? "GPU acceleration: no accelerator build available on this machine — transcription runs on the CPU."
             : "GPU acceleration: run \"vno setup\" in a terminal to install whisper.cpp and check for one.";
-          host.appendChild(gh);
+          transcriptionCol.appendChild(gh);
         }
 
-        openSel = selectField(host, "Open this viewer when a run finishes", [
+        var importCol = document.createElement("div");
+        importCol.className = "settings-col";
+        var ih = document.createElement("h4");
+        ih.textContent = "Import";
+        importCol.appendChild(ih);
+        grid.appendChild(importCol);
+
+        var pathField = document.createElement("div");
+        pathField.className = "field";
+        var pl = document.createElement("label");
+        pl.textContent = "Target folder";
+        pathField.appendChild(pl);
+        var pv = document.createElement("div");
+        pv.className = "path";
+        pv.textContent = CONFIG.target;
+        pathField.appendChild(pv);
+        var ph = document.createElement("p");
+        ph.className = "hint";
+        ph.textContent = "Every import — a detected volume or a source folder below — copies into here. " +
+          "Change it with \"vno setting\" — moving it needs a re-scan.";
+        pathField.appendChild(ph);
+        importCol.appendChild(pathField);
+
+        openSel = selectField(importCol, "Open this viewer when a run finishes", [
           { label: "On — launch the viewer after import/transcribe", value: "true" },
           { label: "Off — finish quietly", value: "false" }
         ], String(CONFIG.openWhenDone !== false));
 
-        rememberSel = selectField(host, "Remember deleted recordings", [
+        rememberSel = selectField(importCol, "Remember deleted recordings", [
           { label: "On — don't re-import what I deleted here", value: "true" },
           { label: "Off — import whatever the device has", value: "false" }
         ], String(CONFIG.rememberDeletions !== false));
         var rh = document.createElement("p");
         rh.className = "hint";
         rh.textContent = "Deletes made here and by cleanup are logged, so importing again won't copy them back. \"vno cleanup ledger\" forgets them.";
-        host.appendChild(rh);
+        importCol.appendChild(rh);
+
+        var sourcesSection = document.createElement("div");
+        sourcesSection.className = "settings-full";
+        host.appendChild(sourcesSection);
+
+        var sourcesLabel = document.createElement("h4");
+        sourcesLabel.textContent = "Source folders";
+        sourcesSection.appendChild(sourcesLabel);
+        var sh = document.createElement("p");
+        sh.className = "hint";
+        sh.textContent = "Folders synced every time you import, in addition to detected volumes — e.g. wherever a " +
+          "phone's Quick Share/Quick Send drops files. Pattern is a \"*\"/\"?\" wildcard against the filename " +
+          "(\"*\" = any audio file). \"Delete after import\" removes the file from this folder once it's safely " +
+          "copied in — only turn this on for a disposable landing folder, not a real archive.";
+        sourcesSection.appendChild(sh);
+
+        var sourcesBox = document.createElement("div");
+        sourcesBox.className = "picklist";
+        sourcesSection.appendChild(sourcesBox);
+
+        var allExts = CONFIG.audioExtensions || [];
+
+        function addSourceRow(entry) {
+          var row = document.createElement("div");
+          row.className = "pick source-row";
+          row.style.flexWrap = "wrap";
+          row.style.gap = "6px";
+
+          var pathInput = document.createElement("input");
+          pathInput.type = "text";
+          pathInput.placeholder = "Folder path (paste or type)";
+          pathInput.value = entry.path || "";
+          pathInput.style.flex = "2";
+          pathInput.style.minWidth = "220px";
+          row.appendChild(pathInput);
+
+          var chipsWrap = document.createElement("div");
+          chipsWrap.className = "ext-chips";
+          chipsWrap.title = "Which audio file types to pick up from this folder";
+          var extState = {};
+          extsFromPattern(entry.pattern, allExts).forEach(function (e) { extState[e] = true; });
+          allExts.forEach(function (ext) {
+            var chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "chip" + (extState[ext] ? " on" : "");
+            chip.textContent = ext;
+            chip.addEventListener("click", function () {
+              extState[ext] = !extState[ext];
+              chip.classList.toggle("on", extState[ext]);
+            });
+            chipsWrap.appendChild(chip);
+          });
+          row.appendChild(chipsWrap);
+
+          var delWrap = document.createElement("label");
+          delWrap.className = "check";
+          var delCb = document.createElement("input");
+          delCb.type = "checkbox";
+          delCb.checked = !!entry.deleteAfterImport;
+          delWrap.appendChild(delCb);
+          delWrap.appendChild(document.createTextNode("Delete after import"));
+          row.appendChild(delWrap);
+
+          var removeBtn = button("Remove", "", function () {
+            sourcesBox.removeChild(row);
+            sourceRows = sourceRows.filter(function (r) { return r.row !== row; });
+          });
+          row.appendChild(removeBtn);
+
+          sourcesBox.appendChild(row);
+          sourceRows.push({
+            row: row,
+            pathInput: pathInput,
+            delCb: delCb,
+            selectedExts: function () { return allExts.filter(function (e) { return extState[e]; }); }
+          });
+        }
+
+        (CONFIG.sources || []).forEach(addSourceRow);
+        sourcesSection.appendChild(button("Add folder", "", function () { addSourceRow({ path: "", pattern: "*", deleteAfterImport: false }); }));
       },
       onConfirm: function () {
         var patch = {
@@ -786,10 +887,21 @@
           rememberDeletions: rememberSel.value === "true"
         };
         if (gpuSel) patch.useGpu = gpuSel.value === "true";
-        return api("/api/settings", { method: "POST", body: patch }).then(function (res) {
-          CONFIG = res.config;
-          toast("Settings saved", "ok");
-        });
+        var sources = sourceRows
+          .map(function (r) {
+            return {
+              path: r.pathInput.value.trim(),
+              pattern: patternFromExts(r.selectedExts(), CONFIG.audioExtensions || []),
+              deleteAfterImport: r.delCb.checked
+            };
+          })
+          .filter(function (s) { return s.path; });
+        return api("/api/settings", { method: "POST", body: patch })
+          .then(function () { return api("/api/sources", { method: "POST", body: { sources: sources } }); })
+          .then(function (res) {
+            CONFIG = res.config;
+            toast("Settings saved", "ok");
+          });
       }
     });
   }
@@ -818,7 +930,7 @@
     var backdrop = document.createElement("div");
     backdrop.className = "backdrop";
     var box = document.createElement("div");
-    box.className = "modal";
+    box.className = "modal" + (spec.wide ? " wide" : "");
     backdrop.appendChild(box);
 
     var h = document.createElement("h3");
@@ -1183,24 +1295,35 @@
         confirmLabel: "Import",
         build: function (host) {
           picks = pickList(host, res.volumes.map(function (v) {
-            var browse = document.createElement("button");
-            browse.type = "button";
-            browse.className = "btn";
-            browse.textContent = subdirs[v.id] ? "…/" + subdirs[v.id].split(/[\\/]/).pop() : "Subfolder";
-            browse.title = "Sync only a subfolder of this volume";
-            browse.addEventListener("click", function (e) {
-              e.preventDefault();
-              e.stopPropagation();
-              browseFolders(v, subdirs[v.id], function (chosen) {
-                subdirs[v.id] = chosen || "";
-                browse.textContent = chosen ? "…/" + chosen.split(/[\\/]/).pop() : "Subfolder";
+            // Configured source folders always sync their whole folder
+            // (optionally pattern-filtered), so there's nothing to browse.
+            var extra;
+            if (v.isManualSource) {
+              extra = document.createElement("span");
+              extra.className = "pk-right";
+              extra.textContent = (v.pattern && v.pattern !== "*" ? "pattern " + v.pattern : "") +
+                (v.deleteAfterImport ? (v.pattern && v.pattern !== "*" ? ", " : "") + "deletes source" : "");
+            } else {
+              var browse = document.createElement("button");
+              browse.type = "button";
+              browse.className = "btn";
+              browse.textContent = subdirs[v.id] ? "…/" + subdirs[v.id].split(/[\\/]/).pop() : "Subfolder";
+              browse.title = "Sync only a subfolder of this volume";
+              browse.addEventListener("click", function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                browseFolders(v, subdirs[v.id], function (chosen) {
+                  subdirs[v.id] = chosen || "";
+                  browse.textContent = chosen ? "…/" + chosen.split(/[\\/]/).pop() : "Subfolder";
+                });
               });
-            });
+              extra = browse;
+            }
             return {
               value: v.id,
               name: v.name + (v.isManualSource ? "  (configured source)" : ""),
               sub: v.mountPath + (v.known && v.known.lastSynced ? "  · last synced " + v.known.lastSynced.slice(0, 10) : ""),
-              extra: browse,
+              extra: extra,
               checked: v.isManualSource || !!(v.known && v.known.autoImport)
             };
           }));
@@ -1288,6 +1411,24 @@
       row.addEventListener("click", onClick);
       return row;
     }
+  }
+
+  // "*" (or empty/legacy) means "any audio file" - shown as every extension
+  // selected, since that's the equivalent state in the multi-select. A
+  // pattern this UI didn't produce (a hand-edited config.json with a custom
+  // wildcard like "VN*.m4a") has no clean multi-select equivalent, so it
+  // also falls back to "everything selected" rather than silently dropping
+  // files - the config file value itself isn't touched until Save.
+  function extsFromPattern(pattern, allExts) {
+    if (!pattern || pattern === "*") return allExts.slice();
+    var parts = pattern.split(",").map(function (p) { return p.trim().toLowerCase(); });
+    var matched = allExts.filter(function (ext) { return parts.indexOf("*" + ext) !== -1; });
+    return matched.length ? matched : allExts.slice();
+  }
+
+  function patternFromExts(selected, allExts) {
+    if (!selected.length || selected.length === allExts.length) return "*";
+    return selected.map(function (ext) { return "*" + ext; }).join(",");
   }
 
   /* ---- Cleanup ---- */

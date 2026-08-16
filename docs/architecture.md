@@ -76,6 +76,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
 | `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `useGpu` |
+| `/api/sources` | POST | Replace `config.sources` wholesale (array-shaped, doesn't fit the scalar `/api/settings` patch) |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
 | `/api/transcript` | PUT | Save an edited transcript (cues or plain text) |
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |
@@ -127,10 +128,16 @@ folder and rejects anything that escapes it.
   the file changed underneath, and the save is refused with a `409`.
 - **Imports are idempotent** by name + size. See
   [Import & sync](import-and-sync.md#re-running-is-safe).
-- **Deletion is confined** to `cleanup`, the UI's cleanup, and per-take delete.
-  Nothing else in the codebase removes a user file — keep it that way. Those
-  three are also the only writers to the deletion ledger, which is why they're
-  the only deletions import can know about.
+- **Deletion is confined** to `cleanup`, the UI's cleanup, and per-take delete
+  for files inside `target`. Those three are also the only writers to the
+  deletion ledger, which is why they're the only deletions import can know
+  about. There is one other, narrower exception: a manually configured
+  `sources` entry with `deleteAfterImport: true` deletes its own
+  already-imported files, but only from the source folder itself, only at
+  import time, and it never touches the ledger (it only reads
+  `loadDeletionMatcher` to avoid deleting a source file whose imported copy
+  was deliberately removed from `target`). See
+  [Import & sync → Source folders](import-and-sync.md#source-folders).
 - **The ledger must never be load-bearing.** `lib/ledger.js` swallows its own
   read *and* write failures: missing, corrupt and unreadable all resolve to
   "nothing is remembered", and a failed write can't turn a successful delete

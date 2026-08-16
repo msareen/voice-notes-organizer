@@ -16,7 +16,9 @@ rather than crashing the tool.
 ```json
 {
   "target": "/path/to/voice-notes",
-  "sources": [],
+  "sources": [
+    { "path": "/mnt/nas/voice-notes", "pattern": "*", "deleteAfterImport": false }
+  ],
   "knownMounts": {},
   "autoTranslate": null,
   "defaultModel": "turbo",
@@ -36,7 +38,7 @@ time.
 | Setting | `vno setting` | UI Settings | Edit the file |
 | --- | :---: | :---: | :---: |
 | `target` | ✅ | shown only | ✅ |
-| `sources` | — | — | ✅ |
+| `sources` | ✅ | ✅ | ✅ |
 | `knownMounts` | reset all | per-volume, on import | ✅ |
 | `autoTranslate` | ✅ | ✅ | ✅ |
 | `defaultModel` | ✅ | ✅ | ✅ |
@@ -61,27 +63,45 @@ Defaults to a `voice-notes` folder inside whatever directory you first ran
 ## `sources`
 
 An array of folders to import from **in addition** to auto-detected removable
-volumes. Use it for network shares, or for drives that are already mounted and
-won't show up as "removable" (an internal disk, a permanently attached USB
-HDD).
+volumes. Use it for network shares, drives that are already mounted and won't
+show up as "removable" (an internal disk, a permanently attached USB HDD), or
+a landing folder a phone's Quick Share/Quick Send drops files into (typically
+Downloads).
 
 ```json
 "sources": [
-  "/mnt/nas/voice-notes",
-  "D:\\Backups\\OldRecorder"
+  { "path": "/mnt/nas/voice-notes", "pattern": "*", "deleteAfterImport": false },
+  { "path": "D:\\Users\\me\\Downloads", "pattern": "VN*.m4a", "deleteAfterImport": true }
 ]
 ```
+
+| Field | Meaning |
+| --- | --- |
+| `path` | Folder to sync from |
+| `pattern` | `"*"`/`"?"` wildcard against the filename. `"*"` (default) means "any audio-extension file", same as a detected volume |
+| `deleteAfterImport` | Once a file is safely copied into `target` (or found to already be there), delete it from this folder. `false` by default. Only turn this on for a disposable landing folder — the original is expected to live somewhere else (e.g. still on the phone), not just here |
 
 Add as many as you like. Every entry is synced into `target` on every
 `vno import` run **without prompting** — it was explicitly configured, so it's
 trusted. They also appear in the UI's import dialog, marked
-*(configured source)* and checked by default.
+*(configured source)* and checked by default, with the pattern/delete state
+shown alongside.
 
 If two sources (or a source and a detected volume) share the same folder name,
 the later one is disambiguated with its parent folder name — e.g.
 `Recordings (deviceB)` — so they don't land in the same destination folder.
 
-**Only settable by editing this file for now.**
+A `deleteAfterImport` source never touches the [deletion ledger](#rememberdeletions)
+— it only reads it, to avoid deleting the source copy of a file whose imported
+copy you deliberately removed from `target` before. See
+[Import & sync](import-and-sync.md#source-folders) for the exact rule.
+
+Older configs with plain path strings (e.g. `"sources": ["/mnt/nas"]`) still
+load fine — they're normalized to `{ path, pattern: "*", deleteAfterImport: false }`
+on read, matching today's behavior exactly.
+
+Add, edit or remove entries with `vno setting` → *Source folders*, from the
+UI's Settings dialog, or by editing this file directly.
 
 ## `knownMounts`
 

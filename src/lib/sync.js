@@ -45,18 +45,24 @@ export function matchGlob(pattern, filename) {
  * `pattern` (a "*"/"?" wildcard) filters by filename instead of the default
  * audio-extension check when given and isn't "*" - used by manually configured
  * source folders that want to restrict what's picked up (see lib/config.js).
+ *
+ * `recursive` (default true) descends into subfolders; passing false scans
+ * only `root` itself. Detected removable volumes never pass this (recorders
+ * bury audio several folders deep, so they need the default), but a manually
+ * configured source folder defaults to false at the config layer - see
+ * lib/config.js:normalizeSources.
  */
-export async function findAudioFiles(root, { onProgress, pattern } = {}) {
+export async function findAudioFiles(root, { onProgress, pattern, recursive = true } = {}) {
   const results = [];
   const matches =
     pattern && pattern !== "*"
       ? (name) => matchGlob(pattern, name)
       : (name) => AUDIO_EXTENSIONS.has(path.extname(name).toLowerCase());
-  await walk(root, results, root, reporter(onProgress), matches);
+  await walk(root, results, root, reporter(onProgress), matches, recursive);
   return results;
 }
 
-async function walk(dir, results, root, report, matches) {
+async function walk(dir, results, root, report, matches, recursive) {
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -68,7 +74,7 @@ async function walk(dir, results, root, report, matches) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walk(full, results, root, report, matches);
+      if (recursive) await walk(full, results, root, report, matches, recursive);
     } else if (entry.isFile() && matches(entry.name)) {
       results.push(full);
     }
@@ -107,6 +113,12 @@ export function reporter(onProgress) {
  * "*"/"?" wildcard instead of the default audio-extension check - only ever
  * set on manually configured source folders, never on detected volumes.
  *
+ * `volume.recursive`, when explicitly false, scans only `volume.mountPath`
+ * itself instead of every subfolder - again only ever set on source folders;
+ * left undefined for detected volumes so `findAudioFiles` keeps its default
+ * (always recursive, since a device's own layout isn't something the user
+ * chose).
+ *
  * `volume.deleteAfterImport`, when true, removes the source file once it's
  * either freshly copied in or found to already match the destination (a
  * duplicate re-drop of an already-imported file) - also source-folder-only.
@@ -138,7 +150,11 @@ export async function syncVolume(volume, target, { rememberDeletions = true, onP
     report({ phase: "log", message: `Flattened ${flattened} previously nested file(s) in ${destRoot}.` });
   }
 
-  const files = (await findAudioFiles(volume.mountPath, { onProgress, pattern: volume.pattern })).sort((a, b) =>
+  const files = (await findAudioFiles(volume.mountPath, {
+    onProgress,
+    pattern: volume.pattern,
+    recursive: volume.recursive,
+  })).sort((a, b) =>
     a.localeCompare(b)
   );
   let copied = 0;

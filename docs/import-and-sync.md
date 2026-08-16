@@ -30,12 +30,21 @@ without prompting.
 ## Source folders
 
 A `sources` entry behaves like a permanently plugged-in volume — synced every
-run, no prompt — but with two extra, opt-in behaviors a real volume doesn't
+run, no prompt — but with three extra, opt-in behaviors a real volume doesn't
 need:
 
 - **`pattern`** restricts the walk to filenames matching a `"*"`/`"?"`
   wildcard (e.g. `VN*.m4a`) instead of the default "any audio-extension file"
   check. Useful when the folder isn't dedicated to voice notes.
+- **`recursive`** — `false` by default, meaning only the configured folder
+  itself is scanned, not its subfolders. A source folder is usually a flat
+  drop point (e.g. a phone's Quick Share/Quick Send target), so a single-level
+  scan is both the common case and the fast one; turn it on to also pick up
+  recordings nested in subfolders. Detected removable volumes don't have this
+  knob — they always scan the whole tree, since a recorder's own folder
+  layout isn't something the user chose (see
+  [Pinning a subfolder](#pinning-a-subfolder) below for narrowing those
+  instead).
 - **`deleteAfterImport`** removes the source file once it's either freshly
   copied into `target` or found to already be there (a duplicate re-drop).
   This is the setting for something like a phone's Quick Share/Quick Send

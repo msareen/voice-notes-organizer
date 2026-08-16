@@ -30,6 +30,7 @@ export async function runImport({ open } = {}) {
         isManualSource: true,
         pattern: source.pattern,
         deleteAfterImport: source.deleteAfterImport,
+        recursive: source.recursive,
       });
     } else {
       console.log(chalk.yellow(`Configured source folder does not exist: ${source.path}`));

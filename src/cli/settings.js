@@ -49,7 +49,7 @@ async function manageSources(config) {
   while (true) {
     const sources = config.sources || [];
     const choices = sources.map((s, i) => ({
-      name: `${s.path}  ${chalk.dim(`[pattern ${s.pattern || "*"}${s.deleteAfterImport ? ", deletes after import" : ""}]`)}`,
+      name: `${s.path}  ${chalk.dim(`[pattern ${s.pattern || "*"}${s.recursive ? ", includes subfolders" : ""}${s.deleteAfterImport ? ", deletes after import" : ""}]`)}`,
       value: `edit:${i}`,
     }));
 
@@ -133,6 +133,20 @@ async function promptSourceEntry(existing) {
   ]);
   if (patternRes === CANCELLED) return null;
 
+  const recursiveRes = await prompt([
+    {
+      type: "list",
+      name: "value",
+      message: "Also scan subfolders of this folder?",
+      default: existing ? Boolean(existing.recursive) : false,
+      choices: [
+        { name: "No — only this folder (typical for a flat drop point)", value: false },
+        { name: "Yes — include every subfolder too", value: true },
+      ],
+    },
+  ]);
+  if (recursiveRes === CANCELLED) return null;
+
   const deleteRes = await prompt([
     {
       type: "list",
@@ -147,7 +161,12 @@ async function promptSourceEntry(existing) {
   ]);
   if (deleteRes === CANCELLED) return null;
 
-  return { path: folder, pattern: patternRes.value.trim() || "*", deleteAfterImport: deleteRes.value };
+  return {
+    path: folder,
+    pattern: patternRes.value.trim() || "*",
+    recursive: recursiveRes.value,
+    deleteAfterImport: deleteRes.value,
+  };
 }
 
 /**

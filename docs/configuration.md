@@ -17,7 +17,7 @@ rather than crashing the tool.
 {
   "target": "/path/to/voice-notes",
   "sources": [
-    { "path": "/mnt/nas/voice-notes", "pattern": "*", "deleteAfterImport": false }
+    { "path": "/mnt/nas/voice-notes", "pattern": "*", "recursive": false, "deleteAfterImport": false }
   ],
   "knownMounts": {},
   "autoTranslate": null,
@@ -70,8 +70,8 @@ Downloads).
 
 ```json
 "sources": [
-  { "path": "/mnt/nas/voice-notes", "pattern": "*", "deleteAfterImport": false },
-  { "path": "D:\\Users\\me\\Downloads", "pattern": "VN*.m4a", "deleteAfterImport": true }
+  { "path": "/mnt/nas/voice-notes", "pattern": "*", "recursive": true, "deleteAfterImport": false },
+  { "path": "D:\\Users\\me\\Downloads", "pattern": "VN*.m4a", "recursive": false, "deleteAfterImport": true }
 ]
 ```
 
@@ -79,6 +79,7 @@ Downloads).
 | --- | --- |
 | `path` | Folder to sync from |
 | `pattern` | `"*"`/`"?"` wildcard against the filename. `"*"` (default) means "any audio-extension file", same as a detected volume |
+| `recursive` | Also scan subfolders of `path`. `false` by default — only `path` itself is scanned, since a source is usually a flat drop point. Turn it on for a folder whose recordings are nested in subfolders |
 | `deleteAfterImport` | Once a file is safely copied into `target` (or found to already be there), delete it from this folder. `false` by default. Only turn this on for a disposable landing folder — the original is expected to live somewhere else (e.g. still on the phone), not just here |
 
 Add as many as you like. Every entry is synced into `target` on every
@@ -97,8 +98,10 @@ copy you deliberately removed from `target` before. See
 [Import & sync](import-and-sync.md#source-folders) for the exact rule.
 
 Older configs with plain path strings (e.g. `"sources": ["/mnt/nas"]`) still
-load fine — they're normalized to `{ path, pattern: "*", deleteAfterImport: false }`
-on read, matching today's behavior exactly.
+load fine — they're normalized to
+`{ path, pattern: "*", recursive: false, deleteAfterImport: false }` on read.
+That's a behavior change from before `recursive` existed (everything was
+scanned recursively); re-enable it per source if you relied on that.
 
 Add, edit or remove entries with `vno setting` → *Source folders*, from the
 UI's Settings dialog, or by editing this file directly.

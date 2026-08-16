@@ -69,11 +69,12 @@ export async function transcribeFile(
   }
 
   const wavPath = path.join(os.tmpdir(), `vno-whisper-${process.pid}-${Date.now()}.wav`);
+  let whisperOutput = "";
   try {
     announce("Converting to WAV...", onOutput);
     await convertToWav(ffmpeg, filePath, wavPath);
     announce("Transcribing with whisper.cpp...", onOutput);
-    await runWhisperCpp(binary.path, {
+    whisperOutput = await runWhisperCpp(binary.path, {
       wavPath,
       modelPath,
       translate,
@@ -88,10 +89,18 @@ export async function transcribeFile(
   }
 
   // Belt and braces: a zero exit code with no fresh transcript on disk is
-  // still a failure, and the caller is about to report "Saved" otherwise.
+  // still a failure (seen with an empty/near-silent recording, or a WAV
+  // whisper.cpp accepted but couldn't align any segments in) - and the caller
+  // is about to report "Saved" otherwise. Exit code 0 means runWhisperCpp
+  // resolved rather than rejected, so there's no thrown error to relay; the
+  // last lines of its own stdout/stderr are the only diagnostic there is.
   const stats = await fs.stat(transcript).catch(() => null);
   if (!stats || stats.mtimeMs < startedAt - 1000) {
-    throw new Error(`whisper.cpp wrote no transcript for ${path.basename(filePath)}`);
+    const tail = whisperOutput && lastLines(whisperOutput, 8);
+    throw new Error(
+      `whisper.cpp wrote no transcript for ${path.basename(filePath)}` +
+        (tail ? ` - last output:\n${tail}` : " (it produced no output either)")
+    );
   }
 }
 
@@ -155,15 +164,21 @@ function runWhisperCpp(
 
     const child = spawn(binaryPath, args, { windowsHide: true });
 
+    // Both streams are kept (not just stderr) so a clean exit that still
+    // wrote no transcript - whisper.cpp does this for a silent/near-empty
+    // recording - has something to show beyond a bare "no transcript" error.
+    let combined = "";
     let stderr = "";
     child.stdout.on("data", (d) => {
       const text = d.toString();
+      combined = (combined + text).slice(-MAX_KEPT_OUTPUT);
       if (onOutput) emitLines(text, onOutput);
       else process.stdout.write(chalk.dim(text));
     });
     child.stderr.on("data", (d) => {
       const text = d.toString();
       stderr = (stderr + text).slice(-MAX_KEPT_OUTPUT);
+      combined = (combined + text).slice(-MAX_KEPT_OUTPUT);
       // whisper.cpp logs backend selection and progress to stderr, so it's
       // worth surfacing live (same as stdout) even though it's also kept for
       // the failure message.
@@ -176,7 +191,7 @@ function runWhisperCpp(
         reject(new Error(stderr ? lastLines(stderr) : `whisper.cpp exited with code ${code}`));
         return;
       }
-      resolve();
+      resolve(combined);
     });
   });
 }

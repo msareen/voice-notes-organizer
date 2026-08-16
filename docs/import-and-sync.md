@@ -27,6 +27,44 @@ Anything the detector misses can be added by hand as a
 [`sources`](configuration.md#sources) entry, which is imported on every run
 without prompting.
 
+## Source folders
+
+A `sources` entry behaves like a permanently plugged-in volume — synced every
+run, no prompt — but with three extra, opt-in behaviors a real volume doesn't
+need:
+
+- **`pattern`** restricts the walk to filenames matching a `"*"`/`"?"`
+  wildcard (e.g. `VN*.m4a`) instead of the default "any audio-extension file"
+  check. Useful when the folder isn't dedicated to voice notes.
+- **`recursive`** — `false` by default, meaning only the configured folder
+  itself is scanned, not its subfolders. A source folder is usually a flat
+  drop point (e.g. a phone's Quick Share/Quick Send target), so a single-level
+  scan is both the common case and the fast one; turn it on to also pick up
+  recordings nested in subfolders. Detected removable volumes don't have this
+  knob — they always scan the whole tree, since a recorder's own folder
+  layout isn't something the user chose (see
+  [Pinning a subfolder](#pinning-a-subfolder) below for narrowing those
+  instead).
+- **`deleteAfterImport`** removes the source file once it's either freshly
+  copied into `target` or found to already be there (a duplicate re-drop).
+  This is the setting for something like a phone's Quick Share/Quick Send
+  drop folder: the phone still holds the original, so the copy that lands in
+  Downloads is disposable, and turning this on keeps it from piling up.
+
+  There's one safety exception: if [`rememberDeletions`](configuration.md#rememberdeletions)
+  shows this exact target path was **deliberately deleted from the library
+  before**, the source file is left in place instead of being removed — the
+  import is skipping it on purpose, so silently destroying the only remaining
+  copy would be wrong. Nothing about this is written to the deletion ledger;
+  it only ever reads it.
+
+  Leave `deleteAfterImport` off (the default) for a folder that's an actual
+  permanent archive.
+
+See [Configuration → `sources`](configuration.md#sources) for the exact
+schema, and `vno setting` → *Source folders* / the UI's Settings dialog to
+manage entries without hand-editing the config file.
+
 ## Pinning a subfolder
 
 Most voice recorders bury audio several folders deep:
@@ -88,7 +126,10 @@ So plugging the recorder in twice copies nothing the second time, and
 Synced "IC RECORDER": 4 copied, 112 already up to date -> D:\voice-notes\IC RECORDER
 ```
 
-**Nothing is ever deleted from the device.** Import only reads.
+**Nothing is ever deleted from a detected volume.** Import only reads from
+those. The one exception is a manually configured [source folder](#source-folders)
+with `deleteAfterImport: true`, which is opt-in per folder and never applies
+to a removable device.
 
 ## Deleted recordings stay deleted
 

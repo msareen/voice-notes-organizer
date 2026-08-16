@@ -22,9 +22,18 @@ src/
     config.js  notes.js  sync.js  media.js  vtt.js
     volumes.js  whisper.js  whispercpp.js  setup.js  open.js  ledger.js
   web/               the browser UI behind `vno visualize`
-    server.js        HTTP server: session token, JSON API, SSE job stream
+    server/          HTTP server: session token, JSON API, SSE job stream
+      index.js       bootstraps http.Server, builds ctx, dispatches routes
+      context.js     the shared ctx: notes/config/job state + helpers
+      assets.js  media.js  events.js
+      routes/        one module per route group (state, settings, notes,
+                      transcribe, import, cleanup)
     page.js          the HTML shell, and nothing else
-    assets/          app.css and app.js, served as plain static files
+    assets/          app.css and app.js (the client entry), plus:
+      js/            state.js  dom.js  api.js  format.js  widgets.js
+                      list.js  deck.js  jobs.js  actions.js  deps.js  models.js
+                      divider.js  dragdrop.js
+      js/panels/     settings.js  import.js  transcribe.js  cleanup.js
 ```
 
 **Dependencies run one way:** `bin/` → `cli/` → `lib/`, with `web/` reaching
@@ -48,12 +57,17 @@ so anything there is safe to reuse from either side.
 
 ## There is no build step
 
-`assets/app.css` and `assets/app.js` are read from disk on **each request**, so
-a browser reload is enough to see a UI edit — no restart. Changes to
-`server.js` or anything in `lib/` do need a restart.
+`assets/app.css`, `assets/app.js` and every module under `assets/js/` are read
+from disk on **each request**, so a browser reload is enough to see a UI edit
+— no restart. Changes to anything in `web/server/` or `lib/` do need a
+restart.
 
-The client script is plain ES5-flavoured JavaScript with no bundler, no
-framework and no dependencies. Keep it that way.
+The client is plain ES5-flavoured JavaScript loaded as native ES modules
+(`<script type="module">`) — no bundler, no framework and no dependencies,
+just the browser resolving `import`/`export` directly off disk. Keep it that
+way: a new client file just needs an `import` from whichever module uses it,
+and `server/assets.js` serves anything under `assets/` by extension, so no
+server change is needed either.
 
 The session token is the one thing not in the assets: `page.js` inlines it into
 the HTML, so it never travels in an asset URL — which is also why the two asset
@@ -69,13 +83,14 @@ outright. See the [UI's security model](ui.md#security-model).
 | Route | Method | Purpose |
 | --- | --- | --- |
 | `/` | GET | The page. Token required as `?t=` |
-| `/assets/{app.css,app.js}` | GET | Static assets. **Not** token-gated, by design |
+| `/assets/*` | GET | Static assets (app.css, app.js, assets/js/**). **Not** token-gated, by design |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
 | `/api/state` | GET | Notes, config, model list, `ffmpeg`/whisper.cpp availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
 | `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `useGpu` |
+| `/api/sources` | POST | Replace `config.sources` wholesale (array-shaped, doesn't fit the scalar `/api/settings` patch) |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
 | `/api/transcript` | PUT | Save an edited transcript (cues or plain text) |
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |
@@ -83,6 +98,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/transcribe` | POST | Start a transcription job |
 | `/api/volumes` | GET | Detected volumes plus configured sources |
 | `/api/browse` | GET | List subfolders of a volume, one level |
+| `/api/browse-fs` | GET | List subfolders of any filesystem path, one level (drives/root with no `path`) — powers the source-folder picker, since it isn't confined to a volume |
 | `/api/import` | POST | Start an import job |
 | `/api/upload` | POST | Drag-and-drop: stream one raw audio file to `Dropped/`. Not a job — token comes off the query string, since it's not a JSON body |
 | `/api/cleanup/scan` | GET | Recordings under a duration threshold |
@@ -127,10 +143,16 @@ folder and rejects anything that escapes it.
   the file changed underneath, and the save is refused with a `409`.
 - **Imports are idempotent** by name + size. See
   [Import & sync](import-and-sync.md#re-running-is-safe).
-- **Deletion is confined** to `cleanup`, the UI's cleanup, and per-take delete.
-  Nothing else in the codebase removes a user file — keep it that way. Those
-  three are also the only writers to the deletion ledger, which is why they're
-  the only deletions import can know about.
+- **Deletion is confined** to `cleanup`, the UI's cleanup, and per-take delete
+  for files inside `target`. Those three are also the only writers to the
+  deletion ledger, which is why they're the only deletions import can know
+  about. There is one other, narrower exception: a manually configured
+  `sources` entry with `deleteAfterImport: true` deletes its own
+  already-imported files, but only from the source folder itself, only at
+  import time, and it never touches the ledger (it only reads
+  `loadDeletionMatcher` to avoid deleting a source file whose imported copy
+  was deliberately removed from `target`). See
+  [Import & sync → Source folders](import-and-sync.md#source-folders).
 - **The ledger must never be load-bearing.** `lib/ledger.js` swallows its own
   read *and* write failures: missing, corrupt and unreadable all resolve to
   "nothing is remembered", and a failed write can't turn a successful delete

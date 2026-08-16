@@ -151,6 +151,14 @@ The settings that are also offered by `vno setting`:
 is shown but not editable here — changing it needs a re-scan, so it lives in
 `vno setting`. Changes save as you make them.
 
+**Source folders** — synced every import in addition to detected volumes — are
+also editable here: paste or type a path, or click **Browse…** to walk the
+filesystem from a server-side folder tree (a browser's own directory picker
+can't hand back a real path, so this drives `/api/browse-fs` instead). Each
+row also picks which audio extensions to pick up, whether to include
+subfolders (off by default — a source is usually a flat drop point), and
+whether to delete the source file once it's safely copied in.
+
 The GPU row only appears when an accelerator-capable whisper.cpp build was
 installed, and only turns it on or off: *installing* one is
 [`vno setup`](cli-reference.md#vno-setup)'s job, since the browser can't run

@@ -5,6 +5,19 @@ import path from "node:path";
 const CONFIG_DIR = path.join(os.homedir(), ".vno");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
+function normalizeSources(list) {
+  return (list || []).map((s) =>
+    typeof s === "string"
+      ? { path: s, pattern: "*", deleteAfterImport: false, recursive: false }
+      : {
+          path: s.path,
+          pattern: s.pattern || "*",
+          deleteAfterImport: Boolean(s.deleteAfterImport),
+          recursive: Boolean(s.recursive),
+        }
+  );
+}
+
 function defaultConfig() {
   return {
     // Where imported/synced audio files land. Defaults to a "voice-notes"
@@ -12,8 +25,18 @@ function defaultConfig() {
     // afterwards by editing this file.
     target: path.join(process.cwd(), "voice-notes"),
     // Optional manually-configured source folders to import from in addition
-    // to auto-detected removable volumes (e.g. network shares or folders
-    // that are already mounted). Only settable by editing this file for now.
+    // to auto-detected removable volumes (e.g. network shares, a phone's
+    // Quick Share/Quick Send drop folder, or folders that are already
+    // mounted). Each entry is { path, pattern, deleteAfterImport, recursive }:
+    // `pattern` is a "*"/"?" wildcard against the filename ("*" = any
+    // audio-extension file, today's behavior); `deleteAfterImport` removes the
+    // source file once it's safely copied in, for disposable landing folders
+    // where the original lives elsewhere (e.g. still on the phone) - see
+    // lib/sync.js:syncVolume. `recursive` defaults to false (scan only the
+    // configured folder itself) since a source folder is usually a flat drop
+    // point, unlike a recorder's device volume which always walks the whole
+    // tree; tick it on to also pick up files nested in subfolders. Editable
+    // via `vno setting` and the UI.
     sources: [],
     // keyed by a stable identifier for the volume (label + size), remembers
     // whether the user wants it auto-imported and when it was last synced.
@@ -72,6 +95,7 @@ export async function loadConfig() {
     const merged = {
       ...defaults,
       ...data,
+      sources: normalizeSources(data.sources),
       knownMounts: { ...data.knownMounts },
       accel: { ...defaults.accel, ...data.accel },
     };

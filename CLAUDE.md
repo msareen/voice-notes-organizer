@@ -139,9 +139,10 @@ linter config. Verify changes by running the CLI or the UI by hand. `tsconfig.js
 is a leftover Bun template — there is no TypeScript in the repo and nothing typechecks
 it; ignore it rather than trying to satisfy it.
 
-**No build step for the UI either.** `src/web/assets/app.css` and `app.js` are read
-from disk on *every request*, so a browser reload shows a UI edit. Changes to
-`server.js`, `page.js`, or anything in `src/lib/` need a server restart.
+**No build step for the UI either.** `src/web/assets/app.css`, `app.js` and every
+module under `assets/js/` are read from disk on *every request* (`server/assets.js`),
+so a browser reload shows a UI edit. Changes to `src/web/server/`, `page.js`, or
+anything in `src/lib/` need a server restart.
 
 **Published to npm as a public scoped package.** `@msareen/voice-notes-organizer`
 — `publishConfig.access` must stay `"public"`, since scoped packages default to
@@ -175,10 +176,27 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   model resolution/download/validation) and `whisper.js` (resolving the installed
   binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
   the binary, the accel-state helpers that replaced `gpu.js`).
-- `src/web/server.js` — the whole HTTP server: token gate, JSON API, SSE job stream,
-  range-request media streaming. `page.js` emits the HTML shell and nothing else.
-- `src/web/assets/app.js` — the entire client, ~1200 lines of plain ES5-flavoured JS
-  in one IIFE, no framework, no bundler, no dependencies. Keep it that way.
+- `src/web/server/` — the HTTP server, split by route group. `index.js` builds the
+  shared `ctx` (notes/config/job/SSE-clients state, plus the token gate and dispatch
+  table) and owns process/socket lifecycle; `context.js` defines `ctx` itself;
+  `assets.js`/`media.js`/`events.js` handle static files, range-request audio
+  streaming and the SSE stream; `routes/*.js` (state, settings, notes, transcribe,
+  import, cleanup) each export a `createXRoutes(ctx)` factory of closures over `ctx` -
+  add a new route by adding a case to `index.js`'s dispatch switch and a handler in
+  the matching (or a new) `routes/` file. `page.js` emits the HTML shell and nothing
+  else.
+- `src/web/assets/app.js` — the client entry point, native ES modules (`<script
+  type="module">`, no bundler, no framework, no dependencies - browsers resolve the
+  imports directly, so app.js is just wiring). The rest lives under `assets/js/`:
+  `state.js`/`dom.js` hold the shared mutable state and element refs every module
+  reads; `api.js`/`format.js`/`widgets.js` are generic helpers; `list.js` (the takes
+  list) and `deck.js` (the playback/transcript deck) are mutually referential by
+  design - selecting a row plays it, the deck's actions refresh the list - which is a
+  safe ES module cycle as long as cross-calls happen inside event handlers rather
+  than at module-evaluation time; `panels/*.js` are the four command modals
+  (Settings, Import, Transcribe, Cleanup); `jobs.js` owns the SSE connection, the job
+  strip and page lifecycle (heartbeat, quit, deferred shutdown). Keep the "no build
+  step" property: every file here must be loadable as-is by a browser.
 
 `docs/architecture.md` has the full route table and module responsibilities; read it
 before changing the API surface.
@@ -268,8 +286,9 @@ before changing the API surface.
 - Config is a single global file, `~/.vno/config.json`, loaded via `loadConfig()` and
   merged over `defaultConfig()`; a corrupt file is backed up rather than crashing.
   New settings need a default there plus, usually, a case in `vno setting`, a field in
-  the UI's settings dialog (`app.js:openSettings`), and passthrough in the server's
-  `patchSettings` **and** `stateResponse` — the dialog can't show what state doesn't
+  the UI's settings dialog (`assets/js/panels/settings.js:openSettings`), and
+  passthrough in the server's `routes/settings.js:settings` **and**
+  `context.js:stateResponse` — the dialog can't show what state doesn't
   send. `~/.vno` also holds `deleted.json`; config is not the only file there.
 - **Long per-file work reports, it doesn't print.** `buildNotes`, `findAudioFiles` and
   `syncVolume` take an optional `onProgress` and emit `{ phase: "scan", dir, found }`,

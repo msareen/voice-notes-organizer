@@ -7,6 +7,7 @@ import path from "node:path";
 import { URL } from "node:url";
 import chalk from "chalk";
 import { renderPage } from "../page.js";
+import { themeOf } from "../../lib/themes.js";
 import { createContext } from "./context.js";
 import { serveAsset } from "./assets.js";
 import { serveMedia } from "./media.js";
@@ -69,7 +70,11 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         res.writeHead(403, { "Content-Type": "text/plain" });
         return res.end("Invalid or missing session token. Open the URL vno printed in your terminal.");
       }
-      const html = renderPage({ rootLabel: path.basename(target) || "voice notes", token });
+      const html = renderPage({
+        rootLabel: path.basename(target) || "voice notes",
+        token,
+        theme: themeOf(ctx.config),
+      });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(html);
     }

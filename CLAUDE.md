@@ -174,7 +174,8 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
   `setup.js` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.js`
   (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
-  model resolution/download/validation) and `whisper.js` (resolving the installed
+  model resolution/download/validation), `themes.js` (the UI theme ids +
+  `themeOf()` — ids only, never colours) and `whisper.js` (resolving the installed
   binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
   the binary, the accel-state helpers that replaced `gpu.js`), plus
   `special-case-handling.js` (recovering Samsung `.m4a` files with a truncated
@@ -198,7 +199,9 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   safe ES module cycle as long as cross-calls happen inside event handlers rather
   than at module-evaluation time; `panels/*.js` are the four command modals
   (Settings, Import, Transcribe, Cleanup); `jobs.js` owns the SSE connection, the job
-  strip and page lifecycle (heartbeat, quit, deferred shutdown). Keep the "no build
+  strip and page lifecycle (heartbeat, quit, deferred shutdown); `theme.js` writes the
+  theme id onto `<html>` and `icons.js` builds the few SVGs the client makes at
+  runtime (the topbar's are inline in `page.js`). Keep the "no build
   step" property: every file here must be loadable as-is by a browser.
 
 `docs/architecture.md` has the full route table and module responsibilities; read it
@@ -251,6 +254,17 @@ before changing the API surface.
   full rescan.
 - **One job at a time.** `guardJob()` returns `409 Busy` for a second start. Job output
   streams line-by-line to the page log.
+- **Colour lives in tokens, and a theme is one attribute.** Every palette is a
+  `[data-theme="<id>"]` block at the top of `assets/app.css` setting the same dozen
+  semantic custom properties (`--bg`, `--surface`, `--ink`, `--accent`, `--line`, …);
+  nothing below those blocks may write a literal colour, or it won't survive a theme
+  swap. The blocks are deliberately `[data-theme=…]` and not `:root[data-theme=…]`,
+  so the settings dialog previews a theme by putting its id on a swatch element and
+  no hex value is ever repeated in JS. `page.js` stamps the saved theme onto `<html>`
+  server-side, since a theme arriving with `/api/state` would flash the default first.
+  `"auto"` has no palette of its own: it borrows Tape, and Daylight again inside a
+  `prefers-color-scheme: light` media query — the one palette written twice, because
+  a media query can't be referenced from another selector. Keep those two in step.
 - **The Samsung `.m4a` repair re-frames with ffmpeg, and only from a catch block.**
   `lib/special-case-handling.js` handles recordings whose `moov` was cut off
   mid-`stsz` by an interrupted copy: `mdat` is intact, but AAC `raw_data_block`s

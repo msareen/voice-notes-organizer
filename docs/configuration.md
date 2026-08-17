@@ -25,6 +25,7 @@ rather than crashing the tool.
   "transcribeLanguage": "auto",
   "openWhenDone": true,
   "rememberDeletions": true,
+  "theme": "tape",
   "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
 }
 ```
@@ -45,6 +46,7 @@ time.
 | `transcribeLanguage` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
+| `theme` | ✅ | ✅ | ✅ |
 | `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
 
 ---
@@ -215,6 +217,27 @@ Whether a finished `vno import` / `vno transcribe` run launches the
 headless.
 
 `--no-open` overrides it for a single run.
+
+---
+
+## `theme`
+
+Which colour theme the [browser UI](ui.md#settings) wears. One of:
+
+| Value | Looks like |
+| --- | --- |
+| `auto` | Follows your system's light/dark setting (Tape after dark, Daylight in the light) |
+| `tape` | Warm dark, amber accent — the default |
+| `dusk` | Cool indigo, periwinkle accent |
+| `moss` | Deep green, lime accent |
+| `daylight` | Light paper, rust accent |
+| `contrast` | Maximum contrast, heavier hairlines |
+
+Pick one in the UI's Settings panel (it previews as you click) or in
+`vno setting`. Anything else in this field falls back to `tape`.
+
+The theme is stored here rather than in the browser, so the page can be served
+already wearing it — and so `vno setting` can change it without a browser open.
 
 ---
 

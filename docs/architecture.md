@@ -19,7 +19,7 @@ src/
     import.js  transcribe.js  cleanup.js  visualize.js  settings.js
     setup.js   prompt.js  searchableCheckbox.js  progress.js
   lib/               domain logic and OS access, shared by the CLI and the UI
-    config.js  notes.js  sync.js  media.js  vtt.js
+    config.js  notes.js  sync.js  media.js  vtt.js  themes.js
     volumes.js  whisper.js  whispercpp.js  setup.js  open.js  ledger.js
     special-case-handling.js
   web/               the browser UI behind `vno visualize`
@@ -33,7 +33,7 @@ src/
     assets/          app.css and app.js (the client entry), plus:
       js/            state.js  dom.js  api.js  format.js  widgets.js
                       list.js  deck.js  jobs.js  actions.js  deps.js  models.js
-                      divider.js  dragdrop.js
+                      divider.js  dragdrop.js  theme.js  icons.js
       js/panels/     settings.js  import.js  transcribe.js  cleanup.js
 ```
 
@@ -55,6 +55,7 @@ so anything there is safe to reuse from either side.
 | `cli/progress.js` | The terminal progress bar every slow per-file loop draws through |
 | `lib/open.js` | Opening a folder / revealing a file, per OS — behind `vno explore`, the UI's Explore button and `/api/reveal` alike |
 | `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
+| `lib/themes.js` | The UI's theme ids/labels, and `themeOf(config)`. Ids only — each palette lives in `assets/app.css` as a `[data-theme="id"]` block, so colours have one home. Here rather than in `web/` because `vno setting` offers the same list |
 | `lib/special-case-handling.js` | Recovering Samsung Voice Recorder `.m4a` files whose index was truncated by an interrupted copy — see [Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe-and-a-repairedm4a-appeared) |
 
 ## There is no build step
@@ -87,11 +88,11 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/` | GET | The page. Token required as `?t=` |
 | `/assets/*` | GET | Static assets (app.css, app.js, assets/js/**). **Not** token-gated, by design |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
-| `/api/state` | GET | Notes, config, model list, `ffmpeg`/whisper.cpp availability, current job |
+| `/api/state` | GET | Notes, config, model list, theme list, `ffmpeg`/whisper.cpp availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
-| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `useGpu` |
+| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `theme`, `useGpu` |
 | `/api/sources` | POST | Replace `config.sources` wholesale (array-shaped, doesn't fit the scalar `/api/settings` patch) |
 | `/api/sources/explore` | POST | Open the folder a source's files currently land in (or will, on next sync) — `mapTo` when set, else `target/<sanitized source basename>/`. Used by the source-removal confirmation dialog |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
@@ -123,6 +124,19 @@ folder and rejects anything that escapes it.
   doesn't show stale data until the next full rebuild.
 - **One job at a time.** A second start returns `409 Busy`. Jobs stream their
   output line by line to the page's log panel; the last 200 lines are kept.
+- **Colour only ever comes from a token, and a theme is one attribute.** Every
+  palette is a `[data-theme="<id>"]` block at the top of `assets/app.css`
+  defining the same dozen semantic custom properties (`--bg`, `--surface`,
+  `--ink`, `--accent`, …); nothing below those blocks writes a literal colour,
+  which is what lets a theme swap the whole page by rewriting
+  `document.documentElement.dataset.theme` (`assets/js/theme.js`). Two
+  consequences worth keeping: the blocks are written as `[data-theme=…]`
+  rather than `:root[data-theme=…]`, so the settings dialog can preview a
+  theme by putting its id on a swatch element instead of duplicating hex
+  values in JS; and the saved theme is stamped into `<html>` by `page.js`,
+  because a theme that only arrived with `/api/state` would paint the default
+  palette first and then visibly swap. `lib/themes.js` holds the ids (shared
+  with `vno setting`) — never the colours.
 - **The Samsung `.m4a` repair is a catch-block feature, and it re-frames with
   ffmpeg rather than a native decoder.** `lib/special-case-handling.js` handles
   recordings whose `moov` was cut off mid-`stsz` by an interrupted copy. The

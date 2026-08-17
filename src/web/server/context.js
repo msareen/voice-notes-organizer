@@ -9,6 +9,7 @@ import { resolveModel } from "../../lib/whispercpp.js";
 import { checkDependencies } from "../../lib/setup.js";
 import { recordDeletions } from "../../lib/ledger.js";
 import { AUDIO_EXTENSIONS } from "../../lib/sync.js";
+import { THEMES, themeOf } from "../../lib/themes.js";
 import { MODELS, LANGUAGES } from "./constants.js";
 
 /**
@@ -116,6 +117,7 @@ export async function createContext({ config, target, onScanProgress }) {
         transcribeLanguage: currentConfig.transcribeLanguage || "auto",
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
+        theme: themeOf(currentConfig),
         sources: currentConfig.sources || [],
         audioExtensions: Array.from(AUDIO_EXTENSIONS).sort(),
         // Only the answer is the browser's to change; the backend itself is
@@ -133,6 +135,7 @@ export async function createContext({ config, target, onScanProgress }) {
       models: MODELS,
       modelAvailability: await modelAvailability(),
       languages: LANGUAGES,
+      themes: THEMES,
       ...(await dependencyStatus()),
       job,
     };

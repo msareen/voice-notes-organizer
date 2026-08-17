@@ -46,13 +46,14 @@ export function modal(spec) {
   var cancel = button("Cancel", "", close);
   actions.appendChild(cancel);
   var confirm = null;
+  var confirmed = false;
   if (spec.onConfirm) {
     confirm = button(spec.confirmLabel || "OK", spec.danger ? "danger" : "primary", function () {
       confirm.disabled = true;
       cancel.disabled = true;
       // new Promise() so a synchronous throw inside onConfirm is caught too.
       new Promise(function (resolve) { resolve(spec.onConfirm()); })
-        .then(close)
+        .then(function () { confirmed = true; close(); })
         .catch(function (err) {
           confirm.disabled = false;
           cancel.disabled = false;
@@ -65,9 +66,13 @@ export function modal(spec) {
   }
   box.appendChild(actions);
 
+  // `onCancel` fires for every way out that isn't a completed confirm
+  // (Cancel, Escape, a click on the backdrop), which is what a dialog with a
+  // live preview needs to put back what the user was looking at.
   function close() {
     backdrop.remove();
     document.removeEventListener("keydown", onKey);
+    if (!confirmed && spec.onCancel) spec.onCancel();
   }
   function isTopmost() {
     var all = document.querySelectorAll(".backdrop");
@@ -81,7 +86,9 @@ export function modal(spec) {
   backdrop.addEventListener("click", function (e) { if (e.target === backdrop) close(); });
   document.addEventListener("keydown", onKey);
   document.body.appendChild(backdrop);
-  (confirm || cancel).focus();
+  // preventScroll, or focusing the action row would scroll a tall dialog
+  // (Settings) straight past its own first section.
+  (confirm || cancel).focus({ preventScroll: true });
   return { close: close };
 }
 

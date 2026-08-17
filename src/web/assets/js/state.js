@@ -9,6 +9,7 @@ export const state = {
   MODELS: [],
   MODEL_AVAILABILITY: {},
   LANGUAGES: [],
+  THEMES: [],
   WHISPER: true,
   FFMPEG: true,
   selectedRel: null,

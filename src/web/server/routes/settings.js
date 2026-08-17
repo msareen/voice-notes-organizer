@@ -1,6 +1,7 @@
 import { accelState } from "../../../lib/whisper.js";
 import { sourceDestFolder } from "../../../lib/sync.js";
 import { openPath } from "../../../lib/open.js";
+import { THEME_IDS } from "../../../lib/themes.js";
 import { MODELS, LANGUAGES } from "../constants.js";
 
 /** POST /api/settings, POST /api/sources, POST /api/sources/explore. */
@@ -14,6 +15,7 @@ export function createSettingsRoutes(ctx) {
     if ("transcribeLanguage" in body && LANGUAGES.includes(body.transcribeLanguage)) {
       config.transcribeLanguage = body.transcribeLanguage;
     }
+    if ("theme" in body && THEME_IDS.includes(body.theme)) config.theme = body.theme;
     if ("openWhenDone" in body) config.openWhenDone = Boolean(body.openWhenDone);
     if ("rememberDeletions" in body) config.rememberDeletions = Boolean(body.rememberDeletions);
     // `useGpu` and not the whole accel block: the installed backend is

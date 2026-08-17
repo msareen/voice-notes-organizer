@@ -1,9 +1,10 @@
-// Settings panel: transcription defaults, import behaviour, and the
-// source-folders editor (including its own server-side folder browser).
+// Settings panel: appearance, transcription defaults, import behaviour, and
+// the source-folders editor (including its own server-side folder browser).
 import { state } from "../state.js";
 import { api, toast } from "../api.js";
 import { button, modal, selectField } from "../widgets.js";
 import { modelOptions } from "../models.js";
+import { applyTheme, currentTheme } from "../theme.js";
 
 var LANGUAGE_LABELS = {
   auto: "Auto-detect",
@@ -14,13 +15,32 @@ var LANGUAGE_LABELS = {
 export function openSettings() {
   var autoSel, modelSel, languageSel, openSel, rememberSel, gpuSel;
   var sourceRows = [];
+  // Theme is previewed live on the whole page, so the panel has to remember
+  // what was on when it opened and put it back if the user backs out.
+  var startTheme = state.CONFIG.theme || currentTheme();
+  var chosenTheme = startTheme;
   modal({
     title: "Settings",
     message: null,
     confirmLabel: "Save",
     panel: true,
+    onCancel: function () { applyTheme(startTheme); },
     build: function (host) {
       var CONFIG = state.CONFIG;
+
+      var appearance = document.createElement("div");
+      appearance.className = "settings-full first";
+      var ah = document.createElement("h4");
+      ah.textContent = "Appearance";
+      appearance.appendChild(ah);
+      appearance.appendChild(themeGrid(chosenTheme, function (id) { chosenTheme = id; }));
+      var themeHint = document.createElement("p");
+      themeHint.className = "hint";
+      themeHint.textContent = "Applies as you pick, and sticks once you save. \"Auto\" follows your " +
+        "system's light/dark setting.";
+      appearance.appendChild(themeHint);
+      host.appendChild(appearance);
+
       var grid = document.createElement("div");
       grid.className = "settings-grid";
       host.appendChild(grid);
@@ -240,6 +260,7 @@ export function openSettings() {
     },
     onConfirm: function () {
       var patch = {
+        theme: chosenTheme,
         autoTranslate: autoSel.value === "null" ? null : autoSel.value === "true",
         defaultModel: modelSel.value,
         transcribeLanguage: languageSel.value,
@@ -266,6 +287,63 @@ export function openSettings() {
         });
     }
   });
+}
+
+/**
+ * The theme picker. Each card carries the theme's id on its swatch, so the
+ * swatch renders in that theme's own tokens straight out of app.css - no
+ * colour value is repeated in JS, and a palette edited in the stylesheet
+ * shows up here without touching this file. Picking one previews it on the
+ * whole page immediately; the caller decides whether to keep it.
+ */
+function themeGrid(selected, onPick) {
+  var wrap = document.createElement("div");
+  wrap.className = "theme-grid";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "Theme");
+
+  var cards = [];
+  (state.THEMES || []).forEach(function (theme) {
+    var card = document.createElement("button");
+    card.type = "button";
+    card.className = "theme-card";
+    card.setAttribute("aria-pressed", String(theme.id === selected));
+
+    var swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.setAttribute("data-theme", theme.id);
+    ["s-dot", "s-bar lit", "s-bar"].forEach(function (cls) {
+      var part = document.createElement("i");
+      part.className = cls;
+      swatch.appendChild(part);
+    });
+    card.appendChild(swatch);
+
+    var name = document.createElement("span");
+    name.className = "t-name";
+    name.appendChild(document.createTextNode(theme.label));
+    var check = document.createElement("span");
+    check.className = "t-check";
+    check.textContent = "✓";
+    name.appendChild(check);
+    card.appendChild(name);
+
+    if (theme.blurb) {
+      var blurb = document.createElement("span");
+      blurb.className = "t-blurb";
+      blurb.textContent = theme.blurb;
+      card.appendChild(blurb);
+    }
+
+    card.addEventListener("click", function () {
+      applyTheme(theme.id);
+      onPick(theme.id);
+      cards.forEach(function (c) { c.setAttribute("aria-pressed", String(c === card)); });
+    });
+    wrap.appendChild(card);
+    cards.push(card);
+  });
+  return wrap;
 }
 
 // Confirms removing a source folder entry before it's actually taken out of

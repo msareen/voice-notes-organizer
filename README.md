@@ -60,6 +60,8 @@ effect on disk immediately.
 - **Full toolbar** — import, transcribe, cleanup, explore and settings, all
   without leaving the page. Long jobs show a progress bar and stream
   whisper.cpp's live output into a log panel.
+- **Six themes** — dark, light, high-contrast, or follow your system. Pick one
+  in Settings and watch the page change as you click.
 - **Private by construction** — bound to `127.0.0.1` on a random port behind a
   single-use session token. Close the tab and the CLI exits.
 
@@ -186,6 +188,7 @@ Settings live in one global per-user file — `~/.vno/config.json`. Run
   "autoTranslate": null,
   "defaultModel": "turbo",
   "openWhenDone": true,
+  "theme": "tape",
   "accel": { "backend": null, "use": null }
 }
 ```
@@ -198,6 +201,7 @@ Settings live in one global per-user file — `~/.vno/config.json`. Run
 | `autoTranslate` | Translate imports to English — `true` / `false` / `null` (ask once) |
 | `defaultModel` | Whisper model: `turbo`, `tiny`, `base`, `small`, `medium`, `large` |
 | `openWhenDone` | Whether finished runs launch the browser UI |
+| `theme` | The browser UI's colour theme: `auto`, `tape`, `dusk`, `moss`, `daylight`, `contrast` |
 | `accel` | What `vno setup` installed for GPU acceleration, and whether to use it |
 
 Most of these are editable from `vno setting` or the UI's Settings dialog — you

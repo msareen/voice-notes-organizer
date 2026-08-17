@@ -69,6 +69,12 @@ function defaultConfig() {
     // files landed in and open the regenerated index.html player. Set to
     // false (or pass --no-open) to keep runs headless.
     openWhenDone: true,
+    // Colour theme for the browser UI, as one of the ids in
+    // web/server/constants.js:THEMES ("auto" follows the OS light/dark
+    // setting). Stored here rather than in the browser's localStorage so the
+    // server can stamp it onto <html> in the first response - a theme that
+    // only arrived with /api/state would flash the default palette first.
+    theme: "tape",
     // What `vno setup` installed for whisper.cpp's accelerator backend, and
     // what the user wants done with it. `backend` is fixed by which binary
     // got installed - null = not installed yet, "cpu" = installed but no

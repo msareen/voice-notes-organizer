@@ -3,6 +3,7 @@ import fs from "fs-extra";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
+import { THEMES, themeOf } from "../lib/themes.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { checkDependencies } from "../lib/setup.js";
 import { accelState } from "../lib/whisper.js";
@@ -293,6 +294,7 @@ export async function runSettings() {
           { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
+          { name: `Viewer theme            ${chalk.dim(`[${themeOf(config)}]`)}`, value: "theme" },
           { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
           { name: `Source folders  ${chalk.dim(`[${(config.sources || []).length} configured]`)}`, value: "sources" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
@@ -444,6 +446,21 @@ export async function runSettings() {
       ]);
       if (res !== CANCELLED) {
         config.openWhenDone = res.value;
+        await saveConfig(config);
+      }
+    } else if (answer.action === "theme") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "Colour theme for the browser viewer",
+          default: themeOf(config),
+          choices: THEMES.map((t) => ({ name: `${t.label}  ${chalk.dim(t.blurb)}`, value: t.id })),
+          loop: false,
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.theme = res.value;
         await saveConfig(config);
       }
     } else if (answer.action === "rememberDeletions") {

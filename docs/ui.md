@@ -18,6 +18,9 @@ with `vno v`.
 
 ### Header
 
+The commands sit on the left, next to the root label; the readout and the two
+system keys sit on the right.
+
 | Element | What it does |
 | --- | --- |
 | **Root label** (`voice-notes`) | The name of your target folder |
@@ -25,9 +28,12 @@ with `vno v`.
 | **Transcribe** | Pick takes and run whisper on them — see [Transcribe dialog](#transcribe) |
 | **Cleanup** | Find and delete very short recordings — see [Cleanup dialog](#cleanup) |
 | **Explore** | Opens the target folder in Explorer / Finder / your file manager — the same thing `vno explore` does |
-| **Settings** | The four settings also offered by `vno setting` — see [Settings dialog](#settings) |
-| **Takes / Total** | Number of recordings and their combined running time |
-| **Quit** | Stops the server and ends the CLI session |
+| **Recordings / Total time** | Number of recordings and their combined running time |
+| **⚙ Settings** (right) | Theme, plus the settings also offered by `vno setting` — see [Settings dialog](#settings) |
+| **⏻ Quit** (right) | Stops the server and ends the CLI session |
+
+On a narrow window the readout drops out and the command buttons keep their
+icons only.
 
 While a job is running, a progress bar and a **Log** toggle appear in the
 header, and the command buttons are disabled until it finishes.
@@ -53,8 +59,13 @@ exists.
 - **Now playing** header with the file name and its folder path.
 - **Metadata chips**: `REC` (recorded date/time), `LEN` (duration), `SIZE`,
   `FMT` (container).
-- **Audio player** — a plain HTML5 player. Audio is streamed from disk with
-  range requests, so seeking works and nothing is copied anywhere.
+- **Transport** — play/pause, a draggable scrub rail, elapsed and total time,
+  `−10s` / `+10s`, and a speed key cycling 1× → 1.25× → 1.5× → 2× → 0.75×. The
+  rail carries a **tick per transcript cue**, so you can see where speech was
+  segmented before you play it. Audio is streamed from disk with range
+  requests, so seeking works and nothing is copied anywhere. With the scrub
+  focused, `←` / `→` seek five seconds, `Home` / `End` jump to either end, and
+  `Space` plays or pauses.
 - **Transcript** — a timed `.vtt` follows along as it plays: the current line
   is highlighted and scrolled into view, and clicking any line jumps playback
   to that timestamp. A plain `.txt` is shown as a block, without highlighting.
@@ -148,7 +159,17 @@ deleted without touching any transcript or the deletion ledger.
 
 ### Settings
 
-The settings that are also offered by `vno setting`:
+Opens as a full-height panel from the right, off the **⚙** key in the header.
+
+**Appearance** is the first section: six themes, each shown as a swatch in its
+own palette — **Auto** (follows your system's light/dark setting), **Tape**
+(the default warm dark), **Dusk**, **Moss**, **Daylight** (light) and
+**Contrast**. Picking one applies it to the page immediately so you can see it;
+**Save** keeps it (in [`theme`](configuration.md#theme)), and **Cancel** or
+`Esc` puts back the one you arrived with. `vno setting` offers the same list in
+the terminal.
+
+Then the settings that are also offered by `vno setting`:
 [`autoTranslate`](configuration.md#autotranslate) (on / off / ask each time),
 [`defaultModel`](configuration.md#defaultmodel),
 [`transcribeLanguage`](configuration.md#transcribelanguage),
@@ -156,7 +177,7 @@ The settings that are also offered by `vno setting`:
 [`openWhenDone`](configuration.md#openwhendone), and
 [`rememberDeletions`](configuration.md#rememberdeletions). The **target folder**
 is shown but not editable here — changing it needs a re-scan, so it lives in
-`vno setting`. Changes save as you make them.
+`vno setting`. **Save** at the bottom of the panel writes the lot.
 
 **Source folders** — synced every import in addition to detected volumes — are
 also editable here: paste or type a path, or click **Browse…** to walk the

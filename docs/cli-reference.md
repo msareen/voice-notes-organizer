@@ -255,6 +255,7 @@ hand-editing `config.json`:
   backend is `vno setup`'s job — this only flips what was found)
 - the **target** import folder
 - whether finished runs **launch the browser UI**
+- the browser UI's **theme** ([`theme`](configuration.md#theme))
 - **forget all remembered volume choices**
 - **check ffmpeg + whisper.cpp** and install what's missing (runs [`vno
   setup`](#vno-setup); the menu line shows the current state)

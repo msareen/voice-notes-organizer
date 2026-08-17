@@ -6,6 +6,7 @@ import { state, noteFor } from "./state.js";
 import { dom } from "./dom.js";
 import { api, toast, fail } from "./api.js";
 import { modal } from "./widgets.js";
+import { applyTheme } from "./theme.js";
 import { renderList } from "./list.js";
 import { select, showPlaceholder } from "./deck.js";
 
@@ -73,8 +74,13 @@ export function reloadState() {
     state.MODELS = s.models;
     state.MODEL_AVAILABILITY = s.modelAvailability || {};
     state.LANGUAGES = s.languages || [];
+    state.THEMES = s.themes || [];
     state.WHISPER = s.whisper;
     state.FFMPEG = s.ffmpeg;
+    // Normally a no-op (page.js stamped the same theme onto <html> before
+    // first paint), but it's what re-applies the saved one if a preview was
+    // left behind, or picks up a theme changed elsewhere.
+    applyTheme(state.CONFIG.theme);
     document.getElementById("folderLabel").textContent = state.CONFIG.rootLabel;
     renderList();
     if (state.selectedRel && noteFor(state.selectedRel)) select(state.selectedRel);

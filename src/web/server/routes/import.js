@@ -12,7 +12,7 @@ import { createWhisperRunner } from "./transcribe.js";
 const DROPPED_DIR_NAME = "Dropped";
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // generous for a single recording
 
-/** GET /api/volumes, GET /api/browse, GET /api/browse-fs, POST /api/import, POST /api/upload. */
+/** GET /api/volumes, GET /api/browse, GET /api/browse-target, GET /api/browse-fs, POST /api/import, POST /api/upload. */
 export function createImportRoutes(ctx) {
   const whisperRunner = createWhisperRunner(ctx);
 
@@ -38,6 +38,7 @@ export function createImportRoutes(ctx) {
         pattern: source.pattern,
         deleteAfterImport: source.deleteAfterImport,
         recursive: source.recursive,
+        mapTo: source.mapTo,
         known: null,
       });
     }
@@ -97,6 +98,33 @@ export function createImportRoutes(ctx) {
     return ctx.sendJson(res, 200, { current, parent: up !== current ? up : null, folders, sep: path.sep });
   }
 
+  // Confined browser for picking a source's mapping folder - unlike browse()
+  // above (rooted at a volume/source's mountPath) this is rooted at the
+  // import target itself, and unlike browseFs() (unconfined, for picking a
+  // source folder anywhere on disk) it can never leave that root. A mapping
+  // folder may not exist yet (it's a destination, not something being
+  // scanned), so an unreadable/missing `current` just reports no subfolders
+  // instead of erroring - the root (`target`) always exists.
+  async function browseTarget(res, params) {
+    const root = path.resolve(ctx.target);
+    const sub = (params.get("sub") || "").split("/").filter((s) => s && s !== "." && s !== "..");
+    const current = path.resolve(root, sub.join(path.sep));
+    if (current !== root && !current.startsWith(root + path.sep)) {
+      return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
+    }
+
+    let folders = [];
+    try {
+      folders = (await fs.readdir(current, { withFileTypes: true }))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      // doesn't exist yet or unreadable - report it as empty rather than failing
+    }
+    return ctx.sendJson(res, 200, { root, current, sub: sub.join("/"), folders });
+  }
+
   async function fsRoots() {
     if (os.platform() !== "win32") return ["/"];
     const roots = [];
@@ -136,6 +164,7 @@ export function createImportRoutes(ctx) {
           pattern: volume.pattern,
           deleteAfterImport: volume.deleteAfterImport,
           recursive: volume.recursive,
+          mapTo: volume.mapTo,
         };
         // syncVolume reports rather than prints, so the copy shows up in the
         // page's log and title instead of the terminal it can't see. One
@@ -283,5 +312,5 @@ export function createImportRoutes(ctx) {
     }
   }
 
-  return { volumes, browse, browseFs, startImport, upload };
+  return { volumes, browse, browseTarget, browseFs, startImport, upload };
 }

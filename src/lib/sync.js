@@ -119,6 +119,12 @@ export function reporter(onProgress) {
  * (always recursive, since a device's own layout isn't something the user
  * chose).
  *
+ * `volume.mapTo`, when set, routes this source's files into that
+ * target-relative folder (see `resolveMappedDest`) instead of the default
+ * `target/<volume.destName or volume.name>/` - only ever set on manually
+ * configured source folders, an explicit user choice that overrides both
+ * `destName` and any collision-disambiguation.
+ *
  * `volume.deleteAfterImport`, when true, removes the source file once it's
  * either freshly copied in or found to already match the destination (a
  * duplicate re-drop of an already-imported file) - also source-folder-only.
@@ -137,7 +143,9 @@ export function reporter(onProgress) {
  */
 export async function syncVolume(volume, target, { rememberDeletions = true, onProgress } = {}) {
   const report = reporter(onProgress);
-  const destRoot = path.join(target, sanitize(volume.destName || volume.name));
+  const destRoot = volume.mapTo
+    ? resolveMappedDest(target, volume.mapTo)
+    : path.join(target, sanitize(volume.destName || volume.name));
   await fs.ensureDir(destRoot);
 
   // Read once per volume, not once per file.
@@ -305,4 +313,42 @@ async function freeName(root, base) {
 
 function sanitize(name) {
   return name.replace(/[<>:"/\\|?*]/g, "_").trim() || "volume";
+}
+
+/**
+ * Resolves a source's `mapTo` (a target-relative path, possibly nested, e.g.
+ * "Work/Meetings") into an absolute destination folder confined to `target`.
+ * Each path segment is sanitized independently (so a nested mapping still
+ * gets a real subfolder per segment rather than one folder with slashes
+ * baked into its name); `.`/`..`/empty segments are dropped rather than
+ * honored, so this can never climb outside `target` - defense in depth on
+ * top of the segment filtering, matching the containment check
+ * `routes/import.js:browse()` uses for the equivalent read-side picker.
+ * Falls back to `target` itself if every segment gets filtered out.
+ */
+function resolveMappedDest(target, mapTo) {
+  const segments = mapTo
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((s) => s && s !== "." && s !== "..")
+    .map((s) => sanitize(s));
+  const resolvedTarget = path.resolve(target);
+  const dest = path.resolve(resolvedTarget, ...segments);
+  if (dest !== resolvedTarget && !dest.startsWith(resolvedTarget + path.sep)) return resolvedTarget;
+  return dest;
+}
+
+/**
+ * The folder a manually configured source's files currently land in (or will
+ * land in on the next sync) - the same rule `syncVolume` uses for `destRoot`:
+ * `source.mapTo` when set, otherwise `target/<sanitized basename of
+ * source.path>/`. Doesn't require a sync to run; used by the UI's "Explore"
+ * action in the source-removal confirmation dialog, so a user can see what's
+ * already been imported there before deciding whether to reorganize or
+ * delete it themselves - removing the source entry never touches those files.
+ */
+export function sourceDestFolder(source, target) {
+  if (source.mapTo) return resolveMappedDest(target, source.mapTo);
+  const name = path.basename(source.path) || "source";
+  return path.join(target, sanitize(name));
 }

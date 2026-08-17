@@ -143,7 +143,7 @@ Starts a local web server and opens the two-pane organizer in your browser.
 
 | Flag | Effect |
 | --- | --- |
-| `-p, --port <number>` | Pin the port. Default: a free one, picked automatically |
+| `-p, --port <number>` | Port to listen on. Default: `8477`, retrying on `8478` (with a warning) if that's busy. `0` picks a free port automatically instead |
 | `--no-open` | Start the server without opening a browser (prints the URL) |
 
 Startup measures every recording with `ffprobe`, which on a large library takes

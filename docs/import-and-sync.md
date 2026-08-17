@@ -30,7 +30,7 @@ without prompting.
 ## Source folders
 
 A `sources` entry behaves like a permanently plugged-in volume — synced every
-run, no prompt — but with three extra, opt-in behaviors a real volume doesn't
+run, no prompt — but with four extra, opt-in behaviors a real volume doesn't
 need:
 
 - **`pattern`** restricts the walk to filenames matching a `"*"`/`"?"`
@@ -60,6 +60,18 @@ need:
 
   Leave `deleteAfterImport` off (the default) for a folder that's an actual
   permanent archive.
+
+- **`mapTo`** routes this source's files into a specific folder inside
+  `target` — e.g. `"Phone"`, or a nested `"Work/Meetings"` — instead of the
+  default folder named after the source path's basename (see
+  [Imports land flat](#imports-land-flat) below). It's resolved relative to
+  `target` and can never point outside it, no matter what's written there.
+  Set it via `vno setting` → *Source folders* or the UI's Settings dialog,
+  both of which offer a folder browser scoped to `target` for picking it.
+  A source with `mapTo` set is exempt from the folder-name-collision
+  disambiguation described in [Configuration → `sources`](configuration.md#sources)
+  — the mapping is trusted as intentional, including two sources sharing one
+  `mapTo` to consolidate into a single folder.
 
 See [Configuration → `sources`](configuration.md#sources) for the exact
 schema, and `vno setting` → *Source folders* / the UI's Settings dialog to
@@ -99,6 +111,10 @@ voice-notes/
 └── Field Recorder/
     └── 260724_2044.mp3
 ```
+
+A source with [`mapTo`](#source-folders) set is the one exception: its files
+land flat inside that mapped folder instead of a folder named after the
+source path (still directly under `target`, and still flat within it).
 
 The device's deep folder tree is **not** mirrored. `FOLDER01` and `FOLDER02`
 are the recorder's storage bins, not a structure you chose, and reproducing

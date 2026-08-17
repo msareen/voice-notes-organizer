@@ -5,6 +5,11 @@ import { startServer } from "../web/server/index.js";
 import { openPath } from "../lib/open.js";
 import { createProgressBar } from "./progress.js";
 
+// Fixed so the URL is stable across runs (bookmarks, browser history) instead
+// of changing every launch. `--port 0` still asks for an OS-assigned free
+// port explicitly, which is why the fallback-on-busy logic below skips it.
+export const DEFAULT_PORT = 8477;
+
 /**
  * Launches the local viewer: a small HTTP server on loopback that serves the
  * two-pane player and an API for everything the CLI can do (import,
@@ -14,7 +19,7 @@ import { createProgressBar } from "./progress.js";
  * closed, the page's Quit button is used, or Ctrl+C is pressed - so closing
  * the browser ends the CLI session.
  */
-export async function runVisualize({ open = true, port = 0, quiet = false } = {}) {
+export async function runVisualize({ open = true, port = DEFAULT_PORT, quiet = false } = {}) {
   const config = await loadConfig();
 
   // The folder may not exist yet on a first run; create it so the viewer can
@@ -30,11 +35,23 @@ export async function runVisualize({ open = true, port = 0, quiet = false } = {}
   try {
     server = await startServer({ config, port, onScanProgress: bar.report });
   } catch (err) {
-    if (err.code === "EADDRINUSE") {
-      console.log(chalk.red(`Port ${port} is already in use. Pick another with --port, or omit it to auto-pick.`));
-      return null;
+    if (err.code !== "EADDRINUSE" || port === 0) throw err;
+
+    // The fixed default port is the common case that collides (a previous
+    // `vno visualize` still running, something else bound to it) - one retry
+    // one port up keeps `vno visualize` working without forcing the user to
+    // go hunt for a free port themselves.
+    const fallbackPort = port + 1;
+    bar.log(`Port ${port} is already in use - trying ${fallbackPort} instead.`, "warn");
+    try {
+      server = await startServer({ config, port: fallbackPort, onScanProgress: bar.report });
+    } catch (err2) {
+      if (err2.code === "EADDRINUSE") {
+        console.log(chalk.red(`Ports ${port} and ${fallbackPort} are both in use. Pick a free one with --port.`));
+        return null;
+      }
+      throw err2;
     }
-    throw err;
   } finally {
     bar.stop();
   }

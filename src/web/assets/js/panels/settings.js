@@ -109,42 +109,82 @@ export function openSettings() {
       sourcesSection.className = "settings-full";
       host.appendChild(sourcesSection);
 
+      var sourcesHead = document.createElement("div");
+      sourcesHead.className = "source-list-head";
       var sourcesLabel = document.createElement("h4");
-      sourcesLabel.textContent = "Source folders";
-      sourcesSection.appendChild(sourcesLabel);
+      sourcesLabel.textContent = "Additional Source Folders";
+      sourcesHead.appendChild(sourcesLabel);
+      sourcesHead.appendChild(button("Add folder", "", function () {
+        addSourceRow({ path: "", pattern: "*", recursive: false, deleteAfterImport: false, mapTo: null });
+      }));
+      sourcesSection.appendChild(sourcesHead);
       var sh = document.createElement("p");
       sh.className = "hint";
       sh.textContent = "Folders synced every time you import, in addition to detected volumes — e.g. wherever a " +
         "phone's Quick Share/Quick Send drops files. Pattern is a \"*\"/\"?\" wildcard against the filename " +
         "(\"*\" = any audio file). \"Delete after import\" removes the file from this folder once it's safely " +
-        "copied in — only turn this on for a disposable landing folder, not a real archive.";
+        "copied in — only turn this on for a disposable landing folder, not a real archive. \"Folder in target\" " +
+        "optionally routes this source's files into a specific folder inside your target folder instead of a " +
+        "folder named after the source path — leave it blank for the default.";
       sourcesSection.appendChild(sh);
 
       var sourcesBox = document.createElement("div");
-      sourcesBox.className = "picklist";
+      sourcesBox.className = "source-list";
       sourcesSection.appendChild(sourcesBox);
 
       var allExts = CONFIG.audioExtensions || [];
 
       function addSourceRow(entry) {
-        var row = document.createElement("div");
-        row.className = "pick source-row";
-        row.style.flexWrap = "wrap";
-        row.style.gap = "6px";
+        var block = document.createElement("div");
+        block.className = "source-block";
+
+        var removeBtn = button("Remove", "", function () {
+          confirmRemoveSource(pathInput.value.trim(), mapToInput.value.trim() || null, function () {
+            sourcesBox.removeChild(block);
+            sourceRows = sourceRows.filter(function (r) { return r.row !== block; });
+          });
+        });
+        removeBtn.classList.add("source-remove");
+        block.appendChild(removeBtn);
+
+        var pathRow = document.createElement("div");
+        pathRow.className = "source-row source-row-path";
 
         var pathInput = document.createElement("input");
         pathInput.type = "text";
         pathInput.placeholder = "Folder path (paste or type)";
         pathInput.value = entry.path || "";
-        pathInput.style.flex = "2";
-        pathInput.style.minWidth = "220px";
-        row.appendChild(pathInput);
+        pathInput.className = "source-path-input";
+        pathRow.appendChild(pathInput);
 
-        row.appendChild(button("Browse…", "", function () {
+        pathRow.appendChild(button("Browse…", "", function () {
           browseFsFolders(pathInput.value.trim() || null, function (chosen) {
             pathInput.value = chosen;
           });
         }, "Pick a folder on this computer"));
+
+        block.appendChild(pathRow);
+
+        var mapRow = document.createElement("div");
+        mapRow.className = "source-row source-row-map";
+
+        var mapToInput = document.createElement("input");
+        mapToInput.type = "text";
+        mapToInput.placeholder = "Folder in target (optional)";
+        mapToInput.value = entry.mapTo || "";
+        mapToInput.className = "source-path-input";
+        mapRow.appendChild(mapToInput);
+
+        mapRow.appendChild(button("Browse…", "", function () {
+          browseTargetFolder(mapToInput.value.trim() || "", function (chosen) {
+            mapToInput.value = chosen;
+          });
+        }, "Pick a folder inside your target folder"));
+
+        block.appendChild(mapRow);
+
+        var optionsRow = document.createElement("div");
+        optionsRow.className = "source-row source-row-options";
 
         var chipsWrap = document.createElement("div");
         chipsWrap.className = "ext-chips";
@@ -162,7 +202,7 @@ export function openSettings() {
           });
           chipsWrap.appendChild(chip);
         });
-        row.appendChild(chipsWrap);
+        optionsRow.appendChild(chipsWrap);
 
         var recWrap = document.createElement("label");
         recWrap.className = "check";
@@ -172,7 +212,7 @@ export function openSettings() {
         recWrap.appendChild(recCb);
         recWrap.appendChild(document.createTextNode("Include subfolders"));
         recWrap.title = "Off scans only this folder itself; on also picks up files nested in subfolders";
-        row.appendChild(recWrap);
+        optionsRow.appendChild(recWrap);
 
         var delWrap = document.createElement("label");
         delWrap.className = "check";
@@ -181,18 +221,15 @@ export function openSettings() {
         delCb.checked = !!entry.deleteAfterImport;
         delWrap.appendChild(delCb);
         delWrap.appendChild(document.createTextNode("Delete after import"));
-        row.appendChild(delWrap);
+        optionsRow.appendChild(delWrap);
 
-        var removeBtn = button("Remove", "", function () {
-          sourcesBox.removeChild(row);
-          sourceRows = sourceRows.filter(function (r) { return r.row !== row; });
-        });
-        row.appendChild(removeBtn);
+        block.appendChild(optionsRow);
 
-        sourcesBox.appendChild(row);
+        sourcesBox.appendChild(block);
         sourceRows.push({
-          row: row,
+          row: block,
           pathInput: pathInput,
+          mapToInput: mapToInput,
           recCb: recCb,
           delCb: delCb,
           selectedExts: function () { return allExts.filter(function (e) { return extState[e]; }); }
@@ -200,7 +237,6 @@ export function openSettings() {
       }
 
       (CONFIG.sources || []).forEach(addSourceRow);
-      sourcesSection.appendChild(button("Add folder", "", function () { addSourceRow({ path: "", pattern: "*", recursive: false, deleteAfterImport: false }); }));
     },
     onConfirm: function () {
       var patch = {
@@ -217,7 +253,8 @@ export function openSettings() {
             path: r.pathInput.value.trim(),
             pattern: patternFromExts(r.selectedExts(), state.CONFIG.audioExtensions || []),
             recursive: r.recCb.checked,
-            deleteAfterImport: r.delCb.checked
+            deleteAfterImport: r.delCb.checked,
+            mapTo: r.mapToInput.value.trim() || null
           };
         })
         .filter(function (s) { return s.path; });
@@ -229,6 +266,39 @@ export function openSettings() {
         });
     }
   });
+}
+
+// Confirms removing a source folder entry before it's actually taken out of
+// `sourceRows` - removing it only forgets the sync configuration, it never
+// touches files already copied into target, so the dialog makes that
+// explicit and offers an Explore button to go see (and reorganize/delete,
+// if wanted) what's there. `onRemove` runs only if the user confirms.
+function confirmRemoveSource(sourcePath, mapTo, onRemove) {
+  modal({
+    title: "Remove this source folder?",
+    message: null,
+    confirmLabel: "Remove",
+    danger: true,
+    build: function (host) {
+      var p = document.createElement("p");
+      p.textContent = "This only removes the sync configuration - it won't touch any files already " +
+        "imported from this folder. Your target folder's structure stays exactly as is; delete or " +
+        "reorganize those files yourself from the folder.";
+      host.appendChild(p);
+      if (sourcePath) {
+        host.appendChild(button("Explore…", "", function () {
+          exploreSourceDest(sourcePath, mapTo);
+        }, "Open the folder these files currently live in"));
+      }
+    },
+    onConfirm: onRemove
+  });
+}
+
+function exploreSourceDest(sourcePath, mapTo) {
+  return api("/api/sources/explore", { method: "POST", body: { path: sourcePath, mapTo: mapTo } })
+    .then(function () { toast("Opened folder"); })
+    .catch(function (err) { toast(String(err.message || err), "err"); });
 }
 
 // General-purpose folder browser for source folders, which - unlike volume
@@ -278,6 +348,55 @@ function browseFsFolders(currentPath, onPick, closePrev) {
         onConfirm: function () {
           if (!res.current) throw new Error("Pick a drive or folder first");
           onPick(res.current);
+        }
+      });
+      if (closePrev) closePrev();
+    })
+    .catch(function (err) { toast(String(err.message || err), "err"); });
+}
+
+// Folder browser for a source's mapping folder, confined to the target
+// folder (unlike browseFsFolders above, which can go anywhere on disk) -
+// mirrors the server's containment check in routes/import.js:browseTarget.
+// `relPath` is target-relative ("" = target root), and that's what's
+// returned to `onPick` too, since mapTo is stored relative to target.
+function browseTargetFolder(relPath, onPick, closePrev) {
+  api("/api/browse-target" + (relPath ? "?sub=" + encodeURIComponent(relPath) : ""))
+    .then(function (res) {
+      var level = modal({
+        title: "Choose a folder in target",
+        message: null,
+        confirmLabel: "Use this folder",
+        build: function (host) {
+          var crumb = document.createElement("div");
+          crumb.className = "crumb";
+          crumb.textContent = res.sub ? res.root + " / " + res.sub : res.root;
+          host.appendChild(crumb);
+
+          var box = document.createElement("div");
+          box.className = "picklist";
+          if (res.sub) {
+            var up = res.sub.split("/").slice(0, -1).join("/");
+            box.appendChild(fsFolderRow(".. (up one level)", function () {
+              browseTargetFolder(up, onPick, level.close);
+            }));
+          }
+          if (!res.folders.length) {
+            var none = document.createElement("div");
+            none.className = "pick";
+            none.textContent = "(no subfolders)";
+            box.appendChild(none);
+          }
+          res.folders.forEach(function (name) {
+            box.appendChild(fsFolderRow(name, function () {
+              var next = res.sub ? res.sub + "/" + name : name;
+              browseTargetFolder(next, onPick, level.close);
+            }));
+          });
+          host.appendChild(box);
+        },
+        onConfirm: function () {
+          onPick(res.sub || "");
         }
       });
       if (closePrev) closePrev();

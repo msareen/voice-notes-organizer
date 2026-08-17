@@ -91,6 +91,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
 | `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `useGpu` |
 | `/api/sources` | POST | Replace `config.sources` wholesale (array-shaped, doesn't fit the scalar `/api/settings` patch) |
+| `/api/sources/explore` | POST | Open the folder a source's files currently land in (or will, on next sync) — `mapTo` when set, else `target/<sanitized source basename>/`. Used by the source-removal confirmation dialog |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
 | `/api/transcript` | PUT | Save an edited transcript (cues or plain text) |
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |
@@ -98,6 +99,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/transcribe` | POST | Start a transcription job |
 | `/api/volumes` | GET | Detected volumes plus configured sources |
 | `/api/browse` | GET | List subfolders of a volume, one level |
+| `/api/browse-target` | GET | List subfolders of the target folder, one level — confined to `target`, powers the per-source "Folder in target" (`mapTo`) picker |
 | `/api/browse-fs` | GET | List subfolders of any filesystem path, one level (drives/root with no `path`) — powers the source-folder picker, since it isn't confined to a volume |
 | `/api/import` | POST | Start an import job |
 | `/api/upload` | POST | Drag-and-drop: stream one raw audio file to `Dropped/`. Not a job — token comes off the query string, since it's not a JSON body |

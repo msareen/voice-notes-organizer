@@ -17,7 +17,7 @@ rather than crashing the tool.
 {
   "target": "/path/to/voice-notes",
   "sources": [
-    { "path": "/mnt/nas/voice-notes", "pattern": "*", "recursive": false, "deleteAfterImport": false }
+    { "path": "/mnt/nas/voice-notes", "pattern": "*", "recursive": false, "deleteAfterImport": false, "mapTo": null }
   ],
   "knownMounts": {},
   "autoTranslate": null,
@@ -70,8 +70,8 @@ Downloads).
 
 ```json
 "sources": [
-  { "path": "/mnt/nas/voice-notes", "pattern": "*", "recursive": true, "deleteAfterImport": false },
-  { "path": "D:\\Users\\me\\Downloads", "pattern": "VN*.m4a", "recursive": false, "deleteAfterImport": true }
+  { "path": "/mnt/nas/voice-notes", "pattern": "*", "recursive": true, "deleteAfterImport": false, "mapTo": null },
+  { "path": "D:\\Users\\me\\Downloads", "pattern": "VN*.m4a", "recursive": false, "deleteAfterImport": true, "mapTo": "Phone" }
 ]
 ```
 
@@ -81,6 +81,7 @@ Downloads).
 | `pattern` | `"*"`/`"?"` wildcard against the filename. `"*"` (default) means "any audio-extension file", same as a detected volume |
 | `recursive` | Also scan subfolders of `path`. `false` by default — only `path` itself is scanned, since a source is usually a flat drop point. Turn it on for a folder whose recordings are nested in subfolders |
 | `deleteAfterImport` | Once a file is safely copied into `target` (or found to already be there), delete it from this folder. `false` by default. Only turn this on for a disposable landing folder — the original is expected to live somewhere else (e.g. still on the phone), not just here |
+| `mapTo` | Optional folder *inside* `target` this source's files land in, instead of the default folder named after `path`'s basename — e.g. `"Phone"` or a nested `"Work/Meetings"`. `null` (default) keeps the default naming. Always resolved relative to `target` and can never escape it, however it's written — set it with `vno setting` or the UI's folder browser rather than hand-editing this if you're not sure |
 
 Add as many as you like. Every entry is synced into `target` on every
 `vno import` run **without prompting** — it was explicitly configured, so it's
@@ -91,6 +92,9 @@ shown alongside.
 If two sources (or a source and a detected volume) share the same folder name,
 the later one is disambiguated with its parent folder name — e.g.
 `Recordings (deviceB)` — so they don't land in the same destination folder.
+A source with `mapTo` set skips this disambiguation entirely — an explicit
+mapping is trusted as intentional, including two sources sharing the same
+`mapTo` to consolidate into one folder.
 
 A `deleteAfterImport` source never touches the [deletion ledger](#rememberdeletions)
 — it only reads it, to avoid deleting the source copy of a file whose imported
@@ -99,7 +103,7 @@ copy you deliberately removed from `target` before. See
 
 Older configs with plain path strings (e.g. `"sources": ["/mnt/nas"]`) still
 load fine — they're normalized to
-`{ path, pattern: "*", recursive: false, deleteAfterImport: false }` on read.
+`{ path, pattern: "*", recursive: false, deleteAfterImport: false, mapTo: null }` on read.
 That's a behavior change from before `recursive` existed (everything was
 scanned recursively); re-enable it per source if you relied on that.
 

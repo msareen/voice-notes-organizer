@@ -31,6 +31,7 @@ export async function runImport({ open } = {}) {
         pattern: source.pattern,
         deleteAfterImport: source.deleteAfterImport,
         recursive: source.recursive,
+        mapTo: source.mapTo,
       });
     } else {
       console.log(chalk.yellow(`Configured source folder does not exist: ${source.path}`));
@@ -391,11 +392,14 @@ async function browseForSubdir(volume) {
  * Two different volumes/sources can share a folder name (e.g. two drives
  * both labeled "Recordings"), which would otherwise make their files land
  * in the same destination folder and mix together. Give later duplicates a
- * disambiguated `destName` derived from their mount path.
+ * disambiguated `destName` derived from their mount path. Sources with an
+ * explicit `mapTo` are skipped - that's a deliberate destination, not a
+ * name collision to resolve.
  */
 function assignDestNames(volumes) {
   const seen = new Map();
   for (const volume of volumes) {
+    if (volume.mapTo) continue; // explicit destination - never override it
     const key = volume.name.toLowerCase();
     const count = seen.get(key) || 0;
     seen.set(key, count + 1);

@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "fs-extra";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
@@ -49,7 +50,7 @@ async function manageSources(config) {
   while (true) {
     const sources = config.sources || [];
     const choices = sources.map((s, i) => ({
-      name: `${s.path}  ${chalk.dim(`[pattern ${s.pattern || "*"}${s.recursive ? ", includes subfolders" : ""}${s.deleteAfterImport ? ", deletes after import" : ""}]`)}`,
+      name: `${s.path}  ${chalk.dim(`[pattern ${s.pattern || "*"}${s.recursive ? ", includes subfolders" : ""}${s.deleteAfterImport ? ", deletes after import" : ""}${s.mapTo ? `, maps to "${s.mapTo}"` : ""}]`)}`,
       value: `edit:${i}`,
     }));
 
@@ -70,7 +71,7 @@ async function manageSources(config) {
     if (answer === CANCELLED || answer.action === "done") return;
 
     if (answer.action === "add") {
-      const entry = await promptSourceEntry(null);
+      const entry = await promptSourceEntry(null, config);
       if (entry) {
         config.sources = [...sources, entry];
         await saveConfig(config);
@@ -102,7 +103,7 @@ async function manageSources(config) {
       continue;
     }
 
-    const entry = await promptSourceEntry(existing);
+    const entry = await promptSourceEntry(existing, config);
     if (entry) {
       config.sources = sources.map((s, i) => (i === idx ? entry : s));
       await saveConfig(config);
@@ -110,8 +111,82 @@ async function manageSources(config) {
   }
 }
 
-/** Prompts for one source folder's path/pattern/delete-after-import; returns null on cancel. */
-async function promptSourceEntry(existing) {
+/**
+ * Arrow-key folder browser rooted at `config.target`, for picking a source's
+ * mapping folder. Unlike `browseForSubdir` in cli/import.js (which browses a
+ * source to *scan from*, so a typed path must already exist), a mapping
+ * folder is a *destination* - it's created with `fs.ensureDir` at copy time,
+ * so typing a path that doesn't exist yet is fine here. Returns the chosen
+ * path relative to `config.target`, or null for "no mapping - default
+ * behavior".
+ */
+async function browseMapToFolder(config) {
+  let current = config.target;
+
+  while (true) {
+    let entries = [];
+    try {
+      entries = (await fs.readdir(current, { withFileTypes: true }))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      // doesn't exist yet or unreadable - fall through with no subfolders listed
+    }
+
+    const rel = path.relative(config.target, current);
+    const choices = [
+      { name: `Use this folder${rel ? ` (${rel})` : " (target root - i.e. no mapping)"}`, value: { action: "use" } },
+    ];
+    if (current !== config.target) {
+      choices.push({ name: "..  (go up)", value: { action: "up" } });
+    }
+    for (const name of entries) {
+      choices.push({ name: `${name}/`, value: { action: "down", name } });
+    }
+    choices.push({ name: "Type a path manually instead (doesn't need to exist yet)", value: { action: "manual" } });
+    choices.push({ name: "Cancel - no mapping (default folder naming)", value: { action: "cancel" } });
+
+    const { choice } = await promptStrict([
+      {
+        type: "list",
+        name: "choice",
+        message: `Browsing ${current}`,
+        choices,
+        pageSize: 15,
+      },
+    ]);
+
+    if (choice.action === "use") {
+      return rel || null;
+    }
+    if (choice.action === "cancel") {
+      return null;
+    }
+    if (choice.action === "up") {
+      current = path.dirname(current);
+      continue;
+    }
+    if (choice.action === "down") {
+      current = path.join(current, choice.name);
+      continue;
+    }
+    if (choice.action === "manual") {
+      const { subdir } = await promptStrict([
+        {
+          type: "input",
+          name: "subdir",
+          message: `Folder path relative to ${config.target} (e.g. Work/Meetings):`,
+        },
+      ]);
+      const trimmed = subdir.trim();
+      return trimmed || null;
+    }
+  }
+}
+
+/** Prompts for one source folder's path/pattern/delete-after-import/mapping-folder; returns null on cancel. */
+async function promptSourceEntry(existing, config) {
   const pathRes = await prompt([
     {
       type: "input",
@@ -161,11 +236,32 @@ async function promptSourceEntry(existing) {
   ]);
   if (deleteRes === CANCELLED) return null;
 
+  const mapToRes = await prompt([
+    {
+      type: "list",
+      name: "value",
+      message: "Route this source's files into a specific folder inside your target folder?",
+      default: existing && existing.mapTo ? "browse" : "default",
+      choices: [
+        { name: `No — use the default folder (named after "${path.basename(folder)}")`, value: "default" },
+        { name: "Yes — pick a folder inside target", value: "browse" },
+      ],
+    },
+  ]);
+  if (mapToRes === CANCELLED) return null;
+  let mapTo = existing ? existing.mapTo || null : null;
+  if (mapToRes.value === "browse") {
+    mapTo = await browseMapToFolder(config);
+  } else if (mapToRes.value === "default") {
+    mapTo = null;
+  }
+
   return {
     path: folder,
     pattern: patternRes.value.trim() || "*",
     recursive: recursiveRes.value,
     deleteAfterImport: deleteRes.value,
+    mapTo,
   };
 }
 

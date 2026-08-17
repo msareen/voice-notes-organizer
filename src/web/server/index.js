@@ -116,6 +116,8 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         return settingsRoutes.settings(res, body);
       case "/api/sources POST":
         return settingsRoutes.sources(res, body);
+      case "/api/sources/explore POST":
+        return settingsRoutes.exploreSourceDest(res, body);
 
       case "/api/reveal POST":
         return notesRoutes.reveal(res, body);
@@ -133,6 +135,8 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
         return importRoutes.volumes(res);
       case "/api/browse GET":
         return importRoutes.browse(res, url.searchParams);
+      case "/api/browse-target GET":
+        return importRoutes.browseTarget(res, url.searchParams);
       case "/api/browse-fs GET":
         return importRoutes.browseFs(res, url.searchParams);
       case "/api/import POST":

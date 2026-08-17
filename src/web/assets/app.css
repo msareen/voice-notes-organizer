@@ -356,6 +356,29 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .chip:hover { border-color: var(--amber-line); }
 .chip.on { background: var(--amber-soft); border-color: var(--amber-line); color: var(--amber); }
+
+/* ---- Source folder blocks (Settings → Additional Source Folders) ---- */
+.source-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 4px;
+}
+.source-list-head h4 { margin: 0; }
+.source-list {
+  display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;
+  max-height: 48vh; overflow-y: auto; padding-right: 2px;
+}
+.source-block {
+  position: relative; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel-2); padding: 38px 12px 10px; display: flex;
+  flex-direction: column; gap: 8px;
+}
+.source-remove { position: absolute; top: 8px; right: 12px; }
+.source-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.source-row .source-path-input { flex: 1 1 auto; min-width: 200px; }
+.source-row-options {
+  padding-top: 8px; border-top: 1px solid var(--line);
+  font-size: .8rem; color: var(--dim);
+}
 .modal input[type="number"], .modal input[type="text"] {
   width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px;
   background: var(--bg); color: var(--ink); font: .85rem var(--mono); outline: none;

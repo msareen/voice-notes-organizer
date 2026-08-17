@@ -82,7 +82,7 @@ moment.
 
 | Flag | Effect |
 | --- | --- |
-| `-p, --port <number>` | Default `0` = pick a free port |
+| `-p, --port <number>` | Default `8477`; falls back to `8478` (with a warning) if that's taken. `0` picks a free port automatically instead |
 | `--no-open` | Start the server without opening a browser |
 
 ### `vno explore` (`open`)

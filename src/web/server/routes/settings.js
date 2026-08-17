@@ -1,7 +1,9 @@
 import { accelState } from "../../../lib/whisper.js";
+import { sourceDestFolder } from "../../../lib/sync.js";
+import { openPath } from "../../../lib/open.js";
 import { MODELS, LANGUAGES } from "../constants.js";
 
-/** POST /api/settings, POST /api/sources. */
+/** POST /api/settings, POST /api/sources, POST /api/sources/explore. */
 export function createSettingsRoutes(ctx) {
   async function settings(res, body) {
     const config = ctx.config;
@@ -39,11 +41,27 @@ export function createSettingsRoutes(ctx) {
       pattern: (s.pattern || "*").trim() || "*",
       deleteAfterImport: Boolean(s.deleteAfterImport),
       recursive: Boolean(s.recursive),
+      mapTo: typeof s.mapTo === "string" && s.mapTo.trim() ? s.mapTo.trim().replace(/\\/g, "/") : null,
     }));
     await ctx.saveConfig();
     ctx.log("Source folders updated from the browser.");
     ctx.sendJson(res, 200, { config: (await ctx.stateResponse()).config });
   }
 
-  return { settings, sources };
+  // Opens the folder a source's files currently live in (or will, on the
+  // next sync) - not confined via ctx.resolveInside like /api/reveal, since
+  // a source with no `mapTo` lands outside `target` for the input (the
+  // source's own `path`) but the *computed destination* is always inside
+  // `target` (sourceDestFolder mirrors syncVolume's own destRoot rule), so
+  // it's safe to open directly.
+  async function exploreSourceDest(res, body) {
+    const srcPath = typeof body.path === "string" ? body.path.trim() : "";
+    if (!srcPath) return ctx.sendJson(res, 400, { error: "Missing source path" });
+    const mapTo = typeof body.mapTo === "string" && body.mapTo.trim() ? body.mapTo.trim() : null;
+    const dest = sourceDestFolder({ path: srcPath, mapTo }, ctx.target);
+    openPath(dest);
+    ctx.sendJson(res, 200, { opened: dest });
+  }
+
+  return { settings, sources, exploreSourceDest };
 }

@@ -106,7 +106,9 @@ Every run generates a fresh single-use token, inlined into the page URL:
 
 - **A bookmarked URL won't work** — its token belongs to a dead session. Start
   a new one with `vno v` and use the URL it prints.
-- **The port changes every run** unless you pin it with `-p/--port`.
+- **The port is `8477` by default**, so it's stable across runs — but if
+  something else is already bound to it, `vno` retries once on `8478` and
+  prints a warning, so check the terminal for which one actually got used.
 - If no browser opens, the URL is in the terminal — paste it manually.
 - `--no-open` starts the server without launching a browser at all.
 

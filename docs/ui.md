@@ -209,8 +209,9 @@ The CLI stays up serving the page, and exits when you're done with it:
 These endpoints delete files and launch programs, so access is narrow by
 design:
 
-- The server binds to **`127.0.0.1`** on a **random free port** — never an
-  external interface.
+- The server binds to **`127.0.0.1`** on a **fixed default port (8477)** —
+  never an external interface. If that port is busy it retries once on 8478
+  and prints a warning; `-p/--port 0` asks for a random free port instead.
 - Every request needs a **single-use session token**, generated per run and
   inlined into the page. Requests without it get a 403, including anyone who
   guesses the port.
@@ -219,8 +220,9 @@ design:
 - Every file path is resolved back against the target folder; anything
   escaping it is rejected.
 
-`-p/--port <number>` pins the port if you need a stable one; `--no-open` starts
-the server without launching a browser (it prints the tokenized URL instead).
+`-p/--port <number>` pins the port if you need a different stable one;
+`--no-open` starts the server without launching a browser (it prints the
+tokenized URL instead).
 
 > Earlier versions wrote a static `index.html` into the target folder. That
 > file is no longer generated or updated — if you have one lying around it's a

@@ -5,7 +5,7 @@ import chalk from "chalk";
 import { runImport } from "../src/cli/import.js";
 import { runTranscribe } from "../src/cli/transcribe.js";
 import { runCleanup, runLedgerCleanup } from "../src/cli/cleanup.js";
-import { runVisualize } from "../src/cli/visualize.js";
+import { runVisualize, DEFAULT_PORT } from "../src/cli/visualize.js";
 import { runSettings } from "../src/cli/settings.js";
 import { runSetup } from "../src/cli/setup.js";
 import { runExplore } from "../src/cli/explore.js";
@@ -112,10 +112,15 @@ program
   .description(
     "Launch the browser UI: play, edit transcripts, import, transcribe, clean up and change settings (alias: v, --v)"
   )
-  .option("-p, --port <number>", "port to listen on (default: a free one picked automatically)", "0")
+  .option(
+    "-p, --port <number>",
+    `port to listen on; falls back to the next port up if it's busy (default: ${DEFAULT_PORT})`,
+    String(DEFAULT_PORT)
+  )
   .option("--no-open", "start the server without opening a browser")
   .action(async (opts) => {
-    await runVisualize({ open: opts.open, port: parseInt(opts.port, 10) || 0 });
+    const port = parseInt(opts.port, 10);
+    await runVisualize({ open: opts.open, port: Number.isNaN(port) ? DEFAULT_PORT : port });
   });
 
 program

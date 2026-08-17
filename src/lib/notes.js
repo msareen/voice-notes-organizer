@@ -4,6 +4,7 @@ import chalk from "chalk";
 import { findAudioFiles, reporter } from "./sync.js";
 import { parseCues } from "./vtt.js";
 import { getDurationSeconds, recordedDate } from "./media.js";
+import { healIfDamaged } from "./special-case-handling.js";
 import { loadNotesCache, saveNotesCache } from "./notesCache.js";
 
 // Preference order for a note's transcript: timed formats first (they unlock
@@ -115,6 +116,20 @@ async function buildNote(target, audioPath, { size, mtimeMs, durationSec } = {})
   // slashes ("" for files sitting directly in the target root).
   const dir = dirRaw === "." ? "" : dirRaw.split(path.sep).join("/");
 
+  // Damaged Samsung recordings are repaired in place before anything reads
+  // them (lib/special-case-handling.js). This sits here rather than behind a
+  // failed probe or a cache miss because it has to run for every note either
+  // way - see `healIfDamaged`. When it fires, the file on disk is a different
+  // one, so the passed-in stat and any cached duration describe the old file.
+  if (await healIfDamaged(audioPath)) {
+    durationSec = undefined;
+    const after = await fs.stat(audioPath).catch(() => null);
+    if (after) {
+      size = after.size;
+      mtimeMs = after.mtimeMs;
+    }
+  }
+
   const transcript = await readTranscript(audioPath);
 
   // Recording date/time is pre-formatted here (it comes from the recorder's
@@ -198,8 +213,14 @@ export async function buildNotes(target, { onProgress } = {}) {
       mtimeMs,
       durationSec: fresh ? cached.durationSec : undefined,
     });
+
     notes.push(note);
-    if (size != null) nextCache[rel] = { size, mtimeMs, durationSec: note.durationSec };
+    // Keyed off the note rather than the stat above: an in-place repair inside
+    // buildNote replaces the file, and the entry has to describe the one that's
+    // there now or every future build re-probes it.
+    if (note.size != null) {
+      nextCache[rel] = { size: note.size, mtimeMs: note.mtimeMs, durationSec: note.durationSec };
+    }
   }
 
   report({ phase: "work", done: notes.length, total, dir: "", name: "" });
@@ -233,9 +254,9 @@ export async function refreshNote(target, audioPath) {
 
   const note = await buildNote(target, audioPath, { size, mtimeMs });
 
-  if (size != null) {
+  if (note.size != null) {
     const cache = await loadNotesCache(target);
-    cache[note.rel] = { size, mtimeMs, durationSec: note.durationSec };
+    cache[note.rel] = { size: note.size, mtimeMs: note.mtimeMs, durationSec: note.durationSec };
     await saveNotesCache(target, cache);
   }
 

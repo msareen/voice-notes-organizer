@@ -21,6 +21,7 @@ src/
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.js  notes.js  sync.js  media.js  vtt.js
     volumes.js  whisper.js  whispercpp.js  setup.js  open.js  ledger.js
+    special-case-handling.js
   web/               the browser UI behind `vno visualize`
     server/          HTTP server: session token, JSON API, SSE job stream
       index.js       bootstraps http.Server, builds ctx, dispatches routes
@@ -54,6 +55,7 @@ so anything there is safe to reuse from either side.
 | `cli/progress.js` | The terminal progress bar every slow per-file loop draws through |
 | `lib/open.js` | Opening a folder / revealing a file, per OS — behind `vno explore`, the UI's Explore button and `/api/reveal` alike |
 | `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
+| `lib/special-case-handling.js` | Recovering Samsung Voice Recorder `.m4a` files whose index was truncated by an interrupted copy — see [Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe-and-a-repairedm4a-appeared) |
 
 ## There is no build step
 
@@ -121,6 +123,28 @@ folder and rejects anything that escapes it.
   doesn't show stale data until the next full rebuild.
 - **One job at a time.** A second start returns `409 Busy`. Jobs stream their
   output line by line to the page's log panel; the last 200 lines are kept.
+- **The Samsung `.m4a` repair is a catch-block feature, and it re-frames with
+  ffmpeg rather than a native decoder.** `lib/special-case-handling.js` handles
+  recordings whose `moov` was cut off mid-`stsz` by an interrupted copy. The
+  audio is intact; only the frame boundaries are lost, and an AAC
+  `raw_data_block` has no length field to scan for. The trick is that vno
+  already ships a decoder that can find them: given an MP4 declaring the whole
+  `mdat` as a *single* sample, ffmpeg decodes one frame, reports what it
+  consumed, and libavformat re-feeds the rest — recovering every frame. That
+  makes the repair deterministic and verifiable (the recovered frame count is
+  checked against the count `stts` recorded before the cut) at the cost of one
+  re-encode, and with no dependency beyond the ffmpeg vno already requires.
+  The rebuild replaces the recording **in place** so nothing downstream has to
+  know a repair happened, with the damaged file kept as `<name>.original.m4a` —
+  filtered out of `findAudioFiles` so it can't surface as a duplicate note, and
+  removable through `vno cleanup --originals` / the Cleanup dialog's checkbox.
+  Verification runs before anything is renamed, and the swap moves the original
+  aside first, so a failed repair can never leave the user without their file.
+  Two easy things to get wrong: a successful ffprobe is **not** a health check
+  (duration comes from the intact movie header), and neither is a cache miss (a
+  library scanned before this existed has durations cached) — which is why the
+  structural check hangs off `buildNote`, the one call every recording passes
+  through, rather than off `getDurationSeconds`.
 - **Dependency probing never runs the thing it's checking for.** `lib/setup.js`
   scans `PATH` for ffmpeg (honouring `PATHEXT`, and `lstat` so Windows App
   Execution Aliases resolve); `lib/whispercpp.js:resolveBinary` checks the

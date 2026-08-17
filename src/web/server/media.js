@@ -8,6 +8,10 @@ export function serveMedia(ctx, req, res, route) {
   const full = ctx.resolveInside(rel);
   if (!full) return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
 
+  // Nothing special is needed for a truncated-index Samsung .m4a here: the
+  // repair (lib/special-case-handling.js) replaces the recording in place, so
+  // by the time the page can ask for it, the file under `rel` is the playable
+  // one. That's the whole reason the repair swaps rather than writing a sibling.
   let stat;
   try {
     stat = fs.statSync(full);

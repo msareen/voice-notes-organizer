@@ -5,6 +5,7 @@ import chalk from "chalk";
 import fs from "fs-extra";
 import { which } from "./setup.js";
 import { resolveBinary, resolveModel } from "./whispercpp.js";
+import { repairSamsungM4A } from "./special-case-handling.js";
 
 /**
  * Whether whisper.cpp is callable. Resolved by checking the vendored
@@ -68,39 +69,64 @@ export async function transcribeFile(
     throw new Error("ffmpeg isn't installed. Run `vno setup` to install it.");
   }
 
-  const wavPath = path.join(os.tmpdir(), `vno-whisper-${process.pid}-${Date.now()}.wav`);
-  let whisperOutput = "";
-  try {
-    announce("Converting to WAV...", onOutput);
-    await convertToWav(ffmpeg, filePath, wavPath);
-    announce("Transcribing with whisper.cpp...", onOutput);
-    whisperOutput = await runWhisperCpp(binary.path, {
-      wavPath,
-      modelPath,
-      translate,
-      device,
-      threads: threads || Math.max(1, os.cpus().length - 1),
-      outputPrefix,
-      onOutput,
-      language,
-    });
-  } finally {
-    await fs.remove(wavPath).catch(() => {});
+  // Runs the convert+transcribe+verify pipeline against a single input file.
+  // Split out so it can be retried once against a repaired copy: a truncated
+  // Samsung .m4a (see special-case-handling.js) doesn't always make ffmpeg
+  // *throw* - ffmpeg can open just enough of a mangled moov to exit 0 on a
+  // near-empty decode, which whisper.cpp then also exits 0 on (0 timings, no
+  // segments), so the real signal is the "no transcript on disk" check below,
+  // not a caught exception from convertToWav.
+  async function attempt(inputPath) {
+    const wavPath = path.join(os.tmpdir(), `vno-whisper-${process.pid}-${Date.now()}.wav`);
+    let whisperOutput = "";
+    try {
+      announce("Converting to WAV...", onOutput);
+      await convertToWav(ffmpeg, inputPath, wavPath);
+      announce("Transcribing with whisper.cpp...", onOutput);
+      whisperOutput = await runWhisperCpp(binary.path, {
+        wavPath,
+        modelPath,
+        translate,
+        device,
+        threads: threads || Math.max(1, os.cpus().length - 1),
+        outputPrefix,
+        onOutput,
+        language,
+      });
+    } finally {
+      await fs.remove(wavPath).catch(() => {});
+    }
+
+    // Belt and braces: a zero exit code with no fresh transcript on disk is
+    // still a failure (seen with an empty/near-silent recording, or a WAV
+    // whisper.cpp accepted but couldn't align any segments in) - and the caller
+    // is about to report "Saved" otherwise. Exit code 0 means runWhisperCpp
+    // resolved rather than rejected, so there's no thrown error to relay; the
+    // last lines of its own stdout/stderr are the only diagnostic there is.
+    const stats = await fs.stat(transcript).catch(() => null);
+    if (!stats || stats.mtimeMs < startedAt - 1000) {
+      const tail = whisperOutput && lastLines(whisperOutput, 8);
+      throw new Error(
+        `whisper.cpp wrote no transcript for ${path.basename(filePath)}` +
+          (tail ? ` - last output:\n${tail}` : " (it produced no output either)")
+      );
+    }
   }
 
-  // Belt and braces: a zero exit code with no fresh transcript on disk is
-  // still a failure (seen with an empty/near-silent recording, or a WAV
-  // whisper.cpp accepted but couldn't align any segments in) - and the caller
-  // is about to report "Saved" otherwise. Exit code 0 means runWhisperCpp
-  // resolved rather than rejected, so there's no thrown error to relay; the
-  // last lines of its own stdout/stderr are the only diagnostic there is.
-  const stats = await fs.stat(transcript).catch(() => null);
-  if (!stats || stats.mtimeMs < startedAt - 1000) {
-    const tail = whisperOutput && lastLines(whisperOutput, 8);
-    throw new Error(
-      `whisper.cpp wrote no transcript for ${path.basename(filePath)}` +
-        (tail ? ` - last output:\n${tail}` : " (it produced no output either)")
-    );
+  try {
+    await attempt(filePath);
+  } catch (err) {
+    // Only worth the extra decode/rebuild pass for that one known Samsung
+    // shape; any other failure (corrupt audio, unsupported format, a real
+    // silent recording, etc.) just propagates as before.
+    if (path.extname(filePath).toLowerCase() !== ".m4a") throw err;
+    // The repair replaces the recording in place (keeping the damaged file as
+    // `<name>.original.m4a`), so the retry runs against the same path and the
+    // transcript still lands under the name the user knows.
+    const repaired = await repairSamsungM4A(filePath, { onOutput });
+    if (!repaired) throw err;
+    announce("Retrying transcription with the repaired recording...", onOutput);
+    await attempt(repaired);
   }
 }
 

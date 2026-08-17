@@ -65,6 +65,7 @@ transcript sidecars, after a confirmation that defaults to *no*.
 | --- | --- |
 | `-f, --file <names...>` | Delete exactly these recordings instead of scanning. Skips ffprobe entirely. If **any** name fails to resolve, nothing is deleted |
 | `-t, --threshold <seconds>` | Duration cutoff, default `3` |
+| `--originals` | Also offer the `*.original.m4a` backups kept beside repaired Samsung recordings. Listed and deleted as their own group — no transcript sidecars, never written to the ledger. Works without ffprobe |
 | `--dry-run` | List what would go, delete nothing |
 
 ### `vno cleanup ledger`
@@ -175,7 +176,9 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
   model resolution/download/validation) and `whisper.js` (resolving the installed
   binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
-  the binary, the accel-state helpers that replaced `gpu.js`).
+  the binary, the accel-state helpers that replaced `gpu.js`), plus
+  `special-case-handling.js` (recovering Samsung `.m4a` files with a truncated
+  index — see the invariant below).
 - `src/web/server/` — the HTTP server, split by route group. `index.js` builds the
   shared `ctx` (notes/config/job/SSE-clients state, plus the token gate and dispatch
   table) and owns process/socket lifecycle; `context.js` defines `ctx` itself;
@@ -248,6 +251,28 @@ before changing the API surface.
   full rescan.
 - **One job at a time.** `guardJob()` returns `409 Busy` for a second start. Job output
   streams line-by-line to the page log.
+- **The Samsung `.m4a` repair re-frames with ffmpeg, and only from a catch block.**
+  `lib/special-case-handling.js` handles recordings whose `moov` was cut off
+  mid-`stsz` by an interrupted copy: `mdat` is intact, but AAC `raw_data_block`s
+  have no length field, so the frame boundaries can't be byte-scanned. Rather than
+  an FFI'd AAC decoder (an earlier version used `koffi`+libfaad2 — never satisfiable
+  on Windows, and it only recovered the surviving `stsz` prefix), it rebuilds a
+  minimal MP4 declaring the *whole* `mdat` as a **single sample**: ffmpeg decodes a
+  frame, reports what it consumed, and libavformat re-feeds the remainder, walking
+  every frame. That single-sample `stsz` is deliberately untruthful — don't "fix" it.
+  The result is verified against the frame count `stts` recorded before the cut, so
+  a repair either provably got everything or says what it missed. Costs one
+  re-encode; needs nothing beyond the ffmpeg vno already requires. The rebuild
+  **replaces the recording in place** (so `rel`, the transcript name and every
+  downstream consumer are unaffected), keeping the damaged file as
+  `<name>.original.m4a` — filtered out of `findAudioFiles`, removable via
+  `vno cleanup --originals` and the Cleanup dialog's checkbox, and never written to
+  the deletion ledger. Verification runs *before* the swap, and the swap renames
+  the original aside first, so a failed repair can't cost the user their file.
+  Two things are easy to get wrong: a successful ffprobe is **not** a health check
+  (duration comes from the intact movie header), and neither is a cache miss (an
+  already-scanned library has durations cached) — so the check hangs off
+  `healIfDamaged()` in `buildNote`, the one call every recording passes through.
 - **A zero exit code still gets a freshness check.** whisper.cpp's exit code is
   reliable (unlike the old Python whisper, which could exit 0 having silently
   skipped a file over a Windows console encoding bug — gone now that there's

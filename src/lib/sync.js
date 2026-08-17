@@ -1,6 +1,7 @@
 import fs from "fs-extra";
 import path from "node:path";
 import { loadDeletionMatcher } from "./ledger.js";
+import { isOriginalBackup } from "./special-case-handling.js";
 
 export const AUDIO_EXTENSIONS = new Set([
   ".mp3",
@@ -75,7 +76,12 @@ async function walk(dir, results, root, report, matches, recursive) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (recursive) await walk(full, results, root, report, matches, recursive);
-    } else if (entry.isFile() && matches(entry.name)) {
+    } else if (entry.isFile() && matches(entry.name) && !isOriginalBackup(entry.name)) {
+      // A `.original.m4a` is the damaged pre-repair copy of the recording sitting
+      // beside it (see special-case-handling.js), not a separate recording -
+      // listing it would show every repaired file twice in the UI and offer to
+      // transcribe the copy that can't be decoded. `vno cleanup --originals` and
+      // the cleanup dialog are how they're removed.
       results.push(full);
     }
   }

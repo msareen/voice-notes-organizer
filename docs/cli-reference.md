@@ -164,9 +164,28 @@ with any matching `.vtt` / `.srt` / `.txt` sidecar.
 | --- | --- |
 | `-f, --file <names...>` | Delete exactly these recordings instead of scanning for short ones |
 | `-t, --threshold <seconds>` | Recordings shorter than this are candidates. Default `3` |
+| `--originals` | Also offer the `*.original.m4a` copies kept beside repaired Samsung recordings |
 | `--dry-run` | List what would be deleted, delete nothing |
 
-The same scan-and-confirm flow is available from the UI's *Cleanup* button.
+The same scan-and-confirm flow is available from the UI's *Cleanup* button,
+where `--originals` is the *Also list pre-repair originals* checkbox.
+
+### Deleting pre-repair originals
+
+When vno repairs a damaged Samsung recording it keeps the broken file as
+`<name>.original.m4a` (see
+[Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe)).
+Those backups are hidden from the takes list and from every other command;
+`--originals` is how you get rid of them once you're happy with the repair.
+
+They're listed as their own group and deleted separately from recordings: they
+have no transcripts to take with them, and they're never written to the
+[deletion ledger](configuration.md#rememberdeletions) — the recording they came
+from is still there under its own name, so remembering them would suppress a
+future import of a file nobody deleted.
+
+`--originals` works even when `ffprobe` is missing: the short-recording scan
+needs it, the backups don't, so they're still offered.
 
 ### Deleting named recordings
 

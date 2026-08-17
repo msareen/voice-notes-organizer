@@ -7,6 +7,7 @@ import { findAudioFiles } from "../lib/sync.js";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
 import { getDurationSeconds } from "../lib/media.js";
 import { recordDeletions, clearLedger, ledgerSummary } from "../lib/ledger.js";
+import { listOriginalBackups, isOriginalBackup } from "../lib/special-case-handling.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { ensureDependencies } from "./setup.js";
 import { createProgressBar, locationOf } from "./progress.js";
@@ -25,8 +26,16 @@ function transcriptPathsFor(audioPath) {
  * for recordings shorter than `threshold` (the accidental button presses) and
  * offer those. Both paths end at the same confirm-then-delete, so transcripts
  * go with the audio and the deletion ledger is written either way.
+ *
+ * `originals` adds the damaged pre-repair copies kept beside repaired Samsung
+ * recordings (see lib/special-case-handling.js) to the same offer. They're
+ * listed and deleted separately from the recordings because they aren't
+ * recordings: they have no transcripts of their own, and they must never reach
+ * the deletion ledger - the recording they were made from is still there under
+ * its own name, so "remembering" them would suppress a future import of a file
+ * that was never deleted.
  */
-export async function runCleanup({ threshold = 3, dryRun = false, files = null } = {}) {
+export async function runCleanup({ threshold = 3, dryRun = false, files = null, originals = false } = {}) {
   const config = await loadConfig();
 
   if (!(await fs.pathExists(config.target))) {
@@ -40,13 +49,20 @@ export async function runCleanup({ threshold = 3, dryRun = false, files = null }
     return;
   }
 
+  const backups = originals ? await listOriginalBackups(allAudio) : [];
+
   const named = Array.isArray(files) && files.length > 0;
-  const doomed = named
+  let doomed = named
     ? await resolveNamed(files, allAudio, config.target)
     : await findShortRecordings(allAudio, threshold, config.target);
 
-  if (doomed === null) return; // the finder already explained why
-  if (doomed.length === 0) {
+  if (doomed === null) {
+    // The finder already explained why (usually a missing ffprobe). Backups
+    // don't need it, so there's still something worth offering.
+    if (backups.length === 0) return;
+    doomed = [];
+  }
+  if (doomed.length === 0 && backups.length === 0) {
     console.log(
       named
         ? chalk.yellow("Nothing matched - nothing to delete.")
@@ -55,18 +71,30 @@ export async function runCleanup({ threshold = 3, dryRun = false, files = null }
     return;
   }
 
-  console.log(
-    chalk.bold(
-      named
-        ? `Deleting ${doomed.length} named recording(s):`
-        : `Found ${doomed.length} recording(s) shorter than ${threshold}s:`
-    )
-  );
-  for (const { file, duration } of doomed) {
-    const label = path.relative(config.target, file);
-    const suffix = duration === undefined || duration === null ? "" : chalk.dim(` (${duration.toFixed(1)}s)`);
-    const sidecars = (await existingTranscripts(file)).map((t) => path.extname(t));
-    console.log(`  - ${label}${suffix}${sidecars.length ? chalk.dim(` + ${sidecars.join(" ")}`) : ""}`);
+  if (doomed.length > 0) {
+    console.log(
+      chalk.bold(
+        named
+          ? `Deleting ${doomed.length} named recording(s):`
+          : `Found ${doomed.length} recording(s) shorter than ${threshold}s:`
+      )
+    );
+    for (const { file, duration } of doomed) {
+      const label = path.relative(config.target, file);
+      const suffix = duration === undefined || duration === null ? "" : chalk.dim(` (${duration.toFixed(1)}s)`);
+      const sidecars = (await existingTranscripts(file)).map((t) => path.extname(t));
+      console.log(`  - ${label}${suffix}${sidecars.length ? chalk.dim(` + ${sidecars.join(" ")}`) : ""}`);
+    }
+  }
+
+  if (backups.length > 0) {
+    console.log(chalk.bold(`\nFound ${backups.length} pre-repair original(s):`));
+    for (const { backup, recording, size } of backups) {
+      console.log(
+        `  - ${path.relative(config.target, backup)}` +
+          chalk.dim(` (${formatBytes(size)}, repaired as ${path.basename(recording)})`)
+      );
+    }
   }
 
   if (dryRun) {
@@ -74,12 +102,13 @@ export async function runCleanup({ threshold = 3, dryRun = false, files = null }
     return;
   }
 
+  const total = doomed.length + backups.length;
   console.log();
   const { confirmed } = await inquirer.prompt([
     {
       type: "list",
       name: "confirmed",
-      message: `Delete these ${doomed.length} file(s) (and their transcripts, if any)?`,
+      message: `Delete these ${total} file(s)${doomed.length ? " (and their transcripts, if any)" : ""}?`,
       choices: [
         { name: "No, cancel", value: false },
         { name: "Yes, delete them", value: true },
@@ -94,25 +123,59 @@ export async function runCleanup({ threshold = 3, dryRun = false, files = null }
     return;
   }
 
-  const { removed, deleted } = await deleteRecordings(
-    doomed.map((d) => d.file),
-    config.target
-  );
+  if (doomed.length > 0) {
+    const { removed, deleted } = await deleteRecordings(
+      doomed.map((d) => d.file),
+      config.target
+    );
 
-  console.log(
-    chalk.green(
-      named
-        ? `Deleted ${removed}/${doomed.length} recording(s).`
-        : `Deleted ${removed}/${doomed.length} short recording(s).`
-    )
-  );
+    console.log(
+      chalk.green(
+        named
+          ? `Deleted ${removed}/${doomed.length} recording(s).`
+          : `Deleted ${removed}/${doomed.length} short recording(s).`
+      )
+    );
 
-  const remembered = await recordDeletions(config.target, deleted, {
-    enabled: config.rememberDeletions !== false,
-  });
-  if (remembered > 0) {
-    console.log(chalk.dim(`Remembered ${remembered} of them, so a re-import won't bring them back.`));
+    const remembered = await recordDeletions(config.target, deleted, {
+      enabled: config.rememberDeletions !== false,
+    });
+    if (remembered > 0) {
+      console.log(chalk.dim(`Remembered ${remembered} of them, so a re-import won't bring them back.`));
+    }
   }
+
+  if (backups.length > 0) {
+    const removed = await deleteOriginalBackups(backups.map((b) => b.backup), config.target);
+    console.log(chalk.green(`Deleted ${removed}/${backups.length} pre-repair original(s).`));
+  }
+}
+
+/** Rough file size for the backup listing - these are the only sizes shown here. */
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return "?";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Deletes pre-repair originals, and *only* those: every path is re-checked
+ * against the naming rule first, so a bug elsewhere in the selection can't turn
+ * this into a recording remover. No transcripts and no ledger entries - see
+ * `runCleanup` for why.
+ */
+async function deleteOriginalBackups(backups, target) {
+  let removed = 0;
+  for (const file of backups) {
+    if (!isOriginalBackup(path.basename(file))) continue;
+    try {
+      await fs.remove(file);
+      removed++;
+    } catch (err) {
+      console.log(chalk.red(`Failed to delete ${path.relative(target, file)}: ${err.message}`));
+    }
+  }
+  return removed;
 }
 
 /**

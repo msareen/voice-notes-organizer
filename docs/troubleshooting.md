@@ -93,6 +93,47 @@ subfolder: the CLI prompt offers a folder browser, and the UI's import dialog
 has a **Subfolder** button per volume. See
 [Pinning a subfolder](import-and-sync.md#pinning-a-subfolder).
 
+## A Samsung recording won't play or transcribe
+
+Samsung's Voice Recorder writes the sample index (`moov`) at the **end** of the
+file, so a copy or cloud sync that was interrupted leaves the audio (`mdat`)
+complete but the index cut off mid-table. The file looks normal and even reports
+the right duration — that's read from the movie header, which survives — but
+nothing can decode it: not VLC, not Windows Media Player, not ffmpeg. So playback
+fails and `vno transcribe` produces nothing.
+
+vno detects that shape (the recorder's vendor atoms plus an atom chain running
+past the end of the file) and **rebuilds the recording in place**, keeping the
+damaged file beside it as `<name>.original.m4a`. Nothing else changes: the
+recording keeps its name, its transcript, and its place in the list.
+
+- **It happens automatically**, the first time vno builds the note for that file
+  — opening the UI is enough — or on a failed transcription, whichever comes
+  first. There's nothing to run by hand.
+- **The damaged file is kept, not deleted**, as `<name>.original.m4a`. Those are
+  hidden from the takes list and every other command, so they can't turn into
+  duplicate notes.
+- **To get rid of the backups**, run `vno cleanup --originals`, or tick *Also
+  list pre-repair originals* in the UI's Cleanup dialog and pick the ones to
+  delete. They're worth keeping until you've played the repaired recording and
+  are happy with it.
+- **The recovered recording is re-encoded**, since the frame boundaries have to
+  be recovered by decoding. One extra AAC generation on a voice memo is
+  inaudible, and whisper downmixes to 16kHz mono anyway.
+- **The repair is verified, not assumed**: the frame count it recovers is
+  checked against the count the file recorded before it was cut, *before*
+  anything is renamed. A shortfall is reported rather than passed off as a clean
+  recovery, and a repair that can't be vouched for never replaces your file.
+
+If the log says `mdat itself is truncated`, the audio really is incomplete —
+the file was cut before the recording finished, and there's nothing to recover.
+Re-copy it from the phone. If it says `no Samsung Voice Recorder markers found`,
+the file is broken some other way and this repair deliberately doesn't touch it.
+
+Already have a repaired recording and want the original back? Rename
+`<name>.original.m4a` over it — but it's the damaged file, so it will simply be
+repaired again the next time vno reads it.
+
 ## A recording shows no transcript, but the `.vtt` exists
 
 Transcripts are matched **by filename stem**: `note.mp3` ↔ `note.vtt`. If you

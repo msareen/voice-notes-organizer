@@ -139,6 +139,13 @@ recording shorter than that with its duration, checkboxes to deselect any you
 want to keep, and a confirmation before deleting. Matching `.vtt` / `.srt` /
 `.txt` sidecars go with them.
 
+Tick **Also list pre-repair originals** to include the `*.original.m4a` copies
+kept beside
+[repaired Samsung recordings](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe).
+They appear as a second group in the same list — unticked by default, since
+they're worth keeping until you've played the repaired recording — and are
+deleted without touching any transcript or the deletion ledger.
+
 ### Settings
 
 The settings that are also offered by `vno setting`:

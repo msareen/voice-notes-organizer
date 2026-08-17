@@ -2,25 +2,43 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import fs from "fs-extra";
+import { repairSamsungM4A } from "./special-case-handling.js";
 
 const execFileAsync = promisify(execFile);
+
+async function probeDuration(filePath) {
+  const { stdout } = await execFileAsync(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
+    { windowsHide: true }
+  );
+  const value = parseFloat(stdout.trim());
+  return Number.isFinite(value) ? value : null;
+}
 
 /**
  * Reads duration in seconds via ffprobe (bundled with ffmpeg, which whisper
  * already requires on PATH). Returns null if it can't be determined (e.g.
  * ffprobe isn't installed) so callers can degrade gracefully.
+ *
+ * A .m4a that won't probe at all gets one repair attempt (see
+ * special-case-handling.js) before giving up - a Samsung recording cut badly
+ * enough to lose the movie header lands here. The *usual* damage doesn't:
+ * duration survives that truncation, so those files probe fine and are healed
+ * by `buildNote` instead, which is the one call every recording passes through.
  */
 export async function getDurationSeconds(filePath) {
   try {
-    const { stdout } = await execFileAsync(
-      "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
-      { windowsHide: true }
-    );
-    const value = parseFloat(stdout.trim());
-    return Number.isFinite(value) ? value : null;
+    return await probeDuration(filePath);
   } catch {
-    return null;
+    if (path.extname(filePath).toLowerCase() !== ".m4a") return null;
+    const repaired = await repairSamsungM4A(filePath);
+    if (!repaired) return null;
+    try {
+      return await probeDuration(repaired);
+    } catch {
+      return null;
+    }
   }
 }
 

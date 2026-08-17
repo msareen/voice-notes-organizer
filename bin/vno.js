@@ -88,6 +88,10 @@ program
     "delete these specific recordings and their transcripts (name, relative path, or absolute path) instead of scanning for short ones"
   )
   .option("-t, --threshold <seconds>", "recordings shorter than this (seconds) are removed", "3")
+  .option(
+    "--originals",
+    "also offer the damaged pre-repair originals (*.original.m4a) kept beside repaired Samsung recordings"
+  )
   .option("--dry-run", "list what would be deleted without deleting anything")
   .action(async (what, opts) => {
     if (what === "ledger") {
@@ -103,6 +107,7 @@ program
       threshold: parseFloat(opts.threshold),
       dryRun: Boolean(opts.dryRun),
       files: opts.file || null,
+      originals: Boolean(opts.originals),
     });
   });
 

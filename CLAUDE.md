@@ -193,10 +193,12 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   type="module">`, no bundler, no framework, no dependencies - browsers resolve the
   imports directly, so app.js is just wiring). The rest lives under `assets/js/`:
   `state.js`/`dom.js` hold the shared mutable state and element refs every module
-  reads; `api.js`/`format.js`/`widgets.js` are generic helpers; `list.js` (the takes
-  list) and `deck.js` (the playback/transcript deck) are mutually referential by
-  design - selecting a row plays it, the deck's actions refresh the list - which is a
-  safe ES module cycle as long as cross-calls happen inside event handlers rather
+  reads; `api.js`/`format.js`/`widgets.js` are generic helpers, as is `search.js`
+  (the normalised name+path+transcript haystack the filter box searches, built once
+  per note in a `WeakMap` and warmed while the browser is idle); `list.js` (the
+  takes list) and `deck.js` (the playback/transcript deck) are mutually referential
+  by design - selecting a row plays it, the deck's actions refresh the list - which
+  is a safe ES module cycle as long as cross-calls happen inside event handlers rather
   than at module-evaluation time; `panels/*.js` are the four command modals
   (Settings, Import, Transcribe, Cleanup); `jobs.js` owns the SSE connection, the job
   strip and page lifecycle (heartbeat, quit, deferred shutdown); `theme.js` writes the

@@ -46,9 +46,13 @@ exists.
 
 - **Grouping** — rows group by device folder. Each group header collapses with
   a click, and carries a `⧉` button that opens that folder on disk.
-- **Filter box** — searches file names *and* transcript text, so you can find a
-  recording by something said in it. The `n / n takes` counter above the box
-  tracks the filtered count.
+- **Filter box** — a full-text search across file names, folder paths *and*
+  transcript text, so you can find a recording by something said in it. A take
+  that matched on its transcript shows the matching words underneath, and the
+  same words are highlighted in the transcript when you open it. Whitespace is
+  ignored when matching, so a phrase works even when the transcript broke it
+  across two lines. The `n / n takes` counter above the box tracks the filtered
+  count.
 - **Keyboard** — `↑` / `↓` move through the visible list; `Enter` or `Space`
   selects the focused row.
 - **Divider** — drag it to resize the pane. It's focusable too: `←` / `→`

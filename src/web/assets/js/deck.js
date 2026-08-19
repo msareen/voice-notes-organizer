@@ -8,6 +8,7 @@ import { fmt, fmtDur, fmtSize, extOf } from "./format.js";
 import { button, modal, chip } from "./widgets.js";
 import { icon } from "./icons.js";
 import { renderList, markActive } from "./list.js";
+import { markInto } from "./search.js";
 import { revealFile } from "./actions.js";
 import { openTranscribe } from "./panels/transcribe.js";
 
@@ -80,6 +81,9 @@ export function select(rel) {
 
   dom.placeholder.classList.add("hidden");
   dom.body.classList.remove("hidden");
+  // After the deck is visible: scrolling the first hit into view needs the
+  // transcript laid out, and a hidden body has no layout to scroll.
+  if (state.searchTerm) highlightTranscript(true);
 
   refreshSelected(rel);
 }
@@ -316,6 +320,11 @@ export function showPlaceholder(message) {
 
 function renderTranscript(host, note, audio) {
   host.textContent = "";
+  // What the filter box is searching for gets marked here too, so following a
+  // transcript hit from the list lands you on the words that matched. The
+  // targets are remembered so `highlightTranscript` can re-mark them as the
+  // query changes without rebuilding the deck.
+  host._hlTargets = [];
   if (note.cues && note.cues.length) {
     var cueEls = [];
     note.cues.forEach(function (cue) {
@@ -325,7 +334,8 @@ function renderTranscript(host, note, audio) {
       t.className = "t";
       t.textContent = fmt(cue.start);
       var tx = document.createElement("span");
-      tx.textContent = cue.text;
+      markInto(tx, cue.text, state.searchTerm);
+      host._hlTargets.push({ el: tx, text: cue.text });
       el.appendChild(t);
       el.appendChild(tx);
       el.addEventListener("click", function () { audio.currentTime = cue.start; audio.play(); });
@@ -352,7 +362,8 @@ function renderTranscript(host, note, audio) {
   } else if (note.text) {
     var plain = document.createElement("div");
     plain.className = "plain";
-    plain.textContent = note.text;
+    markInto(plain, note.text, state.searchTerm);
+    host._hlTargets.push({ el: plain, text: note.text });
     host.appendChild(plain);
   } else {
     var empty = document.createElement("div");
@@ -362,6 +373,22 @@ function renderTranscript(host, note, audio) {
       : "No transcript yet — run \"vno transcribe\", or click Edit transcript to write one.";
     host.appendChild(empty);
   }
+}
+
+/**
+ * Re-marks the open transcript for the current filter term. Called on every
+ * filter pass, so it only touches the text nodes rather than re-rendering the
+ * deck - and never while the editor owns the transcript, whose textareas are
+ * the user's unsaved work.
+ */
+export function highlightTranscript(scrollToFirst) {
+  var host = document.getElementById("transcript");
+  if (!host || host._editing || !host._hlTargets) return;
+  var first = null;
+  host._hlTargets.forEach(function (target) {
+    if (markInto(target.el, target.text, state.searchTerm) && !first) first = target.el;
+  });
+  if (scrollToFirst && first) first.scrollIntoView({ block: "nearest" });
 }
 
 /* ---- Minimal transcript editor. Timed transcripts get one box per cue so

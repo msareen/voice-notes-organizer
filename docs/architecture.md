@@ -33,7 +33,7 @@ src/
     assets/          app.css and app.js (the client entry), plus:
       js/            state.js  dom.js  api.js  format.js  widgets.js
                       list.js  deck.js  jobs.js  actions.js  deps.js  models.js
-                      divider.js  dragdrop.js  theme.js  icons.js
+                      search.js  divider.js  dragdrop.js  theme.js  icons.js
       js/panels/     settings.js  import.js  transcribe.js  cleanup.js
 ```
 
@@ -122,6 +122,19 @@ folder and rejects anything that escapes it.
   for it. Selecting a note in the browser triggers `POST /api/notes/refresh`,
   a one-file recheck that bypasses the cache, so a file changed outside vno
   doesn't show stale data until the next full rebuild.
+- **The filter box is a full-text search, and it reads the transcripts.**
+  `assets/js/search.js` matches a take's name, folder path and transcript text
+  as one string — normalised so every run of whitespace is a single space,
+  because a timed transcript is joined cue by cue and a phrase said across a
+  cue boundary is only contiguous after that. Those strings are built once per
+  note into a `WeakMap` (replaced wholesale on the next state reload, so
+  there's nothing to invalidate) and pre-built in idle slices, which is what
+  makes a keystroke a few milliseconds of `indexOf` over the whole library
+  rather than a rescan. Extending a query only re-tests rows still showing,
+  since a string can't contain `abc` without containing `ab`. Transcript hits
+  render as a marked context line under the row and are marked again in the
+  open take's transcript — without that, a take matching on words nobody can
+  see just looks like a filtering bug.
 - **One job at a time.** A second start returns `409 Busy`. Jobs stream their
   output line by line to the page's log panel; the last 200 lines are kept.
 - **Colour only ever comes from a token, and a theme is one attribute.** Every

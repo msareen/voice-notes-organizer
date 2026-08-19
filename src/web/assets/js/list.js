@@ -5,8 +5,9 @@
 import { state } from "./state.js";
 import { dom } from "./dom.js";
 import { fmtDur, fmtSize } from "./format.js";
-import { select } from "./deck.js";
+import { select, highlightTranscript } from "./deck.js";
 import { revealFolder } from "./actions.js";
+import { normalize, matches, snippet, markInto, warmIndex } from "./search.js";
 
 /* ---- Collapsed-folder state persists across visits, keyed by folder ---- */
 var COLLAPSE_KEY = "vno-collapsed";
@@ -70,7 +71,7 @@ export function renderList() {
     right.appendChild(size);
     row.appendChild(right);
 
-    row._haystack = (note.title + " " + (note.name || "") + " " + (note.text || "")).toLowerCase();
+    row._note = note; // the filter searches its name, path and transcript
     row.addEventListener("click", function () { select(note.rel); });
     row.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(note.rel); }
@@ -131,6 +132,9 @@ export function renderList() {
     applyCollapsed(g);
   });
 
+  // Built ahead of the first keystroke rather than on it - see warmIndex.
+  warmIndex(state.NOTES);
+
   applyFilter();
   markActive();
 }
@@ -175,14 +179,31 @@ export function markActive() {
   });
 }
 
-/* ---- Filter box ---- */
+/* ---- Filter box ----------------------------------------------------------
+   A plain substring search over each take's name, folder path and transcript
+   text (js/search.js). Transcript hits show the matching line under the row,
+   because otherwise a take whose *name* has nothing to do with the query just
+   looks like a filtering bug. ---- */
+var lastTerm = "";
+var filterQueued = false;
+
 export function applyFilter() {
-  var term = dom.q.value.trim().toLowerCase();
+  var term = normalize(dom.q.value).toLowerCase();
+  // Extending a query can only shrink the result set - a string can't contain
+  // "abc" without containing "ab" - so a row already filtered out can be left
+  // alone rather than re-searched, which is what keeps every keystroke after
+  // the first cheap on a library with thousands of transcripts.
+  var narrowing = !!term && !!lastTerm && term.indexOf(lastTerm) === 0;
+  lastTerm = term;
+  state.searchTerm = term;
+
   var visible = 0;
   rows.forEach(function (row) {
-    var match = !term || row._haystack.indexOf(term) !== -1;
+    var wasHidden = row.classList.contains("hidden");
+    var match = narrowing && wasHidden ? false : matches(row._note, term);
     row.classList.toggle("hidden", !match);
     if (match) visible++;
+    showHit(row, match ? term : "");
   });
   // Drop headers for folders with no surviving rows; while a search is active
   // force every remaining folder open so matches aren't hidden by collapse.
@@ -192,5 +213,37 @@ export function applyFilter() {
     if (g.body) g.body.classList.toggle("collapsed", term ? false : !!collapsed[g.key]);
   });
   dom.shown.textContent = visible + " / " + rows.length + " takes";
+  // Keep the open take's transcript marked with whatever is being searched.
+  highlightTranscript();
 }
-dom.q.addEventListener("input", applyFilter);
+
+// The transcript context line under a matching row, created on first hit and
+// then reused - a row that matches only on its name keeps an empty one rather
+// than churning DOM as the query changes.
+function showHit(row, term) {
+  var hit = term ? snippet(row._note, term) : null;
+  if (!hit && !row._hit) return;
+  if (!row._hit) {
+    row._hit = document.createElement("div");
+    row._hit.className = "row-hit";
+    row.querySelector(".row-main").appendChild(row._hit);
+  }
+  if (!hit) {
+    row._hit.textContent = "";
+    row._hit.classList.add("hidden");
+    return;
+  }
+  row._hit.classList.remove("hidden");
+  markInto(row._hit, hit.before + hit.hit + hit.after, term);
+}
+
+// Typing coalesces into one pass per frame, so holding a key down (or pasting)
+// can't queue up a filter run per input event.
+dom.q.addEventListener("input", function () {
+  if (filterQueued) return;
+  filterQueued = true;
+  requestAnimationFrame(function () {
+    filterQueued = false;
+    applyFilter();
+  });
+});

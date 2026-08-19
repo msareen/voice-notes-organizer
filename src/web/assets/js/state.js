@@ -13,6 +13,9 @@ export const state = {
   WHISPER: true,
   FFMPEG: true,
   selectedRel: null,
+  // Current filter-box term, normalised + lowercased (see js/search.js). Shared
+  // so the deck can highlight the same term it was filtered by.
+  searchTerm: "",
   alive: true
 };
 

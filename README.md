@@ -52,7 +52,8 @@ effect on disk immediately.
 
 - **Takes list** — newest first, grouped by device, with a green LED where a
   transcript exists. The filter box searches names **and transcript text**, so
-  you can find a recording by something said in it.
+  you can find a recording by something said in it — matches show the words
+  they matched on, and stay highlighted in the transcript.
 - **Follow-along transcript** — the current line highlights and scrolls as the
   audio plays. Click any line to jump straight to that moment.
 - **Fix what whisper got wrong** — an in-page editor with one box per line.

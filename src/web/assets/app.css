@@ -301,6 +301,20 @@ body.resizing { cursor: col-resize; user-select: none; }
   font-family: var(--mono); font-size: .68rem; color: var(--dim); margin-top: 3px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Transcript context under a row that matched on its transcript rather than
+   its name - two lines at most, since the list stays scannable only if a row
+   keeps its height. */
+.row-hit {
+  font-size: .72rem; line-height: 1.35; color: var(--dim); margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+mark.hit {
+  background: var(--accent-soft); color: var(--accent);
+  border-radius: 2px; padding: 0 1px;
+}
+.row.active mark.hit { background: var(--raise); }
+
 .row-right { text-align: right; font-family: var(--mono); line-height: 1.3; font-variant-numeric: tabular-nums; }
 .row-dur { font-size: .78rem; color: var(--ink); }
 .row-size { font-size: .62rem; color: var(--faint); }

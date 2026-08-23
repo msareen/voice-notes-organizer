@@ -90,7 +90,7 @@ moment.
 
 | Flag | Effect |
 | --- | --- |
-| `-p, --port <number>` | Default `8477`; falls back to `8478` (with a warning) if that's taken. `0` picks a free port automatically instead |
+| `-p, --port <number>` | Default `8477`, fixed across runs (stable for bookmarks and an installed PWA's `start_url`). If it's held by another `vno v` instance, opens a tab to that instance instead of picking a new port; if held by something else, errors and asks for `--port`. `0` picks a free port automatically instead |
 | `--no-open` | Start the server without opening a browser |
 
 ### `vno explore` (`open`)
@@ -122,9 +122,11 @@ Linux CUDA asset). If whisper.cpp isn't installed and neither `--local` nor
 `--global` was passed, asks where: local, global, or a path to one already
 installed (`registerExternalBinary`, never copied into place). Nothing
 installs without a confirmation. Also fetches the default model set (`small`
-+ `large-v3-turbo`) into `whisper-cpp/models/`, and reports (with an offer to
++ `large-v3-turbo`) into `whisper-cpp/models/`, reports (with an offer to
 delete) leftover `~/.cache/whisper/*.pt` files from a prior Python whisper
-install.
+install, and — Windows only — reports whether `vno://` is registered as a URL
+protocol handler and offers to (re-)register it (`lib/protocol.js`), so a
+browser can launch `vno v` the way a Teams/Zoom link launches its own app.
 
 | Flag | Effect |
 | --- | --- |
@@ -192,7 +194,10 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
   the binary, the accel-state helpers that replaced `gpu.js`), plus
   `special-case-handling.js` (recovering Samsung `.m4a` files with a truncated
-  index — see the invariant below).
+  index — see the invariant below), `sessionToken.js` (the persisted `~/.vno/session-token`
+  the server reads at startup) and `protocol.js` (Windows-only: registers `vno://` as a
+  URL protocol via `reg.exe`, so a browser can launch `vno v` the way a Teams/Zoom link
+  launches its own app — `vno setup` is the only caller).
 - `src/web/server/` — the HTTP server, split by route group. `index.js` builds the
   shared `ctx` (notes/config/job/SSE-clients state, plus the token gate and dispatch
   table) and owns process/socket lifecycle; `context.js` defines `ctx` itself;
@@ -215,9 +220,10 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   than at module-evaluation time; `panels/*.js` are the four command modals
   (Settings, Import, Transcribe, Cleanup); `jobs.js` owns the SSE connection, the job
   strip and page lifecycle (heartbeat, quit, deferred shutdown); `theme.js` writes the
-  theme id onto `<html>` and `icons.js` builds the few SVGs the client makes at
-  runtime (the topbar's are inline in `page.js`). Keep the "no build
-  step" property: every file here must be loadable as-is by a browser.
+  theme id onto `<html>`; `icons.js` builds the few SVGs the client makes at
+  runtime (the topbar's are inline in `page.js`); `pwa.js` registers the service
+  worker and shows the "install as an app" banner off `beforeinstallprompt`. Keep the
+  "no build step" property: every file here must be loadable as-is by a browser.
 
 `docs/architecture.md` has the full route table and module responsibilities; read it
 before changing the API surface.
@@ -328,7 +334,35 @@ before changing the API surface.
   shutdown (so a reload doesn't kill the session); a running job is allowed to finish.
 - **Assets are deliberately *not* token-gated** and their routes sit ahead of the token
   check, because the session token is inlined into the HTML by `page.js` and must never
-  travel in an asset URL.
+  travel in an asset URL. `/sw.js` follows the same rule and is served at the root path
+  rather than under `/assets/`, so the service worker's default scope covers the whole
+  origin instead of just `/assets/*`. `/manifest.webmanifest` sits ahead of the gate too,
+  but unlike the assets it's generated per request (`page.js:renderManifest`), not read
+  off disk — its `start_url` has to embed the current token, which a static file could
+  never do. An already-installed PWA shortcut won't notice a `start_url` fix on its own
+  (most browsers cache the manifest from install time); reinstalling the PWA is what
+  actually picks up a changed one.
+- **Launching the viewer prefers the installed PWA over a browser tab, and `vno://`
+  never opens a second window.** `cli/visualize.js:openViewer()` calls
+  `lib/open.js:findInstalledPwaShortcut()` (Windows only, matching `vno://`'s own scope)
+  to look for the Start Menu shortcut Chrome/Edge name after the manifest's `name`
+  ("Voice Notes.lnk") and opens that instead of the plain URL when found. The
+  `open-protocol` command (the `vno://` handler's target) never runs the server in its
+  own process — that process is stuck with whatever console window the OS creates for
+  the protocol invocation, so it immediately re-spawns a second, detached
+  `vno visualize --no-open` with `windowsHide: true` (suppresses window creation for
+  the *new* process outright, unlike trying to hide a console this process already
+  owns) and exits, leaving the real server running fully in the background. `--no-open`
+  carries over the same reasoning either way — the tab or window that had the user
+  click "Launch vno" is `offline.html`, already polling in the background, so opening
+  anything there would just be a redundant second window.
+- **The session token is persisted, not regenerated per run.** `lib/sessionToken.js`
+  keeps it in `~/.vno/session-token` and reuses it across `vno v` launches. It still
+  gates every mutating route the same way (loopback is reachable by anything on the
+  machine, including a hostile page's hidden iframe, so the token is what stops that
+  iframe from getting a live session just by loading `/`) — the only change is that the
+  URL an installed PWA remembers as its fixed `start_url` keeps working indefinitely
+  instead of dying the moment the server restarts.
 
 ### Conventions
 
@@ -343,7 +377,8 @@ before changing the API surface.
   the UI's settings dialog (`assets/js/panels/settings.js:openSettings`), and
   passthrough in the server's `routes/settings.js:settings` **and**
   `context.js:stateResponse` — the dialog can't show what state doesn't
-  send. `~/.vno` also holds `deleted.json`; config is not the only file there.
+  send. `~/.vno` also holds `deleted.json` and `session-token`; config is not the only
+  file there.
 - **Long per-file work reports, it doesn't print.** `buildNotes`, `findAudioFiles` and
   `syncVolume` take an optional `onProgress` and emit `{ phase: "scan", dir, found }`,
   `{ phase: "work", done, total, dir, name }` and `{ phase: "log", message, level }`.

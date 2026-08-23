@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import { Command } from "commander";
 import chalk from "chalk";
 import { runImport } from "../src/cli/import.js";
@@ -134,13 +136,43 @@ program
   )
   .option(
     "-p, --port <number>",
-    `port to listen on; falls back to the next port up if it's busy (default: ${DEFAULT_PORT})`,
+    `port to listen on, fixed across runs (default: ${DEFAULT_PORT}). If it's held by another vno v, opens a tab to it instead`,
     String(DEFAULT_PORT)
   )
   .option("--no-open", "start the server without opening a browser")
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
     await runVisualize({ open: opts.open, port: Number.isNaN(port) ? DEFAULT_PORT : port });
+  });
+
+// Invoked by Windows, not by a person: the target of the `vno://` registry
+// key `vno setup` offers to register (lib/protocol.js). A browser navigating
+// to `vno://open` shows its native "Open vno?" dialog, and on approval the OS
+// runs this with the full URI as `%1`. The URI itself carries no arguments
+// worth reading yet - it's just "launch vno v" - so it's accepted and ignored
+// rather than parsed.
+//
+// This process is the one the OS actually launches for the protocol, so it's
+// the one stuck with whatever console window that invocation creates. Rather
+// than running the server here, it immediately re-spawns a second, detached
+// copy with `windowsHide: true` - which suppresses window creation for that
+// *new* process outright, unlike trying to hide a console this process
+// already owns - and exits. The server then runs fully in the background,
+// the same way clicking a Teams/Zoom link doesn't leave a console window
+// behind. `--no-open` is deliberate: the tab or PWA window that had the user
+// click "Launch vno" (offline.html) is already polling and will reload
+// itself the moment the server answers, so opening another one here would
+// just pop a second, redundant window.
+program
+  .command("open-protocol <uri>", { hidden: true })
+  .description("Internal: launched by the vno:// URL handler")
+  .action(() => {
+    const vnoJs = fileURLToPath(new URL("./vno.js", import.meta.url));
+    spawn(process.execPath, [vnoJs, "visualize", "--no-open"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
   });
 
 program

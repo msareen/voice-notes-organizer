@@ -143,13 +143,18 @@ Also check the sidecar is beside the audio, not in a subfolder.
 
 ## The browser page won't open, or says "Invalid session token"
 
-Every run generates a fresh single-use token, inlined into the page URL:
+The session token (inlined into the page URL) is persisted in
+`~/.vno/session-token` and reused across runs — a stable URL, so a
+bookmarked one (or an installed PWA shortcut) keeps working:
 
-- **A bookmarked URL won't work** — its token belongs to a dead session. Start
-  a new one with `vno v` and use the URL it prints.
-- **The port is `8477` by default**, so it's stable across runs — but if
-  something else is already bound to it, `vno` retries once on `8478` and
-  prints a warning, so check the terminal for which one actually got used.
+- **The port is fixed at `8477`.** If something else is already bound to it,
+  `vno v` checks whether that something is a `vno v` instance already
+  running (same token) and, if so, just opens a browser tab to it instead of
+  starting a second server. If it's genuinely something else, pick a free
+  port with `--port`.
+- If a token still shows as invalid, the token file may have been deleted or
+  corrupted between runs — reload the page vno just printed rather than an
+  old bookmark.
 - If no browser opens, the URL is in the terminal — paste it manually.
 - `--no-open` starts the server without launching a browser at all.
 

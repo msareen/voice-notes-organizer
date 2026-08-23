@@ -138,6 +138,44 @@ function setLive(on) {
   }
 }
 
+var quitOverlay = null;
+function showQuitOverlay(title, detail) {
+  if (!quitOverlay) {
+    quitOverlay = document.createElement("div");
+    quitOverlay.className = "quit-overlay";
+    var eq = document.createElement("span");
+    eq.className = "eq";
+    for (var i = 0; i < 5; i++) eq.appendChild(document.createElement("i"));
+    quitOverlay.appendChild(eq);
+    quitOverlay.appendChild(document.createElement("h1"));
+    quitOverlay.appendChild(document.createElement("p"));
+    document.body.appendChild(quitOverlay);
+  }
+  quitOverlay.querySelector("h1").textContent = title;
+  quitOverlay.querySelector("p").textContent = detail;
+}
+
+/* Confirms the server has actually gone (not just that /api/bye was sent -
+   the process takes a moment to unwind, and closing the window before it's
+   really down would just reopen the "disconnected" state on anything still
+   watching). Once a ping genuinely fails to connect, it's safe to try
+   closing the window - best-effort, since a tab the user opened by hand
+   (rather than via window.open) will refuse to be closed by script in most
+   browsers, which is why the overlay's text still doubles as the fallback. */
+function waitForShutdown(triesLeft) {
+  fetch("/api/ping?t=" + encodeURIComponent(state.TOKEN), { method: "POST", cache: "no-store" })
+    .then(function () {
+      if (triesLeft > 0) setTimeout(function () { waitForShutdown(triesLeft - 1); }, 300);
+      else finishShutdown(); // gave it its chance; stop waiting either way
+    })
+    .catch(finishShutdown);
+}
+
+function finishShutdown() {
+  showQuitOverlay("vno has stopped", "You can close this tab now.");
+  try { window.close(); } catch (e) {}
+}
+
 document.getElementById("btnQuit").addEventListener("click", function () {
   modal({
     title: "Quit vno",
@@ -145,10 +183,10 @@ document.getElementById("btnQuit").addEventListener("click", function () {
     confirmLabel: "Quit",
     danger: true,
     onConfirm: function () {
-      return api("/api/bye", { method: "POST", body: { quit: true } }).then(function () {
-        state.alive = false;
-        setLive(false);
-      });
+      state.alive = false; // stop the regular heartbeat from also reacting to this
+      showQuitOverlay("Shutting down vno…", "Waiting for the server to stop.");
+      return api("/api/bye", { method: "POST", body: { quit: true } })
+        .then(function () { waitForShutdown(20); }, function () { waitForShutdown(20); });
     }
   });
 });

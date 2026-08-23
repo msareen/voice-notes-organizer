@@ -26,6 +26,7 @@ import {
 } from "../lib/whispercpp.js";
 import { accelState } from "../lib/whisper.js";
 import { loadConfig, saveConfig } from "../lib/config.js";
+import { protocolStatus, registerProtocol } from "../lib/protocol.js";
 import { prompt, CANCELLED } from "./prompt.js";
 
 /** The two things vno can't transcribe without, in install order. */
@@ -320,6 +321,10 @@ export async function runSetup({ check = false, mode = null, model = null, listM
   const config = await loadConfig();
   reportAccel(config);
 
+  // Windows only for now - see lib/protocol.js for why macOS/Linux aren't here yet.
+  const protocol = os.platform() === "win32" ? await protocolStatus() : null;
+  if (protocol) reportProtocol(protocol);
+
   if (check) {
     // Report-only: never installs or downloads anything.
     return;
@@ -352,6 +357,7 @@ export async function runSetup({ check = false, mode = null, model = null, listM
   await checkAccel(config, activeMode);
   await ensureModels(activeMode, model);
   await reportStalePythonCache();
+  if (protocol) await ensureProtocolHandler(protocol);
 }
 
 /** Which of the two known install roots a resolved path belongs to. */
@@ -396,6 +402,49 @@ function reportAccel(config) {
   }
   const state = accel.use === false ? chalk.dim("off by choice") : chalk.green("in use");
   console.log(`  ${chalk.green("✓")} ${"accel".padEnd(12)} ${chalk.dim(accel.name || accel.backend)} ${state}`);
+}
+
+/** Status line for the `vno://` browser-launch handler, in the same shape as the binary checks above. */
+function reportProtocol(status) {
+  if (!status.registered) {
+    console.log(`  ${chalk.dim("?")} ${"vno://".padEnd(12)} ${chalk.dim("not registered — lets a browser launch `vno v` directly")}`);
+  } else if (!status.upToDate) {
+    console.log(`  ${chalk.yellow("!")} ${"vno://".padEnd(12)} ${chalk.dim("registered, but points at a different vno install")}`);
+  } else {
+    console.log(`  ${chalk.green("✓")} ${"vno://".padEnd(12)} ${chalk.dim("registered")}`);
+  }
+}
+
+/**
+ * Offers to register `vno://` as a Windows URL protocol (lib/protocol.js) -
+ * the same mechanism a `msteams://` or `zoommtg://` link uses - so a page
+ * (the PWA's offline fallback, in particular) can trigger the browser's
+ * native "Open vno?" dialog and have that launch `vno v`. Skipped when
+ * there's no terminal to ask, and re-offered (as an update, not a fresh ask)
+ * if it's registered but pointing at a stale install path.
+ */
+async function ensureProtocolHandler(status) {
+  if (status.registered && status.upToDate) return;
+  if (!process.stdin.isTTY) return;
+
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "choice",
+      message: status.registered
+        ? "vno:// is registered but points at a different vno install - update it?"
+        : "Register vno:// so a browser can launch `vno v` directly (like a Teams/Zoom meeting link)?",
+      choices: [
+        { name: "Yes", value: true },
+        { name: "No", value: false },
+      ],
+      default: true,
+    },
+  ]);
+  if (answer === CANCELLED || !answer.choice) return;
+
+  const result = await registerProtocol();
+  console.log(result.ok ? chalk.green("  vno:// registered.") : chalk.red(`  Couldn't register vno://: ${result.output}`));
 }
 
 /**

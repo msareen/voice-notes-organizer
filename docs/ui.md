@@ -229,7 +229,14 @@ one unreadable recording doesn't abandon the batch.
 
 The CLI stays up serving the page, and exits when you're done with it:
 
-- **Quit** in the header stops the server immediately.
+- **Quit** in the header stops the server, but not silently: the page covers
+  itself with a "Shutting down vno…" screen the moment you confirm, then
+  polls until a request genuinely fails to connect (not just "the last one
+  was slow") before switching that screen to "vno has stopped — you can
+  close this tab now" and trying to close the window itself. That last part
+  is best-effort — most browsers refuse to let a script close a tab it
+  didn't open itself, which is exactly why the message doubles as the
+  fallback instead of assuming the close works.
 - **Closing the browser tab does the same** — the CLI exits a few seconds
   later. A page *reload* isn't mistaken for a close, and a second tab keeps the
   session alive.
@@ -240,17 +247,68 @@ The CLI stays up serving the page, and exits when you're done with it:
 
 ---
 
+## Installing as an app
+
+The page is a PWA (manifest + service worker): most browsers offer to install
+it, and vno surfaces that as an "Install Voice Notes as an app" banner the
+first time a session becomes eligible for it. Installing gives you a standalone
+window with its own icon/taskbar entry instead of a browser tab. It still
+needs `vno v` running — installing doesn't start a background service; if the
+fixed port isn't reachable when you open the installed app, you get a splash
+screen (the app's mark, "Starting Voice Notes…") rather than an error page,
+since the common case is a cold start still spinning up, not a real failure.
+It tries to launch vno for you automatically as soon as it shows. Recovery
+options — a **Launch vno** button, a **Reload**, and manual instructions —
+stay hidden for the first several seconds and only fade in if startup is
+taking longer than a normal cold start should, so the common case reads as
+"starting up" rather than "something's wrong." The page polls quietly in the
+background throughout and moves on by itself the moment the server answers,
+so there's nothing to click once it's up.
+
+Both the automatic attempt and the **Launch vno** button navigate to
+`vno://open` — a custom URL scheme, the same mechanism a Teams or Zoom
+meeting link uses, so the browser shows its own native "Open vno?" prompt
+and, on approval, the OS runs `vno v` for you. It only works once
+`vno setup` has registered the handler (Windows only for now — see
+[`vno setup`](cli-reference.md#vno-setup)); without that, both do nothing
+beyond whatever "unknown link" handling your browser shows, so the manual
+instructions stay right beside them once they appear. The automatic attempt
+fires once per page load, not on every poll, so a server that never comes up
+can't turn it into repeated pop-ups. This launch never opens a second tab or
+window — the splash page itself is already polling in the background and
+moves on the moment the server answers.
+
+The server this starts runs in the background, not in a visible terminal:
+`vno://open` briefly launches a console-owning process (whatever Windows
+creates for the protocol invocation), which immediately hands off to a
+second, detached, windowless copy of the server and exits — so after that
+first flash, there's nothing on your taskbar or desktop for the server
+itself, the same way starting Teams or Zoom doesn't leave a console window
+behind either.
+
+Once installed, plain `vno v` (from a terminal, or a second `vno://open`)
+prefers the installed app over a browser tab: it looks for the app's Start
+Menu shortcut and, if found, opens that instead — so launching vno always
+lands you in the standalone window rather than a tab once you've installed
+it once.
+
+---
+
 ## Security model
 
 These endpoints delete files and launch programs, so access is narrow by
 design:
 
 - The server binds to **`127.0.0.1`** on a **fixed default port (8477)** —
-  never an external interface. If that port is busy it retries once on 8478
-  and prints a warning; `-p/--port 0` asks for a random free port instead.
-- Every request needs a **single-use session token**, generated per run and
-  inlined into the page. Requests without it get a 403, including anyone who
-  guesses the port.
+  never an external interface. If that port is busy, `vno v` checks whether
+  it's a `vno v` instance already running and opens a tab to it instead of
+  picking a different port (bookmarked URLs and an installed PWA shortcut
+  depend on the port staying put); `-p/--port 0` asks for a random free port
+  instead.
+- Every request needs a **session token**, persisted in
+  `~/.vno/session-token` and reused across runs (not regenerated per launch —
+  what lets a bookmark or an installed PWA keep working), inlined into the
+  page. Requests without it get a 403, including anyone who guesses the port.
 - **Cross-origin requests are refused** outright, so a page in another tab
   can't drive your session.
 - Every file path is resolved back against the target folder; anything

@@ -44,6 +44,8 @@ export function renderPage({ rootLabel, token, theme = "tape" }) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Voice Notes · ${folderName}</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#13100e" />
 <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -101,6 +103,27 @@ export function renderPage({ rootLabel, token, theme = "tape" }) {
 </body>
 </html>
 `;
+}
+
+/**
+ * The PWA manifest, generated per request rather than a static file -
+ * `start_url` has to carry the current session token (persisted, but not
+ * knowable when this module is written), or an installed PWA's fixed
+ * shortcut would land on `/` with no token and get a 403 forever. Everything
+ * else in it is static; only `start_url` depends on `token`.
+ */
+export function renderManifest({ token }) {
+  return JSON.stringify({
+    name: "Voice Notes",
+    short_name: "Voice Notes",
+    description: "Local voice recording player, transcript editor and importer for vno.",
+    start_url: `/?t=${token}`,
+    scope: "/",
+    display: "standalone",
+    background_color: "#13100e",
+    theme_color: "#13100e",
+    icons: [{ src: "/assets/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+  });
 }
 
 function escapeHtml(str) {

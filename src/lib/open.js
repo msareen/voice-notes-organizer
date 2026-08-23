@@ -1,5 +1,6 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
+import fs from "fs-extra";
 
 function launch(cmd, args) {
   try {
@@ -38,4 +39,53 @@ export function revealInFolder(target) {
   if (process.platform === "win32") return launch("explorer", [dir]);
   if (process.platform === "darwin") return launch("open", [dir]);
   return launch("xdg-open", [dir]);
+}
+
+// Matches the manifest's `name` (web/page.js:renderManifest) - Chrome/Edge
+// name an installed PWA's Start Menu shortcut after it verbatim.
+const PWA_SHORTCUT_NAME = "Voice Notes.lnk";
+
+/**
+ * Finds the Start Menu shortcut an installed PWA leaves behind, so launching
+ * `vno v` can open the installed app window instead of a plain browser tab.
+ * Windows-only: this mirrors the vno:// protocol handler's own scope
+ * (lib/protocol.js), since neither Chrome's nor Edge's PWA install leaves an
+ * equivalent well-known shortcut on macOS/Linux to search for. Best-effort -
+ * a scan that turns up nothing just means "not installed, or installed
+ * somewhere this didn't think to look," not an error.
+ */
+export async function findInstalledPwaShortcut() {
+  if (process.platform !== "win32") return null;
+
+  const roots = [
+    process.env.APPDATA && path.join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs"),
+    process.env.ProgramData &&
+      path.join(process.env.ProgramData, "Microsoft", "Windows", "Start Menu", "Programs"),
+  ].filter(Boolean);
+
+  for (const root of roots) {
+    const found = await findShortcutIn(root, 2);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function findShortcutIn(dir, depth) {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return null; // folder doesn't exist or isn't readable - not installed here
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isFile() && entry.name.toLowerCase() === PWA_SHORTCUT_NAME.toLowerCase()) return full;
+  }
+  if (depth <= 0) return null;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const found = await findShortcutIn(path.join(dir, entry.name), depth - 1);
+    if (found) return found;
+  }
+  return null;
 }

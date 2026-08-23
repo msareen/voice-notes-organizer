@@ -74,7 +74,40 @@ server change is needed either.
 
 The session token is the one thing not in the assets: `page.js` inlines it into
 the HTML, so it never travels in an asset URL — which is also why the two asset
-routes sit *ahead* of the token gate.
+routes sit *ahead* of the token gate. `/sw.js` (the service worker) follows the
+same reasoning and sits ahead of the gate too, but is served at the *root*
+path rather than under `/assets/` so its default scope is the whole origin.
+
+`/manifest.webmanifest` is also ahead of the gate but, unlike the assets, is
+generated per request (`page.js:renderManifest`) rather than read off disk -
+its `start_url` has to carry the current token, since an installed PWA's
+shortcut has no other way to get one; a static file could only ever bake in
+whatever token happened to exist when it was written. The token itself is
+persisted in `~/.vno/session-token` and reused across `vno v` launches
+(`lib/sessionToken.js`) rather than regenerated per run, so that embedded
+`start_url` keeps working indefinitely instead of dying the moment the
+server restarts. (An *already-installed* PWA shortcut won't pick up a
+manifest fix like this on its own - most browsers cache the manifest from
+install time - so reinstalling the PWA is what actually applies a
+`start_url` change to an existing install.)
+
+`cli/visualize.js:openViewer()` is what actually hands the URL to the OS once
+the server is up: it calls `lib/open.js:findInstalledPwaShortcut()` (Windows
+only, matching `vno://`'s own scope) to look for the app's Start Menu shortcut
+(named after the manifest's `name`, "Voice Notes.lnk" — Chrome/Edge create it
+verbatim on install) and opens that instead of the plain URL when it exists,
+so a person who's installed the PWA always lands in the standalone window
+rather than a browser tab. `bin/vno.js`'s `open-protocol` handler (the `vno://`
+target) never calls `runVisualize` in its own process at all: that process is
+the one the OS launches for the protocol, so it's stuck with whatever console
+window that invocation creates. Instead it immediately re-spawns a second,
+detached `vno visualize --no-open` with `windowsHide: true` - which suppresses
+window creation for the *new* process outright (`CREATE_NO_WINDOW`), unlike
+trying to hide a console this process already owns - and exits. The actual
+server then runs fully in the background with no window of its own.
+`--no-open` carries over the same reasoning as before: the tab or window that
+had the user click "Launch vno" is `offline.html`, already polling in the
+background, so opening anything here would just be a redundant second window.
 
 ## The local HTTP API
 
@@ -87,6 +120,8 @@ outright. See the [UI's security model](ui.md#security-model).
 | --- | --- | --- |
 | `/` | GET | The page. Token required as `?t=` |
 | `/assets/*` | GET | Static assets (app.css, app.js, assets/js/**). **Not** token-gated, by design |
+| `/manifest.webmanifest` | GET | PWA manifest, generated per request so `start_url` carries the current token. **Not** token-gated itself |
+| `/sw.js` | GET | Service worker (installability + offline fallback page). **Not** token-gated |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
 | `/api/state` | GET | Notes, config, model list, theme list, `ffmpeg`/whisper.cpp availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |

@@ -13,9 +13,11 @@ import { openTranscribe } from "./js/panels/transcribe.js";
 import { openCleanup } from "./js/panels/cleanup.js";
 import { reloadState, connectEvents } from "./js/jobs.js";
 import { fail } from "./js/api.js";
+import { initPwa } from "./js/pwa.js";
 
 initDivider();
 initDragDrop();
+initPwa();
 
 document.getElementById("btnFolder").addEventListener("click", function () { revealFolder(""); });
 document.getElementById("btnSettings").addEventListener("click", openSettings);

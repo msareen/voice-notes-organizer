@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice Notes</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: #13100e; color: #f5efe4;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .splash { display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .mark { width: 56px; height: 56px; animation: breathe 1.8s ease-in-out infinite; }
+  @keyframes breathe {
+    0%, 100% { opacity: .55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.06); }
+  }
+  h1 { font-size: 15px; font-weight: 500; margin: 18px 0 0; color: #c9c0b3; letter-spacing: .01em; }
+
+  /* The recovery block is deliberately minor: invisible at first so the
+     splash reads as "starting up", not "something's wrong", and only fades
+     in once a normal startup would plausibly have finished. */
+  .recovery { max-width: 320px; margin-top: 28px; opacity: 0; transition: opacity .6s ease; pointer-events: none; }
+  .recovery.show { opacity: 1; pointer-events: auto; }
+  code {
+    background: #221c17; border: 1px solid #362c22; border-radius: 4px;
+    padding: 2px 6px; color: #ff9e3d;
+  }
+  .btnrow { display: flex; gap: 10px; justify-content: center; }
+  a.btn {
+    font: inherit; font-size: .82rem; padding: 6px 14px; border-radius: 6px;
+    border: 1px solid #362c22; background: transparent; color: #f5efe4;
+    cursor: pointer; text-decoration: none;
+  }
+  a.btn.primary { background: #ff9e3d; color: #1a1200; border-color: #ff9e3d; }
+  .hint { margin-top: 14px; font-size: .74rem; color: #7a6f60; }
+</style>
+</head>
+<body>
+  <div class="splash">
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="#221c17" />
+      <g fill="#ff9e3d">
+        <rect x="5"  y="14" width="3" height="4"  rx="1.5" />
+        <rect x="10" y="9"  width="3" height="14" rx="1.5" />
+        <rect x="15" y="4"  width="3" height="24" rx="1.5" />
+        <rect x="20" y="10" width="3" height="12" rx="1.5" />
+        <rect x="25" y="13" width="3" height="6"  rx="1.5" />
+      </g>
+    </svg>
+    <h1>Starting Voice Notes…</h1>
+    <div class="recovery" id="recovery">
+      <div class="btnrow">
+        <a class="btn primary" href="vno://open">Launch vno</a>
+        <a class="btn" href="#" onclick="location.reload(); return false;">Reload</a>
+      </div>
+      <p class="hint">
+        Taking longer than expected. This tried to launch vno for you
+        automatically via your browser's "Open vno?" prompt; click "Launch
+        vno" if you dismissed it or it never appeared, and set up the
+        <code>vno://</code> handler once via <code>vno setup</code> if
+        neither works. This page keeps checking in the background and moves
+        on by itself the moment the server answers.
+      </p>
+    </div>
+  </div>
+  <script>
+    // Fires the same "Open vno?" prompt the button does, without waiting for
+    // a click. Only attempted once per load: the poll below only reloads the
+    // page on *success*, so a server that never comes up can't turn this
+    // into repeated pop-up spam (which browsers throttle/block after a few
+    // tries anyway).
+    try {
+      location.href = "vno://open";
+    } catch (err) {
+      // Some browsers throw for unregistered custom schemes instead of just
+      // no-op'ing; the recovery block below still covers it either way.
+    }
+    // A normal cold start (spawn + note scan) is usually a couple of
+    // seconds; giving it a few more before showing recovery options keeps
+    // this reading as a splash screen rather than an error page for the
+    // common case, without leaving someone stuck staring at a spinner if
+    // startup genuinely fails.
+    setTimeout(function () {
+      document.getElementById("recovery").classList.add("show");
+    }, 6000);
+    (function poll() {
+      fetch(location.origin, { method: "HEAD", cache: "no-store" })
+        .then(function () { location.reload(); })
+        .catch(function () { setTimeout(poll, 2000); });
+    })();
+  </script>
+</body>
+</html>

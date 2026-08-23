@@ -2,13 +2,58 @@ import fs from "fs-extra";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.js";
 import { startServer } from "../web/server/index.js";
-import { openPath } from "../lib/open.js";
+import { openPath, findInstalledPwaShortcut } from "../lib/open.js";
 import { createProgressBar } from "./progress.js";
+import { getSessionToken } from "../lib/sessionToken.js";
 
-// Fixed so the URL is stable across runs (bookmarks, browser history) instead
-// of changing every launch. `--port 0` still asks for an OS-assigned free
-// port explicitly, which is why the fallback-on-busy logic below skips it.
+// Fixed so the URL is stable across runs (bookmarks, browser history, and an
+// installed PWA's start_url, which is baked in at install time and can't be
+// updated to chase a fallback port) instead of changing every launch.
+// `--port 0` still asks for an OS-assigned free port explicitly, which is
+// why the already-running check below skips it.
 export const DEFAULT_PORT = 8477;
+const HOST = "127.0.0.1"; // matches startServer's own default
+
+/**
+ * A port collision on the fixed default is almost always a `vno v` that's
+ * already running - the common case is opening a second tab, not picking a
+ * new port. Confirmed with a request carrying the same persisted token
+ * (lib/sessionToken.js) rather than assumed from the error alone, so
+ * something unrelated squatting the port still gets reported as busy.
+ */
+async function findRunningInstance(port) {
+  const token = await getSessionToken();
+  const url = `http://${HOST}:${port}/?t=${token}`;
+  try {
+    // `Connection: close` matters here: fetch's default keep-alive socket
+    // would otherwise stay open (and keep this one-shot CLI process alive)
+    // well past the point the answer's already in hand.
+    const res = await fetch(`http://${HOST}:${port}/api/state?t=${token}`, {
+      headers: { Connection: "close" },
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return null;
+    // A 200 alone isn't proof it's vno - anything else squatting the port
+    // could happen to answer every request with 200. Confirm the shape of
+    // /api/state's actual response instead of trusting the status code alone.
+    const body = await res.json();
+    return body && body.config && typeof body.config.target === "string" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Opens the viewer for a human to look at: the installed PWA's own window if
+ * one's been installed, a plain browser tab otherwise. Launching the app
+ * window instead of a tab is the whole point of installing it - and its
+ * start_url already carries the current persisted token, so it lands on a
+ * working session exactly like a fresh tab would.
+ */
+async function openViewer(url) {
+  const shortcut = await findInstalledPwaShortcut();
+  openPath(shortcut || url);
+}
 
 /**
  * Launches the local viewer: a small HTTP server on loopback that serves the
@@ -33,25 +78,23 @@ export async function runVisualize({ open = true, port = DEFAULT_PORT, quiet = f
 
   let server;
   try {
-    server = await startServer({ config, port, onScanProgress: bar.report });
+    server = await startServer({ config, port, host: HOST, onScanProgress: bar.report });
   } catch (err) {
     if (err.code !== "EADDRINUSE" || port === 0) throw err;
 
-    // The fixed default port is the common case that collides (a previous
-    // `vno visualize` still running, something else bound to it) - one retry
-    // one port up keeps `vno visualize` working without forcing the user to
-    // go hunt for a free port themselves.
-    const fallbackPort = port + 1;
-    bar.log(`Port ${port} is already in use - trying ${fallbackPort} instead.`, "warn");
-    try {
-      server = await startServer({ config, port: fallbackPort, onScanProgress: bar.report });
-    } catch (err2) {
-      if (err2.code === "EADDRINUSE") {
-        console.log(chalk.red(`Ports ${port} and ${fallbackPort} are both in use. Pick a free one with --port.`));
-        return null;
-      }
-      throw err2;
+    const runningUrl = await findRunningInstance(port);
+    if (!runningUrl) {
+      console.log(chalk.red(`Port ${port} is already in use by something else. Pick a free one with --port.`));
+      return null;
     }
+
+    if (quiet) {
+      console.log(chalk.dim(`Already running at ${runningUrl}`));
+    } else {
+      console.log(chalk.green(`vno is already running at ${chalk.bold(runningUrl)}`));
+    }
+    if (open) await openViewer(runningUrl);
+    return runningUrl;
   } finally {
     bar.stop();
   }
@@ -64,7 +107,7 @@ export async function runVisualize({ open = true, port = DEFAULT_PORT, quiet = f
     console.log(chalk.dim("Closing the browser tab (or Ctrl+C) stops this server."));
   }
 
-  if (open) openPath(server.url);
+  if (open) await openViewer(server.url);
 
   const onSigint = () => server.stop("interrupted");
   process.once("SIGINT", onSigint);

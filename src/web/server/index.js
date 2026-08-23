@@ -2,12 +2,12 @@
 // module into the request dispatch table below, and owns the process/socket
 // lifecycle (shutdown deferral, the disconnect watchdog).
 import http from "node:http";
-import crypto from "node:crypto";
 import path from "node:path";
 import { URL } from "node:url";
 import chalk from "chalk";
-import { renderPage } from "../page.js";
+import { renderPage, renderManifest } from "../page.js";
 import { themeOf } from "../../lib/themes.js";
+import { getSessionToken } from "../../lib/sessionToken.js";
 import { createContext } from "./context.js";
 import { serveAsset } from "./assets.js";
 import { serveMedia } from "./media.js";
@@ -25,7 +25,7 @@ import { createCleanupRoutes } from "./routes/cleanup.js";
  * tab goes away, the page's Quit button is used, or `stop()` is called.
  */
 export async function startServer({ config, port = 0, host = "127.0.0.1", onScanProgress = null } = {}) {
-  const token = crypto.randomBytes(24).toString("hex");
+  const token = await getSessionToken();
   const target = path.resolve(config.target);
 
   const ctx = await createContext({ config, target, onScanProgress });
@@ -88,6 +88,19 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
     // gate: they hold no secrets (the token is inlined into the HTML), and
     // gating them would mean putting the token in an asset URL, which is worse.
     if (route.startsWith("/assets/")) return serveAsset(res, ctx.sendJson, route.slice(8));
+
+    // The PWA manifest and service worker. Served at the root path (not under
+    // /assets/) so the worker's default scope covers the whole origin - a
+    // script registered from /assets/sw.js could only control /assets/*.
+    // The manifest is generated per request (like the page) because its
+    // start_url has to carry the current token - an installed PWA's fixed
+    // shortcut has no other way to get one, since it can't be prompted for
+    // it the way a fresh `vno v` run's printed URL can.
+    if (route === "/manifest.webmanifest") {
+      res.writeHead(200, { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(renderManifest({ token }));
+    }
+    if (route === "/sw.js") return serveAsset(res, ctx.sendJson, "sw.js");
 
     // Dropped-file uploads stream raw bytes, not JSON, and can be well past
     // readBody's 5MB cap - handled before the generic body read below, with
@@ -208,17 +221,23 @@ export async function startServer({ config, port = 0, host = "127.0.0.1", onScan
   ctx.scheduleShutdown = scheduleShutdown;
   ctx.cancelShutdown = cancelShutdown;
 
-  // Backstop for a wedged connection that never closes (proxy, sleeping
-  // laptop). Deliberately long: background tabs throttle their heartbeat.
-  const watchdog = setInterval(() => {
-    if (!sawBrowser || (ctx.job && ctx.job.running) || ctx.clients.size > 0) return;
-    if (Date.now() - lastSeen > 120000) stop("browser stopped responding");
-  }, 10000);
+  let watchdog;
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, resolve);
   });
+
+  // Backstop for a wedged connection that never closes (proxy, sleeping
+  // laptop). Deliberately long: background tabs throttle their heartbeat.
+  // Created only once the listen above actually succeeds - creating it
+  // earlier would leak the interval (and hang the process) on a failed bind,
+  // e.g. EADDRINUSE, since `stop()` (the only place that clears it) is never
+  // reached on that path.
+  watchdog = setInterval(() => {
+    if (!sawBrowser || (ctx.job && ctx.job.running) || ctx.clients.size > 0) return;
+    if (Date.now() - lastSeen > 120000) stop("browser stopped responding");
+  }, 10000);
 
   const address = server.address();
   const url = `http://${host}:${address.port}/?t=${token}`;

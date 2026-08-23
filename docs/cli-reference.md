@@ -169,7 +169,7 @@ Starts a local web server and opens the two-pane organizer in your browser.
 
 | Flag | Effect |
 | --- | --- |
-| `-p, --port <number>` | Port to listen on. Default: `8477`, retrying on `8478` (with a warning) if that's busy. `0` picks a free port automatically instead |
+| `-p, --port <number>` | Port to listen on. Default: `8477`, fixed across runs. If it's busy with another `vno v` instance, opens a tab to that instance instead of picking a new port. `0` picks a free port automatically instead |
 | `--no-open` | Start the server without opening a browser (prints the URL) |
 
 Startup measures every recording with `ffprobe`, which on a large library takes
@@ -357,6 +357,18 @@ which binary got installed, checking it costs nothing and happens on every
 `vno setup`, not just the first — unlike the old torch probe, there's no slow
 path to gate behind `--check`. Re-run `vno setup` after adding a GPU (or
 changing drivers) to pick up a better backend.
+
+**Windows only, for now:** `vno setup` also reports and offers to register
+`vno://` as a URL protocol handler — the same mechanism a `msteams://` or
+`zoommtg://` link uses, so a browser (in particular, the [PWA's offline
+page](ui.md#installing-as-an-app)) can trigger the OS's native "Open vno?"
+prompt and have that launch `vno v` for you, instead of you switching to a
+terminal. It's a per-user registry key (`HKCU\Software\Classes\vno`, no
+admin needed) pointing at this exact install's `node` and `bin/vno.js`
+paths; `vno setup` re-offers it as an update if a later reinstall moves
+those paths. macOS and Linux don't have this yet — they need an actual
+app bundle / `.desktop` file respectively rather than a registry key, so
+their offline page just tells you to run `vno v` yourself.
 
 **Nothing is installed without you confirming it.** You always see what's
 about to happen first, and can choose to do it yourself instead. Where a

@@ -16,10 +16,12 @@ export const MIME = {
 };
 
 export const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
-// "auto" lets whisper.cpp detect per file; a pinned code is the fix for
-// languages its detector confuses for one another (Hindi/Urdu is the classic
-// case) - see lib/config.js:transcribeLanguage.
-export const LANGUAGES = ["auto", "hi", "en"];
+// Re-exported from lib/ rather than listed here: `vno setting` offers the
+// same languages in the terminal, and this used to be a three-entry subset
+// the CLI disagreed with - the route rejected codes the wizard accepted.
+// "auto" lets whisper.cpp detect per file; a pinned code overrides it, and
+// config.crossLanguage guides it without pinning.
+export { WHISPER_LANGUAGES as LANGUAGES } from "../../lib/languages.js";
 
 // Extensions served out of assets/, resolved against this module rather than
 // the cwd, since vno is usually installed globally and run from wherever the

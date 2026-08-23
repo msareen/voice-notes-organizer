@@ -2,18 +2,26 @@
 // the source-folders editor (including its own server-side folder browser).
 import { state } from "../state.js";
 import { api, toast } from "../api.js";
-import { button, modal, selectField } from "../widgets.js";
+import { button, modal, selectField, helpToggle } from "../widgets.js";
 import { modelOptions } from "../models.js";
 import { applyTheme, currentTheme } from "../theme.js";
 
-var LANGUAGE_LABELS = {
-  auto: "Auto-detect",
-  hi: "Hindi",
-  en: "English"
-};
+// state.LANGUAGES is lib/languages.js's list, sent whole by /api/state:
+// [{ code, label }]. "auto" isn't in it - it isn't a language, it's the
+// absence of a pin - so the pin menu prepends it.
+function languageOptions() {
+  return state.LANGUAGES.map(function (l) { return { label: l.label, value: l.code }; });
+}
+
+function languageLabel(code) {
+  var found = state.LANGUAGES.filter(function (l) { return l.code === code; })[0];
+  return found ? found.label : code;
+}
 
 export function openSettings() {
   var autoSel, modelSel, languageSel, openSel, rememberSel, gpuSel;
+  var crossModelSel, crossFromSel, crossToSel, crossAddBtn;
+  var crossMap = {};
   var sourceRows = [];
   // Theme is previewed live on the whole page, so the panel has to remember
   // what was on when it opened and put it back if the user backs out.
@@ -32,13 +40,12 @@ export function openSettings() {
       appearance.className = "settings-full first";
       var ah = document.createElement("h4");
       ah.textContent = "Appearance";
+      var themeHelp = helpToggle("Applies as you pick, and sticks once you save. \"Auto\" follows your " +
+        "system's light/dark setting.");
+      ah.appendChild(themeHelp.button);
       appearance.appendChild(ah);
+      appearance.appendChild(themeHelp.hint);
       appearance.appendChild(themeGrid(chosenTheme, function (id) { chosenTheme = id; }));
-      var themeHint = document.createElement("p");
-      themeHint.className = "hint";
-      themeHint.textContent = "Applies as you pick, and sticks once you save. \"Auto\" follows your " +
-        "system's light/dark setting.";
-      appearance.appendChild(themeHint);
       host.appendChild(appearance);
 
       var grid = document.createElement("div");
@@ -63,12 +70,11 @@ export function openSettings() {
         CONFIG.defaultModel);
 
       languageSel = selectField(transcriptionCol, "Transcription language",
-        state.LANGUAGES.map(function (l) { return { label: LANGUAGE_LABELS[l] || l, value: l }; }),
-        CONFIG.transcribeLanguage || "auto");
-      var lh = document.createElement("p");
-      lh.className = "hint";
-      lh.textContent = "Pin this if auto-detect keeps guessing the wrong language for you (e.g. Hindi heard as Urdu) - Hindi still handles English mixed in fine.";
-      transcriptionCol.appendChild(lh);
+        [{ label: "Auto-detect", value: "auto" }].concat(languageOptions()),
+        CONFIG.transcribeLanguage || "auto",
+        "Pin this if auto-detect keeps guessing the wrong language for you (e.g. Hindi heard as Urdu) - " +
+        "Hindi still handles English mixed in fine. Cross-language detection below is the softer version; " +
+        "a pin here wins over it.");
 
       var gpu = CONFIG.gpu || {};
       gpuSel = null;
@@ -99,16 +105,15 @@ export function openSettings() {
       pathField.className = "field";
       var pl = document.createElement("label");
       pl.textContent = "Target folder";
+      var pathHelp = helpToggle("Every import — a detected volume or a source folder below — copies into here. " +
+        "Change it with \"vno setting\" — moving it needs a re-scan.");
+      pl.appendChild(pathHelp.button);
       pathField.appendChild(pl);
       var pv = document.createElement("div");
       pv.className = "path";
       pv.textContent = CONFIG.target;
       pathField.appendChild(pv);
-      var ph = document.createElement("p");
-      ph.className = "hint";
-      ph.textContent = "Every import — a detected volume or a source folder below — copies into here. " +
-        "Change it with \"vno setting\" — moving it needs a re-scan.";
-      pathField.appendChild(ph);
+      pathField.appendChild(pathHelp.hint);
       importCol.appendChild(pathField);
 
       openSel = selectField(importCol, "Open this viewer when a run finishes", [
@@ -119,11 +124,93 @@ export function openSettings() {
       rememberSel = selectField(importCol, "Remember deleted recordings", [
         { label: "On — don't re-import what I deleted here", value: "true" },
         { label: "Off — import whatever the device has", value: "false" }
-      ], String(CONFIG.rememberDeletions !== false));
-      var rh = document.createElement("p");
-      rh.className = "hint";
-      rh.textContent = "Deletes made here and by cleanup are logged, so importing again won't copy them back. \"vno cleanup ledger\" forgets them.";
-      importCol.appendChild(rh);
+      ], String(CONFIG.rememberDeletions !== false),
+        "Deletes made here and by cleanup are logged, so importing again won't copy them back. " +
+        "\"vno cleanup ledger\" forgets them.");
+
+      // Cross-language detection. A full-width row rather than a field in the
+      // Transcription column: three dropdowns and a button don't fit in half
+      // the dialog, and the saved rewrites need somewhere to sit.
+      var crossSection = document.createElement("div");
+      crossSection.className = "settings-full";
+      host.appendChild(crossSection);
+
+      var crossLabel = document.createElement("h4");
+      crossLabel.textContent = "Cross-language detection";
+      var crossHelp = helpToggle("whisper.cpp guesses the language from the first 30 seconds of each recording, " +
+        "and it confuses languages that sound alike — Hindi and Urdu are the same language to it, so the same " +
+        "voice can come out in Devanagari one day and Arabic script the next. It has no setting for \"prefer " +
+        "this one\", only a hard pin that would also mislabel your English notes. So: pick a model here and vno " +
+        "runs a quick detection pass before each transcription and rewrites the answer using your list below. " +
+        "Leave the model off and nothing extra runs. On costs one extra model load per file — \"small\" is " +
+        "already installed and plenty accurate for telling these apart.");
+      crossLabel.appendChild(crossHelp.button);
+      crossSection.appendChild(crossLabel);
+      crossSection.appendChild(crossHelp.hint);
+
+      var crossRow = document.createElement("div");
+      crossRow.className = "crosslang-row";
+      crossSection.appendChild(crossRow);
+
+      crossModelSel = selectField(crossRow, "Detect model",
+        [{ label: "Off — no detection pass", value: "" }].concat(modelOptions()),
+        (CONFIG.crossLanguage || {}).model || "");
+      crossFromSel = selectField(crossRow, "When it detects", languageOptions(), "ur");
+      crossToSel = selectField(crossRow, "Transcribe as", languageOptions(), "hi");
+      crossAddBtn = button("Add", "", function () {
+        if (crossFromSel.value === crossToSel.value) return;
+        crossMap[crossFromSel.value] = crossToSel.value;
+        renderCrossMap();
+      });
+      crossRow.appendChild(crossAddBtn);
+
+      var crossChips = document.createElement("div");
+      crossChips.className = "ext-chips";
+      crossSection.appendChild(crossChips);
+
+      function renderCrossMap() {
+        crossChips.textContent = "";
+        var codes = Object.keys(crossMap);
+        if (codes.length === 0) {
+          var none = document.createElement("span");
+          none.className = "chip";
+          none.textContent = "no rewrites yet";
+          crossChips.appendChild(none);
+          return;
+        }
+        codes.forEach(function (from) {
+          var pill = document.createElement("button");
+          pill.type = "button";
+          pill.className = "chip on";
+          pill.textContent = languageLabel(from) + " → " + languageLabel(crossMap[from]) + " ✕";
+          pill.title = "Remove this rewrite";
+          pill.addEventListener("click", function () {
+            delete crossMap[from];
+            renderCrossMap();
+          });
+          crossChips.appendChild(pill);
+        });
+      }
+
+      function syncCrossEnabled() {
+        var off = !crossModelSel.value;
+        crossFromSel.disabled = off;
+        crossToSel.disabled = off;
+        crossAddBtn.disabled = off;
+        crossChips.classList.toggle("is-off", off);
+      }
+
+      crossModelSel.addEventListener("change", function () {
+        // Detection can't run against a pinned language, and picking a model
+        // can only mean the user wants detection - so move the pin rather
+        // than silently doing nothing. It's the field right above; they see it.
+        if (crossModelSel.value && languageSel.value !== "auto") languageSel.value = "auto";
+        syncCrossEnabled();
+      });
+
+      crossMap = Object.assign({}, (CONFIG.crossLanguage || {}).map || {});
+      renderCrossMap();
+      syncCrossEnabled();
 
       var sourcesSection = document.createElement("div");
       sourcesSection.className = "settings-full";
@@ -133,20 +220,26 @@ export function openSettings() {
       sourcesHead.className = "source-list-head";
       var sourcesLabel = document.createElement("h4");
       sourcesLabel.textContent = "Additional Source Folders";
+      var sourcesHelp = helpToggle("Folders synced every time you import, in addition to detected volumes — " +
+        "e.g. wherever a phone's Quick Share/Quick Send drops files. Pattern is a \"*\"/\"?\" wildcard against " +
+        "the filename (\"*\" = any audio file). \"Folder in target\" optionally routes this source's files into " +
+        "a specific folder inside your target folder instead of a folder named after the source path — leave it " +
+        "blank for the default.");
+      sourcesLabel.appendChild(sourcesHelp.button);
       sourcesHead.appendChild(sourcesLabel);
       sourcesHead.appendChild(button("Add folder", "", function () {
         addSourceRow({ path: "", pattern: "*", recursive: false, deleteAfterImport: false, mapTo: null });
       }));
       sourcesSection.appendChild(sourcesHead);
-      var sh = document.createElement("p");
-      sh.className = "hint";
-      sh.textContent = "Folders synced every time you import, in addition to detected volumes — e.g. wherever a " +
-        "phone's Quick Share/Quick Send drops files. Pattern is a \"*\"/\"?\" wildcard against the filename " +
-        "(\"*\" = any audio file). \"Delete after import\" removes the file from this folder once it's safely " +
-        "copied in — only turn this on for a disposable landing folder, not a real archive. \"Folder in target\" " +
-        "optionally routes this source's files into a specific folder inside your target folder instead of a " +
-        "folder named after the source path — leave it blank for the default.";
-      sourcesSection.appendChild(sh);
+      sourcesSection.appendChild(sourcesHelp.hint);
+      // Deliberately not folded into the help above: this one warns about
+      // deleting the user's files, and a warning you have to click to see
+      // isn't a warning.
+      var sw = document.createElement("p");
+      sw.className = "hint";
+      sw.textContent = "\"Delete after import\" removes the file from the source folder once it's safely copied " +
+        "in — only turn that on for a disposable landing folder, not a real archive.";
+      sourcesSection.appendChild(sw);
 
       var sourcesBox = document.createElement("div");
       sourcesBox.className = "source-list";
@@ -264,6 +357,8 @@ export function openSettings() {
         autoTranslate: autoSel.value === "null" ? null : autoSel.value === "true",
         defaultModel: modelSel.value,
         transcribeLanguage: languageSel.value,
+      crossLanguageModel: crossModelSel.value || null,
+      crossLanguageMap: crossMap,
         openWhenDone: openSel.value === "true",
         rememberDeletions: rememberSel.value === "true"
       };

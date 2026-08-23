@@ -5,6 +5,7 @@ import chalk from "chalk";
 import fs from "fs-extra";
 import { which } from "./setup.js";
 import { resolveBinary, resolveModel } from "./whispercpp.js";
+import { normalizeLanguageMap } from "./languages.js";
 import { repairSamsungM4A } from "./special-case-handling.js";
 
 /**
@@ -35,6 +36,11 @@ export async function isWhisperInstalled() {
  * "cpu" to force `-ng` even on an accelerator-capable build - the backend
  * itself is fixed at install time (see lib/whispercpp.js), not chosen here.
  *
+ * `crossLanguage` ({ model, map }) guides auto-detect rather than overriding
+ * it: with a model set, a fast `-dl` pass decides the language first and its
+ * answer is rewritten through `map` before the real run. Ignored unless
+ * `language` is "auto" - a pinned language is the more specific instruction.
+ *
  * `onOutput` receives whisper.cpp's output line by line; the viewer uses it
  * to stream progress into the browser. Without it, output goes to the
  * terminal.
@@ -48,6 +54,7 @@ export async function transcribeFile(
     threads = null,
     onOutput = null,
     language = "auto",
+    crossLanguage = null,
   } = {}
 ) {
   const startedAt = Date.now();
@@ -82,6 +89,17 @@ export async function transcribeFile(
     try {
       announce("Converting to WAV...", onOutput);
       await convertToWav(ffmpeg, inputPath, wavPath);
+      // Runs against the WAV we just made, so guiding the language costs a
+      // model load and one 30s encoder window - not a second conversion.
+      const spokenLanguage = await guideLanguage({
+        binaryPath: binary.path,
+        wavPath,
+        language,
+        crossLanguage,
+        device,
+        threads: threads || Math.max(1, os.cpus().length - 1),
+        onOutput,
+      });
       announce("Transcribing with whisper.cpp...", onOutput);
       whisperOutput = await runWhisperCpp(binary.path, {
         wavPath,
@@ -91,7 +109,7 @@ export async function transcribeFile(
         threads: threads || Math.max(1, os.cpus().length - 1),
         outputPrefix,
         onOutput,
-        language,
+        language: spokenLanguage,
       });
     } finally {
       await fs.remove(wavPath).catch(() => {});
@@ -128,6 +146,85 @@ export async function transcribeFile(
     announce("Retrying transcription with the repaired recording...", onOutput);
     await attempt(repaired);
   }
+}
+
+/**
+ * The language to hand `-l`, having optionally let whisper.cpp vote first.
+ *
+ * whisper.cpp offers no way to bias or restrict auto-detect - `-l` is a pin
+ * or nothing, and `--prompt` isn't in play during detection, which runs off a
+ * single decoder step over the first 30s. So "auto, but never Urdu" has to be
+ * built out here: detect with `-dl`, then rewrite the answer through the
+ * user's map. A code with no entry passes through as detected.
+ *
+ * Every failure path degrades to plain "auto" rather than throwing. The
+ * detection is an optimisation on top of what whisper.cpp would have done by
+ * itself, so a missing model or an unparsable line must cost the user a
+ * better guess, never the transcript.
+ */
+async function guideLanguage({ binaryPath, wavPath, language, crossLanguage, device, threads, onOutput }) {
+  const { model, map } = crossLanguageState({ crossLanguage });
+  if (language !== "auto" || !model) return language;
+
+  const modelPath = await resolveModel(model);
+  if (!modelPath) {
+    announce(`Language detection needs the "${model}" model - run \`vno setup --model ${model}\`. Detecting as usual instead.`, onOutput);
+    return "auto";
+  }
+
+  let detected = null;
+  try {
+    announce(`Detecting the language with "${model}"...`, onOutput);
+    detected = await detectLanguage(binaryPath, { wavPath, modelPath, device, threads });
+  } catch (err) {
+    announce(`Language detection failed (${lastLine(err.message)}). Detecting as usual instead.`, onOutput);
+    return "auto";
+  }
+  if (!detected) {
+    announce("Language detection returned nothing. Detecting as usual instead.", onOutput);
+    return "auto";
+  }
+
+  const chosen = map[detected] || detected;
+  announce(
+    chosen === detected
+      ? `Detected ${detected}.`
+      : `Detected ${detected}, transcribing as ${chosen}.`,
+    onOutput
+  );
+  return chosen;
+}
+
+/**
+ * One `-dl` pass: whisper.cpp detects the language and exits without
+ * transcribing. The answer only ever appears in its log output, so it has to
+ * be read back off stderr - there's no machine-readable form of it, which is
+ * why this parses rather than asks.
+ */
+function detectLanguage(binaryPath, { wavPath, modelPath, device, threads }) {
+  return new Promise((resolve, reject) => {
+    const args = ["-m", modelPath, "-f", wavPath, "-l", "auto", "-dl", "-t", String(threads)];
+    if (device === "cpu") args.push("-ng");
+
+    const child = spawn(binaryPath, args, { windowsHide: true });
+    let combined = "";
+    // Not streamed to onOutput: this pass prints its own model/backend banner,
+    // and repeating that before every file would bury the actual progress.
+    const collect = (d) => {
+      combined = (combined + d.toString()).slice(-MAX_KEPT_OUTPUT);
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(lastLines(combined, 4)));
+        return;
+      }
+      const match = /auto-detected language:\s*([a-z]{2,3})\b/i.exec(combined);
+      resolve(match ? match[1].toLowerCase() : null);
+    });
+  });
 }
 
 /**
@@ -267,6 +364,27 @@ export function resolveAccel(config) {
 export function accelUnasked(config) {
   const accel = accelState(config);
   return Boolean(accel.backend) && accel.backend !== "cpu" && accel.use === null;
+}
+
+/** The `crossLanguage` block, defaulted, for a config that predates it. */
+export function crossLanguageState(config) {
+  const raw = config?.crossLanguage || {};
+  return { model: raw.model || null, map: normalizeLanguageMap(raw.map) };
+}
+
+/**
+ * Everything the language decision needs, read from config in one place -
+ * the `resolveAccel` of languages, and for the same reason: the browser has
+ * nowhere to ask at job time, so the rule has to live somewhere both paths
+ * call rather than being re-derived at each call site.
+ *
+ * A pinned `transcribeLanguage` wins outright: it's the more specific
+ * instruction, and detecting only to overrule it would waste a model load.
+ */
+export function resolveLanguagePlan(config) {
+  const language = config?.transcribeLanguage || "auto";
+  const cross = crossLanguageState(config);
+  return { language, crossLanguage: language === "auto" ? cross : { model: null, map: {} } };
 }
 
 /**

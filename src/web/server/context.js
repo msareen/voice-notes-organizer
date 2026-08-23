@@ -4,7 +4,7 @@ import fs from "fs-extra";
 import chalk from "chalk";
 import { saveConfig, configFilePath } from "../../lib/config.js";
 import { buildNotes, TRANSCRIPT_EXTS } from "../../lib/notes.js";
-import { accelState, resolveAccel } from "../../lib/whisper.js";
+import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper.js";
 import { resolveModel } from "../../lib/whispercpp.js";
 import { checkDependencies } from "../../lib/setup.js";
 import { recordDeletions } from "../../lib/ledger.js";
@@ -115,6 +115,11 @@ export async function createContext({ config, target, onScanProgress }) {
         autoTranslate: currentConfig.autoTranslate ?? null,
         defaultModel: currentConfig.defaultModel || "turbo",
         transcribeLanguage: currentConfig.transcribeLanguage || "auto",
+        // Guides auto-detect rather than overriding it - see
+        // lib/config.js:crossLanguage. Sent through the same defaulting
+        // helper the transcribe path uses, so the dialog and the job can't
+        // disagree about what an older config means.
+        crossLanguage: crossLanguageState(currentConfig),
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
         theme: themeOf(currentConfig),

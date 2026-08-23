@@ -42,19 +42,69 @@ doing nothing while it downloads — that's expected. See [Installing
 whisper.cpp](#installing-whispercpp) for exactly where they live and how to
 pre-fetch or inspect them with `vno setup --list-models`.
 
-## Pinning the language
+## Getting the language right
 
-whisper.cpp auto-detects the spoken language per file by default. That works
-well in general, but its detector can confuse two acoustically close
-languages — Hindi and Urdu are the classic case — and flip between them from
-one recording to the next.
+whisper.cpp auto-detects the spoken language per file, from the first 30
+seconds of audio. That works well in general, but its detector confuses
+languages that sound alike — Hindi and Urdu are the classic case, because to
+an acoustic model they are the same language. What its guess really decides is
+which *script* you get back, and it can flip from one recording to the next.
 
-If that's happening to you, pin
-[`transcribeLanguage`](configuration.md#transcribelanguage) to the language
+Measured across seven Hindi recordings on one machine, both models available
+by default disagreed with themselves and each other:
+
+| Recording | `small` says | `large-v3-turbo` says |
+| --- | --- | --- |
+| 230202 | ur (0.65) | hi (0.77) |
+| 230206 | hi (0.51) | ur (0.72) |
+| 230218 | ur (0.62) | hi (0.86) |
+| 230112 | ur (0.76) | hi (0.72) |
+| 230125 | ur (0.53) | hi (0.81) |
+| Voice 001 | hi (0.58) | hi (0.44) |
+| Voice 015 | ur (0.49) | ur (0.73) |
+
+The lesson worth taking from that table: **a bigger model does not fix this.**
+Turbo is wrong on two of the seven, and confident while it's wrong. So there
+are two real answers, and picking a better detector isn't either of them.
+
+### Pin the language
+
+Set [`transcribeLanguage`](configuration.md#transcribelanguage) to the language
 you actually speak (`vno setting` → *Transcription language*, or the UI's
-Settings dialog). Setting it to Hindi still transcribes English words mixed
-into Hindi speech correctly, so it also covers a "mostly Hindi with some
-English" preference — you don't need a separate setting for the English bits.
+Settings dialog). Auto-detect never runs. Hindi still transcribes English words
+mixed into Hindi speech correctly, so this also covers a "mostly Hindi with
+some English" preference.
+
+The cost is the notes that really are in another language: pinned to Hindi, an
+English-only recording comes back mangled.
+
+### Or guide the detection
+
+[`crossLanguage`](configuration.md#crosslanguage) keeps auto-detect and
+corrects it. Pick a model and vno runs a fast `-dl` detection pass before each
+transcription, then rewrites the result through your own list — `ur → hi`
+means "whenever you hear Urdu, transcribe it as Hindi". A detected language
+with no entry is used exactly as detected, so English notes stay English.
+
+whisper.cpp has no setting for this of its own. Its `-l` flag is a pin or
+nothing; there is no way to bias auto-detect or restrict it to a shortlist,
+and `--prompt` isn't applied during detection. So guiding it means detecting
+first and rewriting the answer, which is what this does.
+
+`small` is the sensible model here: it's installed by default, the detection
+pass takes about 1.5 seconds against turbo's 3, and — per the table above —
+being the bigger model doesn't make turbo right anyway. Since the rewrite
+throws the Hindi/Urdu distinction away by construction, all the detector has
+to get right is the much easier question of whether the recording is
+Hindustani or English.
+
+Set it up in `vno setting` → *Cross-language detection*, or the UI's Settings
+dialog. Leave the model off and nothing extra runs.
+
+A pinned `transcribeLanguage` wins over this: it's the more specific
+instruction, so detection is skipped entirely rather than run and overruled.
+Both surfaces set the pin back to *Auto* for you when you choose a detect
+model, since otherwise the setting would quietly do nothing.
 
 ## Installing whisper.cpp
 

@@ -472,11 +472,24 @@ mark.hit {
   backdrop-filter: blur(3px);
   animation: fade-in .14s ease-out;
 }
+/* A three-part column: title, scrolling body, action row. The padding lives
+   on the parts rather than the box so the body can scroll edge to edge and
+   the action row can sit on the bottom edge. The two variants pad
+   differently, hence the custom properties. */
 .modal {
+  --modal-pad-x: 24px;
+  --modal-pad-y: 24px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 24px; width: min(520px, 100%); max-height: 88vh; overflow-y: auto;
+  width: min(520px, 100%); max-height: 88vh;
+  display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 24px 60px var(--shadow);
   animation: modal-in .16s ease-out;
+}
+/* min-height:0 or the body refuses to shrink below its content and pushes
+   the action row off the bottom - the usual flex-child overflow trap. */
+.modal-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  padding: 0 var(--modal-pad-x) var(--modal-pad-y);
 }
 .modal.wide { width: min(980px, 96vw); }
 
@@ -488,24 +501,44 @@ mark.hit {
    (that split happens separately, in the .settings-grid breakpoint below). */
 .backdrop.panel { justify-content: flex-end; padding: 0; }
 .modal.panel {
+  --modal-pad-x: clamp(20px, 3vw, 34px);
+  --modal-pad-y: 26px;
   width: min(960px, 68vw); max-width: 100vw; height: 100%; max-height: 100%;
-  border-radius: var(--r-lg) 0 0 var(--r-lg); margin: 0; padding: 26px clamp(20px, 3vw, 34px);
+  border-radius: var(--r-lg) 0 0 var(--r-lg); margin: 0;
   animation: panel-in .18s cubic-bezier(.2, .8, .3, 1);
 }
 @media (max-width: 1100px) {
   .modal.panel { width: 100vw; border-radius: 0; }
 }
-.modal h3 {
-  margin: 0 0 6px; font: var(--label); font-size: .7rem;
+.modal > h3 {
+  flex: 0 0 auto;
+  margin: 0 0 6px; padding: var(--modal-pad-y) var(--modal-pad-x) 0;
+  font: var(--label); font-size: .7rem;
   letter-spacing: .2em; text-transform: uppercase; color: var(--accent);
 }
 .modal.panel > h3 { margin-bottom: 20px; }
 .modal p { color: var(--dim); font-size: .9rem; margin: 0 0 16px; word-break: break-word; }
 .modal .field { margin-bottom: 16px; }
 .modal .field > label {
-  display: block; font: var(--label); letter-spacing: var(--label-track);
+  /* flex, not block, so a help-toggle sits on the label's own line. */
+  display: flex; align-items: center; gap: 6px;
+  font: var(--label); letter-spacing: var(--label-track);
   text-transform: uppercase; color: var(--faint); margin-bottom: 7px;
 }
+/* The "?" that opens a paragraph of help. Sized off the micro-label it sits
+   beside, so it reads as part of the label rather than a control of its own
+   until you hover it. */
+.help-toggle {
+  flex: 0 0 auto; width: 14px; height: 14px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 50%; background: transparent;
+  color: var(--faint); font: 600 .6rem/1 var(--mono); letter-spacing: 0;
+  text-transform: none; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+}
+.help-toggle:hover, .help-toggle.on {
+  border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft);
+}
+.help-toggle:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .modal select {
   width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-sm);
   background: var(--bg); color: var(--ink); font: .85rem var(--mono); outline: none;
@@ -514,17 +547,38 @@ mark.hit {
 .modal .hint { font-size: .74rem; color: var(--faint); margin: 6px 0 0; line-height: 1.5; }
 /* A hint belongs to the field above it, so the next field needs its own air. */
 .modal .hint + .field { margin-top: 16px; }
+/* In a full-width section the hint closes the section and what follows is a
+   block - the two-column grid, the source list, the cross-language row - not
+   another .field, so the rule above never reaches it and the two ran
+   together. Same 16px, so the rhythm holds either way. */
+.settings-full .hint { margin-bottom: 16px; }
+/* Inside a field the hint is the last thing in it, and .field already carries
+   the gap to the next one - a second margin would double it when open. */
+.modal .field > .hint { margin-bottom: 0; }
 .modal .path {
   font-family: var(--mono); font-size: .74rem; color: var(--dim); background: var(--bg);
   border: 1px solid var(--line); border-radius: var(--r-sm); padding: 9px 11px; word-break: break-all;
 }
+/* Pinned to the bottom edge, not left wherever the content ran out: Settings
+   is tall enough that Save was off-screen on arrival, and a short dialog
+   shouldn't strand it mid-panel either. A flex footer rather than a sticky
+   child, so it lands on the edge in both cases. */
 .modal-actions {
-  display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px;
-  padding-top: 16px; border-top: 1px solid var(--line-soft);
+  flex: 0 0 auto;
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 16px var(--modal-pad-x) var(--modal-pad-y);
+  border-top: 1px solid var(--line-soft);
 }
-.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; align-items: start; }
+/* Separates the grid from the Appearance block above it. On the section
+   itself, not on that block's hint, because the hint is collapsed behind a
+   help-toggle and would take the spacing with it when shut. */
+.settings-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; align-items: start;
+  margin-top: 22px;
+}
 .settings-col { min-width: 0; }
 .settings-col h4, .settings-full h4 {
+  display: flex; align-items: center; gap: 7px;
   margin: 0 0 16px; padding-bottom: 9px; border-bottom: 1px solid var(--line);
   font: var(--label); font-size: .66rem; letter-spacing: .18em;
   text-transform: uppercase; color: var(--accent);
@@ -656,6 +710,17 @@ mark.hit {
 button.chip { cursor: pointer; font-size: .65rem; padding: 4px 10px; }
 button.chip:hover { border-color: var(--accent-line); color: var(--ink); }
 button.chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+
+/* ---- Cross-language detection (Settings) ---- */
+/* selectField's markup is a full-width stacked field; here three of them sit
+   on one line, so the width cap comes off and each shrinks to fit. */
+.crosslang-row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+.crosslang-row .field { flex: 1 1 150px; min-width: 0; margin: 0; }
+.crosslang-row .btn { flex: 0 0 auto; }
+.crosslang-row select:disabled { opacity: .45; cursor: default; }
+/* The rewrites stay readable while the model is off - they're still saved,
+   just unused - so this dims rather than hides them. */
+.ext-chips.is-off { opacity: .45; }
 
 /* ---- Source folder blocks (Settings → Additional Source Folders) ---- */
 .source-list-head {

@@ -6,7 +6,8 @@ import { loadConfig, saveConfig, configFilePath } from "../lib/config.js";
 import { THEMES, themeOf } from "../lib/themes.js";
 import { ledgerSummary, clearLedger } from "../lib/ledger.js";
 import { checkDependencies } from "../lib/setup.js";
-import { accelState } from "../lib/whisper.js";
+import { accelState, crossLanguageState } from "../lib/whisper.js";
+import { WHISPER_LANGUAGES, languageLabel } from "../lib/languages.js";
 import { resolveModel } from "../lib/whispercpp.js";
 import { prompt, CANCELLED } from "./prompt.js";
 import { runSetup } from "./setup.js";
@@ -14,12 +15,27 @@ import { runSetup } from "./setup.js";
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
 // "auto" lets whisper.cpp detect per file; a pinned code fixes languages its
 // detector confuses for one another (Hindi/Urdu is the classic case).
+// The pin menu stays short on purpose - these are the two the confusable
+// case is about, and the full hundred lives one keystroke away under
+// "Custom". The cross-language menus below use the whole list, since a
+// detection result can be any of them.
 const LANGUAGES = [
   { name: "Auto-detect", value: "auto" },
   { name: "Hindi", value: "hi" },
   { name: "English", value: "en" },
   { name: "Custom (type a whisper.cpp language code)", value: "custom" },
 ];
+
+const LANGUAGE_CHOICES = WHISPER_LANGUAGES.map((l) => ({ name: `${l.label}  ${chalk.dim(l.code)}`, value: l.code }));
+
+/** One-line summary of the cross-language block for the menu. */
+function crossLanguageLabel(config) {
+  const { model, map } = crossLanguageState(config);
+  if (!model) return chalk.red("off");
+  const pairs = Object.entries(map);
+  if (pairs.length === 0) return `${model}, no rewrites yet`;
+  return `${model}: ${pairs.map(([from, to]) => `${from}->${to}`).join(", ")}`;
+}
 
 const onOffLabel = (value) => (value ? chalk.green("on") : chalk.red("off"));
 
@@ -40,6 +56,134 @@ function autoTranslateLabel(value) {
   if (value === true) return chalk.green("on");
   if (value === false) return chalk.red("off");
   return chalk.yellow("ask each time");
+}
+
+/**
+ * The cross-language block: pick the model that runs the detection pass, and
+ * keep a list of "when it says X, transcribe as Y" rewrites.
+ *
+ * Mirrors manageSources below - a sub-loop that redraws after every change
+ * and saves as it goes. The model is the master switch: with it off there is
+ * no detection pass at all, and the rewrites sit there unused.
+ */
+async function manageCrossLanguage(config) {
+  while (true) {
+    const { model, map } = crossLanguageState(config);
+    const pairs = Object.entries(map);
+    const pinned = (config.transcribeLanguage || "auto") !== "auto";
+
+    const rows = pairs.map(([from, to]) => ({
+      name: `${languageLabel(from)} ${chalk.dim("->")} ${languageLabel(to)}  ${chalk.dim(`[${from} -> ${to}]`)}`,
+      value: `remove:${from}`,
+    }));
+
+    if (model && pinned) {
+      console.log(
+        chalk.yellow(
+          `
+Transcription language is pinned to "${config.transcribeLanguage}", so detection never runs. Set it to Auto to use these.`
+        )
+      );
+    }
+
+    const answer = await prompt([
+      {
+        type: "list",
+        name: "action",
+        message: "Cross-language detection (Esc to go back)",
+        pageSize: 15,
+        choices: [
+          { name: `Detect model  ${chalk.dim(`[${model || "off"}]`)}`, value: "model" },
+          ...(rows.length ? [new inquirer.Separator(), ...rows] : []),
+          new inquirer.Separator(),
+          { name: "Add a mapping", value: "add" },
+          { name: "Done", value: "done" },
+        ],
+      },
+    ]);
+
+    if (answer === CANCELLED || answer.action === "done") return;
+
+    if (answer.action === "model") {
+      const choices = [{ name: "Off - no detection pass", value: "off" }];
+      for (const m of MODELS) {
+        const have = await resolveModel(m);
+        choices.push({ name: `${m}${have ? chalk.dim(" (downloaded)") : chalk.dim(" (will download)")}`, value: m });
+      }
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "Model to detect the language with (small is a good balance; it's installed by default)",
+          default: model || "off",
+          choices,
+          loop: false,
+        },
+      ]);
+      if (res === CANCELLED) continue;
+      const chosen = res.value === "off" ? null : res.value;
+      config.crossLanguage = { ...crossLanguageState(config), model: chosen };
+      // Turning detection on while a language is pinned would do nothing, and
+      // silently doing nothing is worse than moving the pin the user has
+      // clearly just decided against. The browser dialog flips it the same way.
+      if (chosen && pinned) {
+        config.transcribeLanguage = "auto";
+        console.log(chalk.dim('Transcription language set back to "auto" so detection can run.'));
+      }
+      await saveConfig(config);
+      continue;
+    }
+
+    if (answer.action === "add") {
+      const from = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "When whisper.cpp detects...",
+          pageSize: 15,
+          choices: LANGUAGE_CHOICES,
+          loop: false,
+        },
+      ]);
+      if (from === CANCELLED) continue;
+      const to = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: `...transcribe "${languageLabel(from.value)}" as`,
+          pageSize: 15,
+          choices: LANGUAGE_CHOICES.filter((c) => c.value !== from.value),
+          loop: false,
+        },
+      ]);
+      if (to === CANCELLED) continue;
+      config.crossLanguage = {
+        ...crossLanguageState(config),
+        map: { ...map, [from.value]: to.value },
+      };
+      await saveConfig(config);
+      continue;
+    }
+
+    const [, code] = answer.action.split(":");
+    const res = await prompt([
+      {
+        type: "list",
+        name: "confirm",
+        message: `Remove ${languageLabel(code)} -> ${languageLabel(map[code])}?`,
+        default: false,
+        choices: [
+          { name: "No, keep it", value: false },
+          { name: "Yes, remove it", value: true },
+        ],
+      },
+    ]);
+    if (res === CANCELLED || !res.confirm) continue;
+    const next = { ...map };
+    delete next[code];
+    config.crossLanguage = { ...crossLanguageState(config), map: next };
+    await saveConfig(config);
+  }
 }
 
 /**
@@ -291,6 +435,7 @@ export async function runSettings() {
           { name: `Auto-translate imports  ${chalk.dim("[" )}${autoTranslateLabel(config.autoTranslate)}${chalk.dim("]")}`, value: "autoTranslate" },
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
           { name: `Transcription language  ${chalk.dim(`[${config.transcribeLanguage || "auto"}]`)}`, value: "language" },
+          { name: `Cross-language detection  ${chalk.dim("[")}${crossLanguageLabel(config)}${chalk.dim("]")}`, value: "crossLanguage" },
           { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
@@ -483,6 +628,8 @@ export async function runSettings() {
           console.log(chalk.dim("The existing ledger is kept but ignored. Remove it with `vno cleanup ledger`."));
         }
       }
+    } else if (answer.action === "crossLanguage") {
+      await manageCrossLanguage(config);
     } else if (answer.action === "sources") {
       await manageSources(config);
     } else if (answer.action === "resetLedger") {

@@ -4,7 +4,14 @@ import chalk from "chalk";
 import { loadConfig } from "../lib/config.js";
 import { findAudioFiles } from "../lib/sync.js";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.js";
-import { transcribeFile, resolveAccel, accelState, isDeviceError, lastLine } from "../lib/whisper.js";
+import {
+  transcribeFile,
+  resolveAccel,
+  accelState,
+  isDeviceError,
+  lastLine,
+  resolveLanguagePlan,
+} from "../lib/whisper.js";
 import { resolveModel } from "../lib/whispercpp.js";
 import { ensureDependencies } from "./setup.js";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.js";
@@ -25,7 +32,7 @@ function transcriptPathFor(audioPath) {
  */
 export async function transcribeMany(
   files,
-  { model = "turbo", translate = false, device = "cpu", language = "auto" } = {}
+  { model = "turbo", translate = false, device = "cpu", language = "auto", crossLanguage = null } = {}
 ) {
   const gerund = translate ? "Translating" : "Transcribing";
   const verb = translate ? "translate" : "transcribe";
@@ -34,7 +41,7 @@ export async function transcribeMany(
   for (const f of files) {
     console.log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
     try {
-      await transcribeFile(f, { model, translate, device: current, language });
+      await transcribeFile(f, { model, translate, device: current, language, crossLanguage });
       console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
       continue;
@@ -54,7 +61,7 @@ export async function transcribeMany(
     }
 
     try {
-      await transcribeFile(f, { model, translate, device: "cpu", language });
+      await transcribeFile(f, { model, translate, device: "cpu", language, crossLanguage });
       console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
     } catch (err) {
@@ -279,7 +286,7 @@ export async function runTranscribe({ model, file, filter, translate = false, op
     model: chosenModel,
     translate,
     device,
-    language: config.transcribeLanguage || "auto",
+    ...resolveLanguagePlan(config),
   });
 
   const label = translate ? "Translated" : "Transcribed";

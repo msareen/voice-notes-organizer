@@ -251,6 +251,11 @@ hand-editing `config.json`:
 
 - whether imports **auto-translate** (on / off / ask each time)
 - the default **whisper model**
+- the **transcription language** — auto-detect, a pinned language, or any
+  whisper.cpp code ([`transcribeLanguage`](configuration.md#transcribelanguage))
+- **cross-language detection** — the model that runs the detection pass, plus
+  the list of "when it detects X, transcribe as Y" rewrites
+  ([`crossLanguage`](configuration.md#crosslanguage))
 - **GPU acceleration** on or off (installing whisper.cpp with a matching
   backend is `vno setup`'s job — this only flips what was found)
 - the **target** import folder

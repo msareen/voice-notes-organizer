@@ -4,7 +4,7 @@ import chalk from "chalk";
 import { loadConfig, saveConfig } from "../lib/config.js";
 import { detectVolumes } from "../lib/volumes.js";
 import { syncVolume } from "../lib/sync.js";
-import { resolveAccel, accelState } from "../lib/whisper.js";
+import { resolveAccel, accelState, resolveLanguagePlan } from "../lib/whisper.js";
 import { runVisualize } from "./visualize.js";
 import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.js";
 import { ensureDependencies } from "./setup.js";
@@ -146,7 +146,7 @@ async function maybeAutoTranslate(imported, config) {
     model,
     translate: true,
     device,
-    language: config.transcribeLanguage || "auto",
+    ...resolveLanguagePlan(config),
   });
   console.log(chalk.bold(`\nDone. Translated ${done}/${imported.length} imported note(s).`));
 

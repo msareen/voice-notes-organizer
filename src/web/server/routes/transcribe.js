@@ -1,6 +1,14 @@
 import path from "node:path";
 import chalk from "chalk";
-import { transcribeFile, resolveAccel, accelState, accelUnasked, isDeviceError, lastLine } from "../../../lib/whisper.js";
+import {
+  transcribeFile,
+  resolveAccel,
+  accelState,
+  accelUnasked,
+  isDeviceError,
+  lastLine,
+  resolveLanguagePlan,
+} from "../../../lib/whisper.js";
 import { MODELS } from "../constants.js";
 
 /**
@@ -19,7 +27,7 @@ import { MODELS } from "../constants.js";
 export function createWhisperRunner(ctx) {
   return function whisperRunner({ model, translate }) {
     let device = resolveAccel(ctx.config);
-    const language = ctx.config.transcribeLanguage || "auto";
+    const { language, crossLanguage } = resolveLanguagePlan(ctx.config);
     if (device !== "cpu") {
       const accel = accelState(ctx.config);
       ctx.jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
@@ -28,7 +36,7 @@ export function createWhisperRunner(ctx) {
 
     return async function run(file) {
       try {
-        await transcribeFile(file, { model, translate, device, language, onOutput: (line) => ctx.jobLog(line) });
+        await transcribeFile(file, { model, translate, device, language, crossLanguage, onOutput: (line) => ctx.jobLog(line) });
         return;
       } catch (err) {
         if (device === "cpu" || !isDeviceError(err.message)) throw err;
@@ -36,7 +44,7 @@ export function createWhisperRunner(ctx) {
         ctx.jobLog("Falling back to the CPU for the rest of this job.");
         device = "cpu";
       }
-      await transcribeFile(file, { model, translate, device: "cpu", language, onOutput: (line) => ctx.jobLog(line) });
+      await transcribeFile(file, { model, translate, device: "cpu", language, crossLanguage, onOutput: (line) => ctx.jobLog(line) });
     };
   };
 }

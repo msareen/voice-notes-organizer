@@ -1,6 +1,7 @@
 import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
+import { normalizeLanguageMap } from "./languages.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".vno");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -59,6 +60,15 @@ function defaultConfig() {
     // classic case) - forcing "hi" still transcribes code-switched English
     // fine, so this is also the fix for "mostly Hindi with English mixed in".
     transcribeLanguage: "auto",
+    // Guides whisper.cpp's auto-detect instead of overriding it. `model` is
+    // the whisper model used for a fast `-dl` detection pass before the real
+    // run (null = off, no extra pass); `map` rewrites what that pass returns,
+    // e.g. { ur: "hi" } so Hindi heard as Urdu is transcribed as Hindi.
+    // whisper.cpp has no preference/candidate-restriction flag of its own -
+    // `-l` is a pin or nothing - so guiding it means detecting first and
+    // rewriting the answer. Only consulted when transcribeLanguage is "auto";
+    // a pinned language wins, since it's the more specific instruction.
+    crossLanguage: { model: null, map: {} },
     // Whether recordings deleted through vno (the UI's delete/cleanup, and
     // `vno cleanup`) are remembered in ~/.vno/deleted.json so a later import
     // doesn't copy them back off a device that still has them. Turning this
@@ -108,6 +118,11 @@ export async function loadConfig() {
       sources: normalizeSources(data.sources),
       knownMounts: { ...data.knownMounts },
       accel: { ...defaults.accel, ...data.accel },
+      crossLanguage: {
+        ...defaults.crossLanguage,
+        ...data.crossLanguage,
+        map: normalizeLanguageMap(data.crossLanguage?.map),
+      },
     };
     delete merged.gpu;
     return merged;

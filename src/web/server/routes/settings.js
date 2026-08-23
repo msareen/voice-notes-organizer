@@ -1,8 +1,9 @@
-import { accelState } from "../../../lib/whisper.js";
+import { accelState, crossLanguageState } from "../../../lib/whisper.js";
 import { sourceDestFolder } from "../../../lib/sync.js";
 import { openPath } from "../../../lib/open.js";
 import { THEME_IDS } from "../../../lib/themes.js";
-import { MODELS, LANGUAGES } from "../constants.js";
+import { isLanguageChoice, normalizeLanguageMap } from "../../../lib/languages.js";
+import { MODELS } from "../constants.js";
 
 /** POST /api/settings, POST /api/sources, POST /api/sources/explore. */
 export function createSettingsRoutes(ctx) {
@@ -12,8 +13,21 @@ export function createSettingsRoutes(ctx) {
     if ("defaultModel" in body && MODELS.includes(body.defaultModel)) {
       config.defaultModel = body.defaultModel;
     }
-    if ("transcribeLanguage" in body && LANGUAGES.includes(body.transcribeLanguage)) {
+    if ("transcribeLanguage" in body && isLanguageChoice(body.transcribeLanguage)) {
       config.transcribeLanguage = body.transcribeLanguage;
+    }
+    // Rebuilt from the stored block rather than assigned wholesale, the way
+    // `useGpu` is below: the two halves arrive as separate scalars, so a
+    // client sending only one can't blank the other.
+    if ("crossLanguageModel" in body) {
+      const model = MODELS.includes(body.crossLanguageModel) ? body.crossLanguageModel : null;
+      config.crossLanguage = { ...crossLanguageState(config), model };
+    }
+    if ("crossLanguageMap" in body) {
+      config.crossLanguage = {
+        ...crossLanguageState(config),
+        map: normalizeLanguageMap(body.crossLanguageMap),
+      };
     }
     if ("theme" in body && THEME_IDS.includes(body.theme)) config.theme = body.theme;
     if ("openWhenDone" in body) config.openWhenDone = Boolean(body.openWhenDone);

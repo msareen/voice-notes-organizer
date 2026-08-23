@@ -175,7 +175,9 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   `setup.js` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.js`
   (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
   model resolution/download/validation), `themes.js` (the UI theme ids +
-  `themeOf()` — ids only, never colours) and `whisper.js` (resolving the installed
+  `themeOf()` — ids only, never colours), `languages.js` (the whisper
+  language vocabulary + `normalizeLanguageMap()`, shared by both settings
+  surfaces for the same reason `themes.js` is) and `whisper.js` (resolving the installed
   binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
   the binary, the accel-state helpers that replaced `gpu.js`), plus
   `special-case-handling.js` (recovering Samsung `.m4a` files with a truncated

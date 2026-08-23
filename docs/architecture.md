@@ -92,7 +92,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
-| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `openWhenDone`, `rememberDeletions`, `theme`, `useGpu` |
+| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `crossLanguageModel`, `crossLanguageMap`, `openWhenDone`, `rememberDeletions`, `theme`, `useGpu` |
 | `/api/sources` | POST | Replace `config.sources` wholesale (array-shaped, doesn't fit the scalar `/api/settings` patch) |
 | `/api/sources/explore` | POST | Open the folder a source's files currently land in (or will, on next sync) — `mapTo` when set, else `target/<sanitized source basename>/`. Used by the source-removal confirmation dialog |
 | `/api/reveal` | POST | Reveal a file, or open a folder |

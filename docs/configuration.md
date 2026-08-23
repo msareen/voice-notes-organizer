@@ -158,6 +158,10 @@ dialog.
 The whisper.cpp model used for auto-translation, and pre-selected in the
 `vno transcribe` picker and the UI's transcribe dialog.
 
+One of `turbo`, `tiny`, `base`, `small`, `medium`, `large`. Defaults to
+`turbo`. See [Transcription](transcription.md#choosing-a-model) for how to
+choose.
+
 ## `transcribeLanguage`
 
 The language whisper.cpp is told to expect, as an ISO-639-1 code (`"hi"`,
@@ -168,12 +172,42 @@ for one another — Hindi and Urdu are acoustically close enough that
 auto-detect can flip between them file to file. Setting this to `"hi"` fixes
 that, and still transcribes English words mixed into Hindi speech fine, so
 it also covers a "mostly Hindi with some English" preference. `vno setting`
-offers Hindi/English/auto plus a custom code; the UI's Settings dialog offers
-the same three presets.
+offers Hindi/English/auto plus a custom code; the UI's Settings dialog lists
+every language whisper.cpp knows.
 
-One of `turbo`, `tiny`, `base`, `small`, `medium`, `large`. Defaults to
-`turbo`. See [Transcription](transcription.md#choosing-a-model) for how to
-choose.
+The trade-off is that a pin applies to every recording, including the ones
+that really are in another language. [`crossLanguage`](#crosslanguage) below
+is the softer version. When both are set, the pin wins.
+
+## `crossLanguage`
+
+Guides auto-detect instead of overriding it.
+
+```json
+"crossLanguage": {
+  "model": "small",
+  "map": { "ur": "hi" }
+}
+```
+
+**`model`** is the whisper model used for a `-dl` detection pass that runs
+before each transcription, or `null` (the default) for off — with it off
+there is no extra pass and nothing here has any effect. `"small"` is a good
+choice: it's one of the two models `vno setup` installs, and the pass takes
+roughly 1.5 seconds. A model that isn't installed is not an error — the run
+logs that it's skipping detection and carries on with plain auto-detect.
+
+**`map`** rewrites what that pass returns. `{ "ur": "hi" }` means "when it
+detects Urdu, transcribe as Hindi". A detected language with no entry is used
+as detected, so this doesn't disturb recordings in other languages. Keys and
+values are whisper.cpp language codes; unknown codes, `"auto"`, and identity
+pairs are dropped when the config is read.
+
+Only consulted when `transcribeLanguage` is `"auto"`. Editable from
+`vno setting` → *Cross-language detection* and the UI's Settings dialog, both
+of which set `transcribeLanguage` back to `"auto"` when you pick a model.
+See [Transcription](transcription.md#or-guide-the-detection) for why this
+exists and what the alternative costs.
 
 ## `accel`
 

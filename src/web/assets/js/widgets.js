@@ -34,12 +34,21 @@ export function modal(spec) {
   var h = document.createElement("h3");
   h.textContent = spec.title;
   box.appendChild(h);
+
+  // Content scrolls in its own element rather than the whole dialog, so the
+  // title stays put and the action row sits on the bottom edge instead of
+  // wherever the content happens to end. `build` is handed this rather than
+  // the box - every caller only appends, so it can't tell the difference.
+  var body = document.createElement("div");
+  body.className = "modal-body";
+  box.appendChild(body);
+
   if (spec.message) {
     var p = document.createElement("p");
     p.textContent = spec.message;
-    box.appendChild(p);
+    body.appendChild(p);
   }
-  if (spec.build) spec.build(box);
+  if (spec.build) spec.build(body);
 
   var actions = document.createElement("div");
   actions.className = "modal-actions";
@@ -86,18 +95,57 @@ export function modal(spec) {
   backdrop.addEventListener("click", function (e) { if (e.target === backdrop) close(); });
   document.addEventListener("keydown", onKey);
   document.body.appendChild(backdrop);
-  // preventScroll, or focusing the action row would scroll a tall dialog
-  // (Settings) straight past its own first section.
+  // preventScroll is belt and braces now that the action row sits outside
+  // the scrolling body - it used to be load-bearing, when focusing it would
+  // scroll a tall dialog (Settings) straight past its own first section.
   (confirm || cancel).focus({ preventScroll: true });
   return { close: close };
 }
 
-export function selectField(host, labelText, options, value) {
+/**
+ * A "?" that shows and hides a paragraph of help, so a dialog can explain
+ * itself without a wall of prose above every control. Returns both pieces
+ * rather than placing them: the button belongs beside a label or heading,
+ * the text belongs below whatever it explains, and only the caller knows
+ * where those are.
+ *
+ * Collapsed by default - the help is for the first time you meet a setting,
+ * not every time.
+ */
+export function helpToggle(text) {
+  var hint = document.createElement("p");
+  hint.className = "hint hidden";
+  hint.textContent = text;
+
+  var btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "help-toggle";
+  btn.textContent = "?";
+  btn.title = "What is this?";
+  btn.setAttribute("aria-expanded", "false");
+  btn.addEventListener("click", function () {
+    var open = !hint.classList.toggle("hidden");
+    btn.setAttribute("aria-expanded", String(open));
+    btn.classList.toggle("on", open);
+  });
+
+  return { button: btn, hint: hint };
+}
+
+export function selectField(host, labelText, options, value, helpText) {
   var field = document.createElement("div");
   field.className = "field";
   var label = document.createElement("label");
   label.textContent = labelText;
   field.appendChild(label);
+  // Inside the field, not after it, so the field's own bottom margin still
+  // separates it from the next one whether the help is open or shut.
+  var helpHint = null;
+  if (helpText) {
+    var h = helpToggle(helpText);
+    label.appendChild(h.button);
+    helpHint = h.hint;
+  }
   var sel = document.createElement("select");
   options.forEach(function (o) {
     var opt = document.createElement("option");
@@ -107,6 +155,7 @@ export function selectField(host, labelText, options, value) {
     sel.appendChild(opt);
   });
   field.appendChild(sel);
+  if (helpHint) field.appendChild(helpHint);
   host.appendChild(field);
   return sel;
 }

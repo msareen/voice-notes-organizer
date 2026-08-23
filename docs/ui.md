@@ -177,6 +177,10 @@ Then the settings that are also offered by `vno setting`:
 [`autoTranslate`](configuration.md#autotranslate) (on / off / ask each time),
 [`defaultModel`](configuration.md#defaultmodel),
 [`transcribeLanguage`](configuration.md#transcribelanguage),
+[`crossLanguage`](configuration.md#crosslanguage) (its own full-width row below
+the two columns: a detect-model dropdown, two language dropdowns and **Add**,
+and the saved rewrites as a strip of `Urdu → Hindi ✕` pills you click to remove
+— the **?** beside the heading explains what the pass is for),
 [GPU acceleration](configuration.md#accel),
 [`openWhenDone`](configuration.md#openwhendone), and
 [`rememberDeletions`](configuration.md#rememberdeletions). The **target folder**

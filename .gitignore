@@ -34,5 +34,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 /voice-notes
 
-# Claude Code local settings (keep local, don't commit)
-.claude/
+# Claude Code: local settings stay local, but project skills are repo
+# knowledge and are meant to be shared.
+.claude/settings.local.json

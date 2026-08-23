@@ -5,6 +5,7 @@ day to day. These pages cover everything else.
 
 | Page | What's in it |
 | --- | --- |
+| [Installation](installation.md) | Prerequisites, `npx`, updating, installing ffmpeg and whisper.cpp by hand |
 | [The browser UI](ui.md) | Every pane, button, dialog and keyboard shortcut in `vno visualize` |
 | [CLI reference](cli-reference.md) | Every command and flag, in full |
 | [Configuration](configuration.md) | `~/.vno/config.json`, key by key — including the options only editable by hand |
@@ -18,6 +19,7 @@ day to day. These pages cover everything else.
 - **Just installed it?** Run `vno setup` to get ffmpeg + whisper in place
   ([what it does](cli-reference.md#vno-setup)), then
   [CLI reference](cli-reference.md) → [Configuration](configuration.md).
+- **Installing, or something missing?** [Installation](installation.md).
 - **Living in the browser UI?** [The browser UI](ui.md).
 - **Recorder buries files in nested folders?** [Import & sync](import-and-sync.md).
 - **Transcripts wrong, slow, or in the wrong language?** [Transcription](transcription.md).

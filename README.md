@@ -7,15 +7,34 @@
 Works on macOS, Windows, and Linux. Everything runs on your machine — no
 account, no upload, no subscription.
 
-```bash
-vno              # plug in the recorder — imports anything new, opens the UI
-vno t            # pick recordings, transcribe them, opens the UI
-vno v            # just open the UI
-vno cleanup      # delete the 2-second accidental button-presses
-```
+---
 
-That's the whole loop. Everything else is a flag or a setting — and the
-[browser UI](#the-app) can do all of it too.
+## Getting started
+
+Four steps, and you're done. You need [Node.js](https://nodejs.org) 18+ on the
+machine; everything else `vno setup` installs for you.
+
+1. **Install the CLI.**
+   ```bash
+   npm install -g @msareen/voice-notes-organizer
+   ```
+2. **Set up ffmpeg and whisper.cpp.**
+   ```bash
+   vno setup
+   ```
+   Guides you through installing both, plus the transcription models.
+3. **Open the UI.**
+   ```bash
+   vno v
+   ```
+4. **Install it as an app.** Click **Install** on the "Install Voice Notes as
+   an app" banner (bottom right) — it becomes a proper desktop app with its
+   own window and icon, no browser tab required. That's the whole setup.
+
+From here, plug in your recorder and import from the app — or set up an
+import folder if your recordings live on a network share or non-removable
+drive instead. Everything else is a flag or a setting — see [the
+app](#the-app) below for what it can do.
 
 ---
 
@@ -31,14 +50,30 @@ what was written down, and no sign that any of it is coming. Meanwhile the
 open-source world got good enough at speech-to-text that a recording can just
 become text, locally, for free.
 
-So the point of this project is narrow and specific: **keep using the recorder
+Or use your phone — you know what the best sound recorder is, the one you have
+with you every time. It supports both. Plaude is too expensive, and frankly I
+don't see the point.
+
+So the point of the project was narrow and specific: **keep using the recorder
 hardware, replace the software that shipped with it.** The recorder is fine.
-The desktop app is what stalled.
+The desktop app is what stalled, but now it almost acts as a companion to
+everything.
 
 Built with digital record-keeping in mind — recordings land in a predictable
 folder you own, transcripts are written as plain `.vtt` files next to the audio
 (readable in any text editor, no database, no lock-in), and every part of it
 runs on your machine.
+
+### The LLM Angle
+
+The recordings are kept in plain `.vtt` files — a low entry barrier for any
+LLM agent you want to use.
+
+### The Power of Whisper.cpp
+
+The project was started with whisper, which was no doubt good, but dead slow.
+With the power of whisper.cpp it just rolls, and GPU acceleration is supported
+in the project.
 
 ---
 
@@ -63,73 +98,25 @@ effect on disk immediately.
   whisper.cpp's live output into a log panel.
 - **Six themes** — dark, light, high-contrast, or follow your system. Pick one
   in Settings and watch the page change as you click.
-- **Private by construction** — bound to `127.0.0.1` on a random port behind a
-  single-use session token. Close the tab and the CLI exits.
+- **Installs as an app** — a manifest and service worker make it installable,
+  so it gets its own window, icon and Start Menu entry instead of living in a
+  browser tab.
+- **Private by construction** — bound to `127.0.0.1` behind a session token
+  kept in `~/.vno`, so nothing else on the machine can reach it. Close the app
+  and the CLI exits.
 
 📖 **[Full UI documentation →](docs/ui.md)** — every pane, dialog and keyboard
 shortcut.
 
 ---
 
-## Installation
+## Installation, in detail
 
-### 1. Prerequisites
+The four steps above are all most people need. If you want the long version —
+prerequisites, `npx`, updating and uninstalling, or installing ffmpeg and
+whisper.cpp by hand instead of letting `vno setup` do it:
 
-- **Node.js 18+** (or [Bun](https://bun.sh)) to run the CLI.
-- **ffmpeg** on your `PATH` — whisper.cpp needs it to decode audio into the
-  16kHz mono WAV it accepts, and `vno cleanup` uses `ffprobe` (shipped with
-  ffmpeg) to measure durations.
-- On Linux, building whisper.cpp from source needs `cmake`, `git` and a C++
-  compiler already on the machine — `vno setup` tells you the exact command if
-  any are missing. No Python, no PyTorch, on any platform.
-
-### 2. Install it
-
-```bash
-npm install -g @msareen/voice-notes-organizer
-```
-
-That puts `vno` on your `PATH`. To try it without installing anything:
-
-```bash
-npx @msareen/voice-notes-organizer          # same as `vno`
-npx @msareen/voice-notes-organizer v        # ...or any other command
-```
-
-To update later, `npm update -g @msareen/voice-notes-organizer`; to remove it,
-`npm uninstall -g @msareen/voice-notes-organizer`.
-
-### 3. Install ffmpeg and whisper.cpp
-
-```bash
-vno setup
-```
-
-Checks `ffmpeg`/`ffprobe` and whisper.cpp, and offers to install whatever is
-missing: ffmpeg using your machine's own package manager
-(winget/Chocolatey/Scoop on Windows, Homebrew/MacPorts on macOS,
-apt/dnf/pacman/zypper/apk on Linux), whisper.cpp per-platform — Homebrew on
-macOS (Metal-accelerated automatically on Apple silicon); on Windows, a
-prebuilt release zip with a CUDA build matched to your driver if you have an
-NVIDIA GPU, a BLAS-accelerated CPU build otherwise; on Linux, a prebuilt CPU
-binary, or a `cmake` source build if you have an NVIDIA GPU (no prebuilt
-Linux CUDA asset exists). It then fetches the default model set (`small` +
-`turbo`) into `whisper-cpp/models/`.
-
-You don't have to remember to run it: `vno transcribe`, `vno cleanup` and an
-import that auto-translates all run the same check first, and offer the same
-install when something is missing. Nothing is installed without you confirming
-it. `vno setup --check` reports and installs nothing.
-
-Prefer to do it yourself:
-
-| OS | ffmpeg | whisper.cpp |
-| --- | --- | --- |
-| macOS | `brew install ffmpeg` | `brew install whisper-cpp` |
-| Windows | `winget install --id Gyan.FFmpeg -e` | download a [release zip](https://github.com/ggml-org/whisper.cpp/releases) |
-| Linux (Debian/Ubuntu) | `sudo apt install ffmpeg` | `git clone` + `cmake` build — see [Transcription](docs/transcription.md#installing-whispercpp) |
-
-Verify with `ffmpeg -version`, `ffprobe -version` and `vno setup --check`.
+📖 **[Full installation guide →](docs/installation.md)**
 
 > *Transcription is slow — but it is free.* It runs on your own machine, so
 > expect to wait; a long recording on a big model can take a while, though
@@ -178,41 +165,16 @@ A few things worth knowing up front:
 
 ## Configuration
 
-Settings live in one global per-user file — `~/.vno/config.json`. Run
-`vno config` to print the path.
+Change what you need from the UI's Settings dialog or `vno setting` — target
+folder, import sources, model, language, theme and the rest. You shouldn't
+need to hand-edit anything, but it all lives in one file if you want to:
+`~/.vno/config.json` (`vno config` prints the path).
 
-```json
-{
-  "target": "/path/to/voice-notes",
-  "sources": [],
-  "knownMounts": {},
-  "autoTranslate": null,
-  "defaultModel": "turbo",
-  "openWhenDone": true,
-  "theme": "tape",
-  "accel": { "backend": null, "use": null }
-}
-```
+**Supported audio** — `.mp3 .wav .m4a .aac .flac .ogg .oga .wma .aiff .opus
+.amr .3gp`. Anything else on the volume is ignored.
 
-| Key | What it controls |
-| --- | --- |
-| `target` | Where imported audio lands, and what every command scans |
-| `sources` | Extra folders to import from (network shares, non-removable drives) |
-| `knownMounts` | Per-device memory: auto-import, pinned subfolder, last sync |
-| `autoTranslate` | Translate imports to English — `true` / `false` / `null` (ask once) |
-| `defaultModel` | Whisper model: `turbo`, `tiny`, `base`, `small`, `medium`, `large` |
-| `openWhenDone` | Whether finished runs launch the browser UI |
-| `theme` | The browser UI's colour theme: `auto`, `tape`, `dusk`, `moss`, `daylight`, `contrast` |
-| `accel` | What `vno setup` installed for GPU acceleration, and whether to use it |
-
-Most of these are editable from `vno setting` or the UI's Settings dialog — you
-shouldn't need to touch the file.
-
-📖 **[Full configuration reference →](docs/configuration.md)**
-
-### Supported audio extensions
-
-`.mp3 .wav .m4a .aac .flac .ogg .oga .wma .aiff .opus .amr .3gp`
+📖 **[Full configuration reference →](docs/configuration.md)** — every key, in
+detail.
 
 ---
 
@@ -220,6 +182,7 @@ shouldn't need to touch the file.
 
 | Page | What's in it |
 | --- | --- |
+| [Installation](docs/installation.md) | Prerequisites, `npx`, updating, installing the dependencies by hand |
 | [The browser UI](docs/ui.md) | Every pane, button, dialog and keyboard shortcut |
 | [CLI reference](docs/cli-reference.md) | Every command and flag, in full |
 | [Configuration](docs/configuration.md) | `~/.vno/config.json`, key by key |

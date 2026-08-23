@@ -395,7 +395,11 @@ before changing the API surface.
 
 ## Documentation
 
-`README.md` is the user-facing overview; `docs/` holds the detail (`ui.md`,
-`cli-reference.md`, `configuration.md`, `import-and-sync.md`, `transcription.md`,
-`troubleshooting.md`, `architecture.md`). Behaviour changes to commands, flags, config
-keys or API routes should be reflected in the matching doc page.
+`README.md` is the user-facing overview — deliberately thin: a four-step
+"Getting started", what the app is, the command table, and a pointer per topic.
+`docs/` holds the detail (`installation.md`, `ui.md`, `cli-reference.md`,
+`configuration.md`, `import-and-sync.md`, `transcription.md`, `troubleshooting.md`,
+`architecture.md`). Behaviour changes to commands, flags, config keys or API routes
+should be reflected in the matching doc page. Resist re-growing a reference *inside*
+the README — the config table and install walkthrough both lived there once, went
+stale against `docs/`, and were cut for exactly that reason.

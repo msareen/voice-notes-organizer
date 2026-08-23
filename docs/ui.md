@@ -1,6 +1,6 @@
 # The browser UI
 
-`vno visualize` (alias `vno v` / `vno --v`) starts a small local web server and
+`vno visualize` (alias `vno v` / `vno viz` / `vno vis` / `vno --v`) starts a small local web server and
 opens the organizer in your browser. It is the app: **everything the CLI can
 do can be done from here**, and the page is live — edits, deletes and imports
 take effect on disk immediately, with no file to regenerate and nothing to

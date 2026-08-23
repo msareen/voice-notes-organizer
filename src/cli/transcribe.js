@@ -72,6 +72,44 @@ export async function transcribeMany(
 }
 
 /**
+ * One-shot path for `vno t <file> -o <out>`: no picker, no model prompt, no
+ * requirement that the file live under `config.target`. Silently uses
+ * `config.defaultModel` (or `-m`) and lets `ensureDependencies` handle the
+ * "not set up yet" case exactly like every other command does.
+ */
+async function runTranscribeDirect({ file, output, model, translate, config }) {
+  const resolved = path.resolve(process.cwd(), file);
+  if (!(await fs.pathExists(resolved))) {
+    console.log(chalk.red(`File not found: ${resolved}`));
+    return;
+  }
+
+  if (!(await ensureDependencies(["ffmpeg", "whisper"], { reason: "transcribing" }))) return;
+
+  const chosenModel = model || config.defaultModel || "turbo";
+  const device = resolveAccel(config);
+  if (device !== "cpu") {
+    const accel = accelState(config);
+    console.log(chalk.dim(`\nUsing accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`));
+  }
+
+  const done = await transcribeMany([resolved], {
+    model: chosenModel,
+    translate,
+    device,
+    ...resolveLanguagePlan(config),
+  });
+  if (done === 0) return;
+
+  if (output) {
+    const dest = path.resolve(process.cwd(), output);
+    await fs.ensureDir(path.dirname(dest));
+    await fs.move(transcriptPathFor(resolved), dest, { overwrite: true });
+    console.log(chalk.green(`Moved -> ${dest}`));
+  }
+}
+
+/**
  * Builds display metadata (relative label + recorded date) for each file. Date
  * comes from the filename when the recorder encodes it there, else file mtime.
  * Duration is filled in later (only for files that survive filtering) since it
@@ -101,8 +139,20 @@ async function describeFiles(entries, target) {
  * `open === false` (from `--no-open`) forces the reveal off; otherwise the
  * remembered `openWhenDone` setting decides.
  */
-export async function runTranscribe({ model, file, filter, translate = false, open } = {}) {
+export async function runTranscribe({
+  model,
+  file,
+  directFile = false,
+  filter,
+  translate = false,
+  output,
+  open,
+} = {}) {
   const config = await loadConfig();
+
+  if (directFile) {
+    return runTranscribeDirect({ file, output, model, translate, config });
+  }
 
   if (!(await fs.pathExists(config.target))) {
     console.log(chalk.yellow(`Target folder does not exist yet: ${config.target}`));

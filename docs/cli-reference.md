@@ -9,7 +9,7 @@ Everything here works unlinked too, as `node bin/vno.js <command>`.
 | --- | --- | --- |
 | [`vno import`](#vno-import) | `vno` (default) | Detect volumes and import new recordings |
 | [`vno transcribe`](#vno-transcribe) | `vno t`, `vno --t`, `vno -t` | Transcribe or translate recordings with whisper.cpp |
-| [`vno visualize`](#vno-visualize) | `vno v`, `vno --v`, `vno -v` | Launch the browser UI |
+| [`vno visualize`](#vno-visualize) | `vno v`, `vno viz`, `vno vis`, `vno --v` | Launch the browser UI |
 | [`vno cleanup`](#vno-cleanup) | — | Delete very short recordings |
 | [`vno explore`](#vno-explore) | `vno open` | Open the target folder in Explorer / Finder |
 | [`vno setting`](#vno-setting) | `vno settings` | Interactive settings wizard |
@@ -119,6 +119,7 @@ picker.
 | `-f, --file [name]` | Transcribe one specific file without the picker — full path, path relative to the target, bare filename (with or without extension), or a unique substring. **Passing `-f` with no value** switches the picker into re-transcribe mode |
 | `-s, --filter <text>` | Pre-seed the picker's live filter |
 | `--translate` | Produce an English translation (whisper.cpp's translate task) instead of a verbatim transcript |
+| `-o, --output <path>` | Write the transcript to this path instead of next to the source file. Only meaningful with a direct `[file]` argument (see below) |
 | `--no-open` | Don't launch the browser UI when the run finishes |
 
 Before anything else it checks that `ffmpeg` and whisper.cpp are installed,
@@ -129,13 +130,38 @@ files, because the picker shows durations that need `ffprobe`.
 Once at least one file has been converted, it launches the [browser
 UI](ui.md) so you can play and proof-read the new transcripts right away.
 
+### Direct one-shot mode
+
+```bash
+vno t ./some/recording.m4a                    # transcribe, write next to the source
+vno t ./some/recording.m4a -o notes.vtt        # transcribe, write to a chosen path
+vno t ./some/recording.m4a --translate -o en.vtt
+```
+
+Passing a **file argument directly** (not `-f`) skips the picker *and* the
+model prompt entirely — it's meant for scripted, one-off use. Differences from
+`-f`:
+
+- The file doesn't need to live under the [target folder](configuration.md#target)
+  or even be a recording vno has seen before — any path that exists is accepted.
+- No model prompt: it silently uses [`defaultModel`](configuration.md#defaultmodel)
+  (`turbo` out of the box) unless `-m` is passed.
+- `-o <path>` writes the `.vtt` to that path instead of next to the source
+  file (creating parent folders as needed).
+- It never opens the browser UI when done, regardless of `--no-open` /
+  [`openWhenDone`](configuration.md#openwhendone) — this mode is for scripting,
+  not for reviewing the result in the viewer.
+
+It still runs the same ffmpeg/whisper.cpp check as every other path, and walks
+you through [`vno setup`](#vno-setup) if something's missing.
+
 More detail in [Transcription](transcription.md).
 
 ---
 
 ## `vno visualize`
 
-Aliases: `vno v`, `vno --v`, `vno -v`.
+Aliases: `vno v`, `vno viz`, `vno vis`, `vno --v`. (`-v` is reserved for `vno --version`.)
 
 Starts a local web server and opens the two-pane organizer in your browser.
 **Everything the CLI can do can be done from there.** Fully documented in

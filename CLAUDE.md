@@ -19,7 +19,7 @@ npm link                      # `vno` runs your working copy from anywhere
 node bin/vno.js <command>     # or run in place, without linking
 
 node bin/vno.js               # import (default command)
-node bin/vno.js visualize     # browser UI; also `v` / `--v`
+node bin/vno.js visualize     # browser UI; also `v` / `viz` / `vis` / `--v`
 node bin/vno.js transcribe    # also `t` / `--t`
 node bin/vno.js cleanup --dry-run
 node bin/vno.js setup         # check/install ffmpeg + whisper.cpp; also `doctor`
@@ -32,7 +32,9 @@ thin wrappers over the same.
 ## The full `vno` surface
 
 Every command and flag, for driving the tool directly. `vno` with no arguments is
-`vno import`. `-v`/`--v` = `visualize`, `-t`/`--t` = `transcribe`.
+`vno import`. `--v` = `visualize`, `-t`/`--t` = `transcribe`. `-v`/`--version` prints
+the version (and a hint to use `v`/`viz`/`vis` for the UI) rather than launching it -
+unlike `-t`, it's deliberately not a `visualize` shortcut.
 
 ### `vno import` (default)
 Detects removable volumes plus configured `sources`, then copies new audio into
@@ -47,7 +49,11 @@ Ends by opening the UI when anything was imported.
 ### `vno transcribe` (`t`, `--t`)
 Runs whisper.cpp over selected recordings, writing one `.vtt` next to each audio
 file. With no `-f`, opens a searchable picker (type to filter, `Space` toggles,
-`Ctrl+A` all, `Enter` confirms) listing only untranscribed files.
+`Ctrl+A` all, `Enter` confirms) listing only untranscribed files. A positional
+`[file]` argument instead (`vno t <file>`) is a direct one-shot path: no picker, no
+model prompt, no requirement that the file live under `target` — just
+`config.defaultModel` (or `-m`) run against exactly that file, never opening the UI
+when done.
 
 | Flag | Effect |
 | --- | --- |
@@ -55,6 +61,7 @@ file. With no `-f`, opens a searchable picker (type to filter, `Space` toggles,
 | `-f, --file [name]` | Transcribe one named file directly. **Bare `-f`** instead opens the picker over *every* file, including already-transcribed ones |
 | `-s, --filter <text>` | Pre-filter the picker by name or recorded date |
 | `--translate` | whisper.cpp's translate task (any language → English) instead of verbatim |
+| `-o, --output <path>` | With a positional `[file]` only: write the transcript here instead of next to the source |
 | `--no-open` | Don't launch the UI when the run finishes |
 
 ### `vno cleanup`
@@ -72,7 +79,7 @@ transcript sidecars, after a confirmation that defaults to *no*.
 Deletes `~/.vno/deleted.json`. Touches no recordings — it only makes vno forget what
 was deleted, so those recordings import again if the device still has them.
 
-### `vno visualize` (`v`, `--v`)
+### `vno visualize` (`v`, `viz`, `vis`, `--v`)
 Serves the browser UI on loopback and blocks until the tab closes, the page's Quit
 button is used, or Ctrl+C. Everything the CLI does is available in the page. Building
 the note model up front needs an ffprobe per recording for duration, but that's cached
@@ -166,8 +173,12 @@ which is what makes it shareable between the terminal and the browser paths. Kee
 that way — if a CLI module grows logic the UI also needs, move it down into `lib/`.
 
 - `bin/vno.js` — commander definitions only. Version is read from `package.json` at
-  runtime, never hardcoded. `-v`/`--v`/`-t`/`--t` are rewritten into command names in
-  `process.argv` before parse, since commander would otherwise read them as options.
+  runtime, never hardcoded. `--v`/`-t`/`--t` are rewritten into command names in
+  `process.argv` before parse, since commander would otherwise read them as options
+  (`v`/`viz`/`vis`/`t` are ordinary commander `.aliases()` and don't need this).
+  `-v`/`--version` is a real option (`program.on("option:version", ...)`, not
+  `.version()`'s built-in handler) so it can print a hint pointing at `v`/`viz`/`vis`
+  alongside the version number.
 - `src/cli/*` — one module per command, each exporting `run<Command>()`. `import.js`
   ends by handing off to `runVisualize()`, so `vno` blocks until the browser tab closes.
 - `src/lib/*` — domain logic and OS access: config, volume detection, the flat copy,

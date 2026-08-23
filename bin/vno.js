@@ -20,19 +20,15 @@ const program = new Command();
 // Short, dashed aliases for the two commands people reach for most, so `vno
 // --v` and `vno --t` work as muscle-memory shortcuts. Commander treats these
 // as options otherwise, so we rewrite them to their command names before parse.
+// `-v` is deliberately excluded: it's the conventional "print version" flag
+// (wired up below), so it stays out of this table - `vno v` (the alias on the
+// visualize command itself) is the short form for launching the UI.
 const SHORTCUTS = {
   "--v": "visualize",
-  "-v": "visualize",
   "--t": "transcribe",
   "-t": "transcribe",
 };
 if (SHORTCUTS[process.argv[2]]) {
-  // -v/--v collides with the conventional "print version" flag, so anyone
-  // reaching for that habit gets pointed at the real thing instead of just
-  // silently landing in the browser UI.
-  if (process.argv[2] === "-v" || process.argv[2] === "--v") {
-    console.log(chalk.dim("(-v launches the browser UI here - run `vno --version` to see the installed version.)"));
-  }
   process.argv[2] = SHORTCUTS[process.argv[2]];
 }
 
@@ -41,7 +37,16 @@ program
   .description(
     "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards."
   )
-  .version(version);
+  .option("-v, --version", "output the version number");
+
+// Not `.version()`'s built-in handler: that prints and exits with no room for
+// the hint below, and `-v` is the flag people are most likely to reach for
+// right after wanting the visualizer, so it's worth pointing them at it.
+program.on("option:version", () => {
+  console.log(version);
+  console.log(chalk.dim("Use `vno v` (also `viz` / `vis`) to open the browser UI."));
+  process.exit(0);
+});
 
 program
   .command("import", { isDefault: true })
@@ -54,6 +59,10 @@ program
 program
   .command("transcribe")
   .alias("t")
+  .argument(
+    "[file]",
+    "transcribe this file directly (name, relative path, or absolute path), skipping the picker and model prompt"
+  )
   .description("Transcribe imported voice notes using whisper (alias: t, --t)")
   .option("-m, --model <model>", "whisper model to use (turbo, tiny, base, small, medium, large)")
   .option(
@@ -65,13 +74,19 @@ program
     "pre-filter the picker list to files whose name or recorded date contains this text"
   )
   .option("--translate", "translate to English (whisper translate task) instead of verbatim transcription")
+  .option(
+    "-o, --output <path>",
+    "write the transcript to this path instead of next to the source file (only with a direct file argument)"
+  )
   .option("--no-open", "don't open the target folder(s) and index.html when the run finishes")
-  .action(async (opts) => {
+  .action(async (file, opts) => {
     await runTranscribe({
       model: opts.model,
-      file: opts.file,
+      file: file || opts.file,
+      directFile: Boolean(file),
       filter: opts.filter,
       translate: Boolean(opts.translate),
+      output: opts.output,
       open: opts.open,
     });
   });
@@ -113,9 +128,9 @@ program
 
 program
   .command("visualize")
-  .alias("v")
+  .aliases(["v", "viz", "vis"])
   .description(
-    "Launch the browser UI: play, edit transcripts, import, transcribe, clean up and change settings (alias: v, --v)"
+    "Launch the browser UI: play, edit transcripts, import, transcribe, clean up and change settings (alias: v, viz, vis, --v)"
   )
   .option(
     "-p, --port <number>",

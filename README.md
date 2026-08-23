@@ -144,7 +144,7 @@ Verify with `ffmpeg -version`, `ffprobe -version` and `vno setup --check`.
 | --- | --- | --- |
 | `vno` | `vno import` | Detect your recorder, import anything new, open the UI |
 | `vno transcribe` | `vno t`, `vno --t` | Pick recordings and transcribe (or translate) them |
-| `vno visualize` | `vno v`, `vno --v` | Open the browser UI |
+| `vno visualize` | `vno v`, `vno viz`, `vno vis`, `vno --v` | Open the browser UI |
 | `vno cleanup` | — | Delete recordings shorter than 3 seconds, after confirming |
 | `vno cleanup -f <files>` | — | Delete named recordings and their transcripts |
 | `vno cleanup ledger` | — | Forget which recordings you deleted, so they import again |

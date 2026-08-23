@@ -15,8 +15,10 @@ afterthought.
 
 ## The one rule
 
-**Never run `npm publish` or `gh release create` without the user explicitly
-confirming that specific version, in this conversation.** Bumping a version
+**Never run `npm publish` yourself, and never `gh release create` without the
+user explicitly confirming that specific version in this conversation.**
+`npm publish` is the user's command to run (step 5 explains why the 2FA prompt
+makes it impractical for an agent). Bumping a version
 number is routine and often happens as part of ordinary code changes; deciding
 that the world should get it is a separate, deliberate call that belongs to the
 user. npm's unpublish window is 72 hours and republishing the same version
@@ -85,9 +87,26 @@ These are quick, and each one has actually broken a release somewhere:
 git status --short                    # must be clean
 git rev-parse --abbrev-ref HEAD       # expect main
 git fetch && git status -sb | head -1 # expect no divergence from origin
-npm whoami                            # expect msareen
+npm whoami                            # expect msareen - but see below
 gh auth status                        # expect logged in
 ```
+
+**`npm whoami` is not a publish check.** It only proves the stored token can
+*read* the registry. Publishing to a 2FA-protected account needs a session that
+has actually satisfied 2FA, and the stored token usually hasn't — so `whoami`
+says `msareen`, everything looks authorised, and `npm publish` then dies with
+`EOTP` after printing the entire tarball listing. Expect this on every release.
+
+The account uses web auth (`npm config get auth-type` → `web`), so the fix is a
+browser login rather than typing codes:
+
+```bash
+npm login    # opens a browser, handles 2FA there
+```
+
+This is interactive and can't be run for the user by an agent — ask them to run
+it themselves (in Claude Code, `!npm login` in the prompt). Same goes for the
+publish itself; see step 5.
 
 A dirty tree matters more here than in most projects: **`npm pack` packs the
 working tree, not the git index.** Uncommitted edits — and uncommitted
@@ -173,13 +192,36 @@ package, and scoped packages default to restricted, so losing that line makes
 ## Step 5 — Publish, after the user says yes
 
 Show the user the version, the commit list, and anything the checks turned up.
-Get an explicit go. Then, in this order:
+Get an explicit go.
+
+**`npm login` and `npm publish` are the user's to run, not yours.** Both are
+interactive against a 2FA-protected account: `npm login` opens a browser, and
+`npm publish` prompts for an OTP that expires in about 30 seconds — far less
+time than a round trip through the conversation. An agent running either just
+burns a turn on `EOTP` and puts a scary error in front of the user. Ask them to
+run these in the prompt, which executes in this session so the output lands in
+the conversation:
+
+```
+!npm login      # only if publish reports EOTP or they aren't logged in
+!npm publish
+```
+
+Then wait for them to confirm, and verify against the registry yourself (step 6)
+rather than trusting "done" — a publish that silently failed looks identical to
+one that worked until you check.
+
+The tag and the GitHub release are yours to run. Sequenced around the user's
+publish, the whole thing goes:
 
 ```bash
+# you:
 VERSION=v$(node -p "require('./package.json').version")
 git tag -a "$VERSION" -m "$VERSION"
 git push origin "$VERSION"
-npm publish
+
+# the user, in the prompt:  !npm publish
+# you, once the registry actually shows it:
 gh release create "$VERSION" --title "$VERSION" --generate-notes
 ```
 
@@ -200,12 +242,29 @@ npm view @msareen/voice-notes-organizer version
 gh release view "$VERSION" --json url,name --jq '.url'
 ```
 
-npm's registry can lag a few seconds; if the version doesn't show immediately,
-that's propagation, not failure. Report the published version and the release
+Check this against the registry rather than npm's local cache, which can serve
+a stale document:
+
+```bash
+curl -s "https://registry.npmjs.org/@msareen%2Fvoice-notes-organizer" | node -e "
+  const d = JSON.parse(require('fs').readFileSync(0));
+  console.log('latest:', d['dist-tags'].latest, '| modified:', d.time.modified);
+"
+```
+
+`time.modified` is the useful field: it stamps on any registry write, so it
+moves the instant a publish lands even if a CDN is still serving an old version
+list. If it hasn't moved since before the publish attempt, the publish didn't
+happen — but give it a minute and re-check before concluding that, since the
+two can be seconds apart and calling it a failure prematurely is its own
+mistake. Report the published version and the release
 URL back to the user.
 
 ## When something goes wrong
 
+- **`npm publish` fails with `EOTP`** — 2FA, not a broken package. Nothing was
+  uploaded and the version number is untouched, so it's safe to retry. Have the
+  user run `npm login` (see step 3) and publish again.
 - **`npm publish` 403s** — either not logged in as `msareen`, or
   `publishConfig.access` isn't `"public"`, or that exact version already
   exists on the registry. Version numbers are never reusable; bump and go again.

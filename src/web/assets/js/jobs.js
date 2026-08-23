@@ -42,21 +42,41 @@ function renderJob(j) {
 
 function renderLog() {
   if (!logBox) return;
-  logBox.textContent = "";
+  var body = logBox.querySelector(".logbox-body");
+  body.textContent = "";
   var lines = (currentJob && currentJob.lines) || [];
   lines.forEach(function (line) {
     var el = document.createElement("div");
     if (line.indexOf("FAILED") === 0) el.className = "bad";
     el.textContent = line;
-    logBox.appendChild(el);
+    body.appendChild(el);
   });
-  logBox.scrollTop = logBox.scrollHeight;
+  body.scrollTop = body.scrollHeight;
+}
+
+function closeLog() {
+  if (!logBox) return;
+  logBox.remove();
+  logBox = null;
 }
 
 document.getElementById("btnLog").addEventListener("click", function () {
-  if (logBox) { logBox.remove(); logBox = null; return; }
+  if (logBox) { closeLog(); return; }
   logBox = document.createElement("div");
   logBox.className = "logbox";
+  var head = document.createElement("div");
+  head.className = "logbox-head";
+  var close = document.createElement("button");
+  close.className = "btn icon logbox-close";
+  close.title = "Close log";
+  close.setAttribute("aria-label", "Close log");
+  close.textContent = "×";
+  close.addEventListener("click", closeLog);
+  head.appendChild(close);
+  var body = document.createElement("div");
+  body.className = "logbox-body";
+  logBox.appendChild(head);
+  logBox.appendChild(body);
   document.body.appendChild(logBox);
   renderLog();
 });

@@ -13,6 +13,7 @@ Everything here works unlinked too, as `node bin/vno.js <command>`.
 | [`vno cleanup`](#vno-cleanup) | — | Delete very short recordings |
 | [`vno explore`](#vno-explore) | `vno open` | Open the target folder in Explorer / Finder |
 | [`vno setting`](#vno-setting) | `vno settings` | Interactive settings wizard |
+| [`vno status`](#vno-status) | — | Report whether everything is installed and ready |
 | [`vno setup`](#vno-setup) | `vno doctor` | Check ffmpeg + whisper.cpp, install what's missing |
 | [`vno config`](#vno-config) | — | Print the config file path |
 
@@ -293,6 +294,62 @@ hand-editing `config.json`:
 
 Arrow keys to pick a setting, `Esc` to exit; changes save as you make them. Most
 of these are also editable from the [UI's Settings dialog](ui.md#settings).
+
+---
+
+## `vno status`
+
+Answers "is vno ready to work?" without changing anything — no installs, no
+downloads, no prompts.
+
+```bash
+vno status
+```
+
+```
+vno setup - win32 x64
+
+  ✓ ffmpeg       C:\...\ffmpeg.EXE
+  ✓ ffprobe      C:\...\ffprobe.EXE
+  ✓ whisper.cpp  C:\...\whisper-cli.exe
+  ✓ accel        NVIDIA GeForce RTX 3060 Laptop GPU in use
+  ✓ vno://       registered
+```
+
+It ends with a one-line verdict — **Ready** or **Not ready** with the specific
+blockers listed — and **exits 0 when ready, 1 when not**, so another tool can
+gate on it without parsing anything:
+
+```bash
+vno status >/dev/null && vno t recording.mp3
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--json` | Machine-readable output: `ready`, `blockers`, `warnings`, and the `required`/`optional` detail |
+
+**Required vs optional is the point of the command.** ffmpeg, whisper.cpp and
+at least one valid model are the difference between "can transcribe" and
+"can't" — anything missing there is a blocker and makes the command exit 1.
+GPU acceleration and the `vno://` handler are reported as notes instead:
+they change how pleasant vno is, not whether it works, so a CPU-only machine
+with no protocol handler still reports **Ready**. Reporting those at the same
+severity would train people to ignore the output.
+
+A model that's present but fails validation counts as missing — a truncated
+download is the failure people actually hit, since the binary installs in
+seconds and the multi-gigabyte model is what gets interrupted.
+
+This is a separate command rather than an alias of `setup`, because an alias
+would inherit setup's offer-to-install behaviour, and a command called
+`status` that starts downloading gigabytes would be a poor surprise.
+[`vno setup --check`](#vno-setup) prints the same lines without the verdict or
+the exit code.
+
+It covers the **external tools**, not your settings. For those, use
+[`vno setting`](#vno-setting) or the [UI's Settings dialog](ui.md#settings);
+[`vno config`](#vno-config) prints the file path. To see which whisper models
+are on disk, use `vno setup --list-models`.
 
 ---
 

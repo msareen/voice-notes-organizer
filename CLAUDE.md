@@ -22,6 +22,7 @@ node bin/vno.js               # import (default command)
 node bin/vno.js visualize     # browser UI; also `v` / `viz` / `vis` / `--v`
 node bin/vno.js transcribe    # also `t` / `--t`
 node bin/vno.js cleanup --dry-run
+node bin/vno.js status        # is vno ready? exits 0/1, --json for scripts
 node bin/vno.js setup         # check/install ffmpeg + whisper.cpp; also `doctor`
 node bin/vno.js config        # prints ~/.vno/config.json path
 ```

@@ -138,6 +138,7 @@ whisper.cpp by hand instead of letting `vno setup` do it:
 | `vno cleanup ledger` | — | Forget which recordings you deleted, so they import again |
 | `vno explore [file]` | `vno open` | Open the target folder in Explorer / Finder, or reveal one recording |
 | `vno setting` | `vno settings` | Interactive wizard for the common settings |
+| `vno status` | — | Is vno ready to transcribe? Reports only; exits 0/1 so scripts can gate on it |
 | `vno setup` | `vno doctor` | Check ffmpeg + whisper.cpp, offer to install what's missing |
 | `vno config` | — | Print the path to the config file |
 

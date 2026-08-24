@@ -9,7 +9,7 @@ import { runTranscribe } from "../src/cli/transcribe.js";
 import { runCleanup, runLedgerCleanup } from "../src/cli/cleanup.js";
 import { runVisualize, DEFAULT_PORT } from "../src/cli/visualize.js";
 import { runSettings } from "../src/cli/settings.js";
-import { runSetup } from "../src/cli/setup.js";
+import { runSetup, runStatus } from "../src/cli/setup.js";
 import { runExplore } from "../src/cli/explore.js";
 import { configFilePath } from "../src/lib/config.js";
 
@@ -65,7 +65,8 @@ program
       ["vno v", "just open the UI"],
       ["vno t", "pick recordings from a list and transcribe them"],
       ["vno t interview.mp3", "transcribe one file directly"],
-      ["vno setup", "check ffmpeg + whisper.cpp, install what's missing"],
+      ["vno status", "is everything installed and ready?"],
+      ["vno setup", "...and offer to install whatever is missing"],
       ["vno cleanup --dry-run", "list the very short recordings, delete nothing"],
     ]) + chalk.dim("\nRun `vno help <command>` for the detail on any one of these.\n")
   );
@@ -338,6 +339,40 @@ program
       model: opts.model || null,
       listModelsOnly: Boolean(opts.listModels),
     });
+  });
+
+// Deliberately its own command rather than another alias on `setup`: an alias
+// would inherit setup's offer-to-install behaviour, and a command called
+// "status" that starts downloading gigabytes is a nasty surprise. This is
+// exactly `vno setup --check` under a name people actually guess.
+program
+  .command("status")
+  .description("Is vno ready to import and transcribe? Reports only, installs nothing")
+  .option("--json", "machine-readable output for scripts and other tools")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno status", "is everything ready? changes nothing"],
+      ["vno status --json", "the same, as JSON"],
+      ["vno setup", "...and offer to install whatever is missing"],
+    ]) +
+      chalk.dim(
+        "\nExits 0 when vno is ready and 1 when it isn't, so other tools can gate on it:\n" +
+          "  vno status >/dev/null && vno t recording.mp3\n\n" +
+          "Required means ffmpeg plus whisper.cpp with at least one valid model - without\n" +
+          "those, transcription can't run at all. GPU acceleration and the vno:// handler\n" +
+          "are reported as notes, not failures: they change how pleasant vno is, not\n" +
+          "whether it works, so a CPU-only machine still reports ready.\n\n" +
+          "This covers the external tools. For your settings - target folder, model,\n" +
+          "sources, theme - use `vno setting`, or `vno config` for the file's path.\n"
+      )
+  )
+  .action(async (opts) => {
+    const ready = await runStatus({ json: Boolean(opts.json) });
+    // The exit code is the whole point of the command for a caller that isn't
+    // a human reading the output, so it has to be set explicitly - commander
+    // resolves the action promise and exits 0 regardless.
+    process.exitCode = ready ? 0 : 1;
   });
 
 program

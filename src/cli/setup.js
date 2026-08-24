@@ -306,6 +306,112 @@ function printManual(name) {
  * `listModelsOnly` prints the model inventory without touching setup at all -
  * the first thing anyone debugging a model-not-found error will want.
  */
+/**
+ * The machine-readable half of `vno status`: gathers everything without
+ * printing, so both the human report and `--json` come from one source of
+ * truth rather than drifting apart.
+ *
+ * The required/optional split is the point of the whole command. ffmpeg and a
+ * whisper binary with at least one valid model are the difference between
+ * "can transcribe" and "can't"; the `vno://` handler and GPU acceleration
+ * change how pleasant it is, not whether it works. Reporting them at the same
+ * severity would train people to ignore the output — the CPU-only laptop that
+ * transcribes fine shouldn't look broken.
+ */
+export async function collectStatus() {
+  await refreshPath();
+  const config = await loadConfig();
+
+  const deps = await checkDependencies(REQUIRED);
+  const models = await listModels();
+  const usable = models.filter((m) => m.valid);
+  const accel = accelState(config);
+  const protocol = os.platform() === "win32" ? await protocolStatus() : null;
+
+  const blockers = [];
+  for (const dep of deps) {
+    if (!dep.found) {
+      blockers.push(dep.name === "whisper" ? "whisper.cpp is not installed" : `${dep.name} is not on PATH`);
+    }
+  }
+  // A whisper binary with nothing to run is as blocking as no binary at all,
+  // and it's the failure people actually hit - the binary installs quickly,
+  // the multi-gigabyte model is what gets interrupted.
+  if (!usable.length) {
+    blockers.push(
+      models.length
+        ? "no valid whisper model — the ones on disk failed validation"
+        : "no whisper model downloaded"
+    );
+  }
+
+  const warnings = [];
+  if (accel.backend === "cpu") warnings.push("no GPU acceleration — transcription runs on the CPU");
+  else if (accel.backend && accel.use === false) warnings.push("GPU acceleration is available but turned off");
+  if (protocol && !protocol.registered) warnings.push("vno:// is not registered — a browser can't launch vno directly");
+  else if (protocol && !protocol.upToDate) warnings.push("vno:// points at a different vno install");
+
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    warnings,
+    required: {
+      ffmpeg: deps.find((d) => d.name === "ffmpeg")?.found ?? false,
+      whisper: deps.find((d) => d.name === "whisper")?.found ?? false,
+      models: usable.map((m) => m.stem),
+    },
+    optional: {
+      // `enabled` means "an accelerator is actually going to be used", so a
+      // missing install (backend null) is false, not merely "not disabled".
+      accel: {
+        backend: accel.backend,
+        name: accel.name ?? null,
+        enabled: Boolean(accel.backend) && accel.backend !== "cpu" && accel.use !== false,
+      },
+      protocol: protocol ? { registered: protocol.registered, upToDate: protocol.upToDate } : null,
+    },
+  };
+}
+
+/**
+ * `vno status` — is vno ready to work? Exits 0 when it is and 1 when it
+ * isn't, so a script or another tool can gate on it without parsing text:
+ *
+ *   vno status --json | jq -e .ready   # or just: vno status >/dev/null
+ */
+export async function runStatus({ json = false } = {}) {
+  const status = await collectStatus();
+
+  if (json) {
+    console.log(JSON.stringify(status, null, 2));
+    return status.ready;
+  }
+
+  console.log(chalk.bold(`vno status — ${os.platform()} ${os.arch()}\n`));
+  await report();
+  reportAccel(await loadConfig());
+  const protocol = os.platform() === "win32" ? await protocolStatus() : null;
+  if (protocol) reportProtocol(protocol);
+
+  const modelCount = status.required.models.length;
+  console.log(
+    modelCount
+      ? `  ${chalk.green("✓")} ${"models".padEnd(12)} ${chalk.dim(status.required.models.join(", "))}`
+      : `  ${chalk.red("✗")} ${"models".padEnd(12)} ${chalk.dim("none downloaded — run `vno setup`")}`
+  );
+
+  console.log("");
+  if (status.ready) {
+    console.log(`  ${chalk.green.bold("Ready.")} ${chalk.dim("vno can import and transcribe.")}`);
+    for (const warning of status.warnings) console.log(`  ${chalk.dim("·")} ${chalk.dim(warning)}`);
+  } else {
+    console.log(`  ${chalk.red.bold("Not ready.")} ${chalk.dim("Run `vno setup` to fix:")}`);
+    for (const blocker of status.blockers) console.log(`  ${chalk.red("·")} ${blocker}`);
+  }
+  console.log("");
+  return status.ready;
+}
+
 export async function runSetup({ check = false, mode = null, model = null, listModelsOnly = false } = {}) {
   console.log(chalk.bold(`vno setup — ${os.platform()} ${os.arch()}\n`));
 

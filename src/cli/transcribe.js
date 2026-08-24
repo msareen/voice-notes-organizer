@@ -32,17 +32,26 @@ function transcriptPathFor(audioPath) {
  */
 export async function transcribeMany(
   files,
-  { model = "turbo", translate = false, device = "cpu", language = "auto", crossLanguage = null } = {}
+  { model = "turbo", translate = false, device = "cpu", language = "auto", crossLanguage = null, toStderr = false } = {}
 ) {
   const gerund = translate ? "Translating" : "Transcribing";
   const verb = translate ? "translate" : "transcribe";
+  // When the transcript itself is going to stdout (`-o -`), every byte of
+  // progress chatter has to go to stderr instead or it corrupts the output a
+  // pipe receives. This is the usual split - data on stdout, diagnostics on
+  // stderr - which vno didn't previously honour anywhere.
+  const log = toStderr ? (line) => process.stderr.write(`${line}\n`) : console.log;
+  // whisper.cpp's own stdout/stderr are written directly by lib/whisper.js
+  // unless it's given an onOutput sink, so redirecting our own logging isn't
+  // enough - the binary's several KB of timings would still land on stdout.
+  const onOutput = toStderr ? (line) => process.stderr.write(chalk.dim(`${line}\n`)) : null;
   let current = device;
   let done = 0;
   for (const f of files) {
-    console.log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
+    log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
     try {
-      await transcribeFile(f, { model, translate, device: current, language, crossLanguage });
-      console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
+      await transcribeFile(f, { model, translate, device: current, language, crossLanguage, onOutput });
+      log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
       continue;
     } catch (err) {
@@ -52,20 +61,20 @@ export async function transcribeMany(
       // old torch probe, the backend is fixed by which binary was installed
       // and re-checking it costs nothing, so there's no cache to invalidate.
       if (current === "cpu" || !isDeviceError(err.message)) {
-        console.log(chalk.red(`Failed to ${verb} ${path.basename(f)}: ${err.message}`));
+        log(chalk.red(`Failed to ${verb} ${path.basename(f)}: ${err.message}`));
         continue;
       }
-      console.log(chalk.yellow(`Accelerator run failed: ${lastLine(err.message)}`));
-      console.log(chalk.yellow("Falling back to the CPU for the rest of this run."));
+      log(chalk.yellow(`Accelerator run failed: ${lastLine(err.message)}`));
+      log(chalk.yellow("Falling back to the CPU for the rest of this run."));
       current = "cpu";
     }
 
     try {
-      await transcribeFile(f, { model, translate, device: "cpu", language, crossLanguage });
-      console.log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
+      await transcribeFile(f, { model, translate, device: "cpu", language, crossLanguage, onOutput });
+      log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
     } catch (err) {
-      console.log(chalk.red(`Failed to ${verb} ${path.basename(f)}: ${err.message}`));
+      log(chalk.red(`Failed to ${verb} ${path.basename(f)}: ${err.message}`));
     }
   }
   return done;
@@ -78,35 +87,57 @@ export async function transcribeMany(
  * "not set up yet" case exactly like every other command does.
  */
 async function runTranscribeDirect({ file, output, model, translate, config }) {
+  // `-o -` means "write the transcript to stdout", so the whole run has to
+  // keep stdout clean for it. Everything else - our progress lines and
+  // whisper.cpp's several KB of timings - moves to stderr for the duration.
+  const toStdout = output === "-";
+  const say = toStdout ? (line) => process.stderr.write(`${line}\n`) : console.log;
+
   const resolved = path.resolve(process.cwd(), file);
   if (!(await fs.pathExists(resolved))) {
-    console.log(chalk.red(`File not found: ${resolved}`));
-    return;
+    // Errors go to stderr regardless of mode: a caller redirecting stdout to a
+    // file should still see why nothing happened.
+    process.stderr.write(chalk.red(`File not found: ${resolved}\n`));
+    return false;
   }
 
-  if (!(await ensureDependencies(["ffmpeg", "whisper"], { reason: "transcribing" }))) return;
+  if (!(await ensureDependencies(["ffmpeg", "whisper"], { reason: "transcribing" }))) return false;
 
   const chosenModel = model || config.defaultModel || "turbo";
   const device = resolveAccel(config);
   if (device !== "cpu") {
     const accel = accelState(config);
-    console.log(chalk.dim(`\nUsing accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`));
+    say(chalk.dim(`\nUsing accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`));
   }
 
   const done = await transcribeMany([resolved], {
     model: chosenModel,
     translate,
     device,
+    toStderr: toStdout,
     ...resolveLanguagePlan(config),
   });
-  if (done === 0) return;
+  if (done === 0) return false;
+
+  const produced = transcriptPathFor(resolved);
+
+  if (toStdout) {
+    // whisper.cpp always writes beside the source, so this is a read-then-clean
+    // rather than a redirect. Removing it matters: the file wasn't asked for,
+    // and leaving it behind would quietly mark the recording as transcribed.
+    const text = await fs.readFile(produced, "utf8");
+    process.stdout.write(text);
+    await fs.remove(produced).catch(() => {});
+    return true;
+  }
 
   if (output) {
     const dest = path.resolve(process.cwd(), output);
     await fs.ensureDir(path.dirname(dest));
-    await fs.move(transcriptPathFor(resolved), dest, { overwrite: true });
-    console.log(chalk.green(`Moved -> ${dest}`));
+    await fs.move(produced, dest, { overwrite: true });
+    say(chalk.green(`Moved -> ${dest}`));
   }
+  return true;
 }
 
 /**

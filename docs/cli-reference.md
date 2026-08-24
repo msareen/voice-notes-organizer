@@ -120,7 +120,7 @@ picker.
 | `-f, --file [name]` | Transcribe one specific file without the picker — full path, path relative to the target, bare filename (with or without extension), or a unique substring. **Passing `-f` with no value** switches the picker into re-transcribe mode |
 | `-s, --filter <text>` | Pre-seed the picker's live filter |
 | `--translate` | Produce an English translation (whisper.cpp's translate task) instead of a verbatim transcript |
-| `-o, --output <path>` | Write the transcript to this path instead of next to the source file. Only meaningful with a direct `[file]` argument (see below) |
+| `-o, --output <path>` | Write the transcript to this path instead of next to the source file, or `-` for stdout. Only meaningful with a direct `[file]` argument (see below) |
 | `--no-open` | Don't launch the browser UI when the run finishes |
 
 Before anything else it checks that `ffmpeg` and whisper.cpp are installed,
@@ -152,6 +152,49 @@ model prompt entirely — it's meant for scripted, one-off use. Differences from
 - It never opens the browser UI when done, regardless of `--no-open` /
   [`openWhenDone`](configuration.md#openwhendone) — this mode is for scripting,
   not for reviewing the result in the viewer.
+
+#### Using it from another tool
+
+This mode is built to compose. It **exits non-zero** when the transcription
+fails — a missing file, a whisper error — so a caller can branch on it:
+
+```bash
+vno t "$f" -o out.vtt || { echo "transcription failed"; exit 1; }
+```
+
+`-o -` writes the transcript to **stdout** instead of a file. In that mode the
+transcript is the only thing on stdout; vno's progress lines and whisper.cpp's
+own output move to stderr, so a pipe receives clean VTT:
+
+```bash
+vno t interview.mp4 -o - 2>/dev/null | your-summariser
+```
+
+The intermediate `.vtt` whisper.cpp writes beside the source is removed
+afterwards in this mode — you didn't ask for a file, and leaving one behind
+would quietly mark the recording as already transcribed.
+
+Pair it with [`vno status`](#vno-status) to check the machine is set up before
+starting:
+
+```bash
+vno status >/dev/null || { echo "run: vno setup"; exit 1; }
+```
+
+#### Video files
+
+The direct mode passes the file to ffmpeg, which extracts the audio track from
+any container it can read — so `.mp4`, `.mkv`, `.mov` and `.webm` all
+transcribe, video track ignored:
+
+```bash
+vno t screencast.mp4 -o notes.vtt
+```
+
+This applies to the direct `[file]` argument only. Import, the picker and the
+browser UI go by the [supported audio extensions](configuration.md#supported-audio-extensions),
+which don't include video containers — videos can be transcribed, but not kept
+in your library.
 
 It still runs the same ffmpeg/whisper.cpp check as every other path, and walks
 you through [`vno setup`](#vno-setup) if something's missing.

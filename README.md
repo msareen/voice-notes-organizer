@@ -161,8 +161,13 @@ A few things worth knowing up front:
   ```bash
   vno t interview.mp3                  # transcript lands next to the audio
   vno t interview.mp3 -o notes.vtt     # ...or wherever you point -o
-  vno t interview.mp3 -m small         # pick the model for this run only
+  vno t interview.mp3 -o -             # ...or to stdout, for piping
+  vno t screencast.mp4 -o notes.vtt    # video works too - ffmpeg pulls the audio out
   ```
+
+  This form is built to script: it exits non-zero if the transcription fails,
+  and with `-o -` the transcript is the only thing on stdout, so
+  `vno t clip.mp4 -o - 2>/dev/null | your-tool` pipes cleanly.
 - **Nothing deletes without asking.** Only `cleanup` and the UI's delete
   buttons remove files, always behind a confirmation. Import and transcribe
   never delete anything.

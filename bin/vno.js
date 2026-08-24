@@ -120,7 +120,7 @@ program
   .option("--translate", "translate to English (whisper translate task) instead of verbatim transcription")
   .option(
     "-o, --output <path>",
-    "write the transcript to this path instead of next to the source file (only with a direct file argument)"
+    "write the transcript to this path instead of next to the source file, or \"-\" for stdout (only with a direct file argument)"
   )
   .option("--no-open", "don't open the target folder(s) and index.html when the run finishes")
   .addHelpText(
@@ -138,6 +138,7 @@ program
         ["vno t 250810_1328", "one imported recording, matched by name"],
         ["vno t ~/Desktop/interview.mp3", "...or any audio file, anywhere"],
         ["vno t interview.mp3 -o notes.vtt", "put the transcript somewhere specific"],
+        ["vno t interview.mp3 -o -", "write it to stdout, for piping"],
         ["vno t interview.mp3 -m small", "use a different model for this run"],
         ["vno t --translate", "translate to English instead of verbatim"],
         ["vno t -s \"Feb 2023\"", "pre-filter the picker by name or date"],
@@ -145,11 +146,16 @@ program
       ]) +
       chalk.dim(
         "\nTranscripts are .vtt files written next to the audio unless -o says otherwise.\n" +
-          "A name can be a full filename, just the stem, or any unique fragment of one.\n"
+          "A name can be a full filename, just the stem, or any unique fragment of one.\n" +
+          "\nScripting a single file: it exits non-zero if the transcription fails, and\n" +
+          "with `-o -` the transcript is the only thing on stdout (progress and\n" +
+          "whisper.cpp's own output move to stderr), so it pipes cleanly:\n" +
+          "  vno t interview.mp4 -o - 2>/dev/null | your-tool\n" +
+          "Video files work too - ffmpeg pulls the audio track out of mp4/mkv/mov/webm.\n"
       )
   )
   .action(async (file, opts) => {
-    await runTranscribe({
+    const ok = await runTranscribe({
       model: opts.model,
       file: file || opts.file,
       directFile: Boolean(file),
@@ -158,6 +164,12 @@ program
       output: opts.output,
       open: opts.open,
     });
+    // Only the direct one-shot path reports success/failure, and it's the only
+    // one a script drives - `vno t x.mp3 -o out.vtt && next-step` was silently
+    // succeeding on a missing file before this. The interactive path returns
+    // undefined and keeps exiting 0, since "some files failed" is already
+    // visible in its own output.
+    if (ok === false) process.exitCode = 1;
   });
 
 program

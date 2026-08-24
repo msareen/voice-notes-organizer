@@ -5,7 +5,7 @@ day to day. These pages cover everything else.
 
 | Page | What's in it |
 | --- | --- |
-| [Installation](installation.md) | Prerequisites, `npx`, updating, installing ffmpeg and whisper.cpp by hand |
+| [Installation](installation.md) | Prerequisites, `bunx`, updating, installing ffmpeg and whisper.cpp by hand |
 | [The browser UI](ui.md) | Every pane, button, dialog and keyboard shortcut in `vno visualize` |
 | [CLI reference](cli-reference.md) | Every command and flag, in full |
 | [Configuration](configuration.md) | `~/.vno/config.json`, key by key — including the options only editable by hand |

@@ -11,12 +11,12 @@ account, no upload, no subscription.
 
 ## Getting started
 
-Four steps, and you're done. You need [Node.js](https://nodejs.org) 18+ on the
+Four steps, and you're done. You need [Bun](https://bun.sh) 1.2+ on the
 machine; everything else `vno setup` installs for you.
 
 1. **Install the CLI.**
    ```bash
-   npm install -g @msareen/voice-notes-organizer
+   bun install -g @msareen/voice-notes-organizer
    ```
 2. **Set up ffmpeg and whisper.cpp.**
    ```bash
@@ -113,7 +113,7 @@ shortcut.
 ## Installation, in detail
 
 The four steps above are all most people need. If you want the long version —
-prerequisites, `npx`, updating and uninstalling, or installing ffmpeg and
+prerequisites, `bunx`, updating and uninstalling, or installing ffmpeg and
 whisper.cpp by hand instead of letting `vno setup` do it:
 
 📖 **[Full installation guide →](docs/installation.md)**
@@ -198,7 +198,7 @@ detail.
 
 | Page | What's in it |
 | --- | --- |
-| [Installation](docs/installation.md) | Prerequisites, `npx`, updating, installing the dependencies by hand |
+| [Installation](docs/installation.md) | Prerequisites, `bunx`, updating, installing the dependencies by hand |
 | [The browser UI](docs/ui.md) | Every pane, button, dialog and keyboard shortcut |
 | [CLI reference](docs/cli-reference.md) | Every command and flag, in full |
 | [Configuration](docs/configuration.md) | `~/.vno/config.json`, key by key |
@@ -215,13 +215,15 @@ detail.
 git clone https://github.com/msareen/voice-notes-organizer.git
 cd voice-notes-organizer
 
-npm install
-node bin/vno.js       # runs your working copy
+bun install
+bun bin/vno.ts        # runs your working copy
+bun run typecheck     # tsc over the CLI, the browser modules and the worker
 ```
 
-**There is no build step.** The UI's CSS and JS are read from disk on each
-request, so a browser reload is enough to see an edit. See
-[Architecture](docs/architecture.md) for the source layout and the ground
+**There is no build step.** vno is TypeScript that Bun runs directly, and the
+UI's CSS and modules are read from disk on each request — the browser ones are
+type-stripped on the way out — so a browser reload is enough to see an edit.
+See [Architecture](docs/architecture.md) for the source layout and the ground
 rules.
 
 ## License

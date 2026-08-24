@@ -1,0 +1,12 @@
+{
+  // The service worker alone. It runs in a ServiceWorkerGlobalScope, so it
+  // needs the WebWorker lib and must NOT see DOM globals - `document` and
+  // `window` don't exist there, and typechecking it alongside the page's
+  // modules would let a reference to either one through.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "WebWorker"],
+    "types": []
+  },
+  "include": ["sw.ts"]
+}

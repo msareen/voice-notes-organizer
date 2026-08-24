@@ -5,37 +5,52 @@ For working on the code. Nothing here is needed to use the tool.
 ```bash
 git clone https://github.com/msareen/voice-notes-organizer.git
 cd voice-notes-organizer
-npm install
-npm link              # `vno` now runs your working copy from anywhere
-node bin/vno.js       # or just run it directly, without linking
+bun install
+bun link              # `vno` now runs your working copy from anywhere
+bun bin/vno.ts        # or just run it directly, without linking
+bun run typecheck     # tsc over all three projects; compiles nothing
 ```
 
 ## Layout
 
 ```
-bin/vno.js           command definitions and argument parsing (commander)
+bin/vno.ts           command definitions and argument parsing (commander)
 src/
+  types.ts           the domain types every layer shares (no imports, so the
+                      browser project can pull from it too)
   cli/               one module per command, plus the terminal prompt helpers
-    import.js  transcribe.js  cleanup.js  visualize.js  settings.js
-    setup.js   prompt.js  searchableCheckbox.js  progress.js
+    import.ts  transcribe.ts  cleanup.ts  visualize.ts  settings.ts
+    setup.ts   prompt.ts  searchableCheckbox.ts  progress.ts
   lib/               domain logic and OS access, shared by the CLI and the UI
-    config.js  notes.js  sync.js  media.js  vtt.js  themes.js
-    volumes.js  whisper.js  whispercpp.js  setup.js  open.js  ledger.js
-    special-case-handling.js
+    config.ts  notes.ts  sync.ts  media.ts  vtt.ts  themes.ts
+    volumes.ts  whisper.ts  whispercpp.ts  setup.ts  open.ts  ledger.ts
+    special-case-handling.ts
   web/               the browser UI behind `vno visualize`
     server/          HTTP server: session token, JSON API, SSE job stream
-      index.js       bootstraps http.Server, builds ctx, dispatches routes
-      context.js     the shared ctx: notes/config/job state + helpers
-      assets.js  media.js  events.js
+      index.ts       bootstraps http.Server, builds ctx, dispatches routes
+      context.ts     the shared ctx: notes/config/job state + helpers
+      assets.ts  media.ts  events.ts
       routes/        one module per route group (state, settings, notes,
                       transcribe, import, cleanup)
-    page.js          the HTML shell, and nothing else
-    assets/          app.css and app.js (the client entry), plus:
-      js/            state.js  dom.js  api.js  format.js  widgets.js
-                      list.js  deck.js  jobs.js  actions.js  deps.js  models.js
-                      search.js  divider.js  dragdrop.js  theme.js  icons.js
-      js/panels/     settings.js  import.js  transcribe.js  cleanup.js
+    page.ts          the HTML shell, and nothing else
+    assets/          app.css and app.ts (the client entry), plus:
+      js/            state.ts  dom.ts  api.ts  format.ts  widgets.ts
+                      list.ts  deck.ts  jobs.ts  actions.ts  deps.ts  models.ts
+                      search.ts  divider.ts  dragdrop.ts  theme.ts  icons.ts
+      js/panels/     settings.ts  import.ts  transcribe.ts  cleanup.ts
+      sw.ts          the service worker (its own TS project - see below)
 ```
+
+The `js/` folder keeps its name even though it holds TypeScript: it's part of
+every client import specifier and of the URLs the browser fetches, so renaming
+it would be churn with nothing behind it.
+
+**Three TypeScript projects, not one**, because they run in three different
+places and must not see each other's globals: `tsconfig.json` covers the CLI
+and server (Bun globals, no DOM), `src/web/assets/tsconfig.json` covers the
+browser modules (DOM, no Bun), and `src/web/assets/tsconfig.sw.json` covers
+the service worker (WebWorker, neither). `bun run typecheck` runs all three.
+They share `tsconfig.base.json`.
 
 **Dependencies run one way:** `bin/` → `cli/` → `lib/`, with `web/` reaching
 into `lib/` alongside `cli/`. Nothing in `lib/` imports from `cli/` or `web/`,
@@ -43,61 +58,75 @@ so anything there is safe to reuse from either side.
 
 | Module | Responsibility |
 | --- | --- |
-| `lib/config.js` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
-| `lib/volumes.js` | Per-OS removable-volume detection |
-| `lib/sync.js` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
-| `lib/whisper.js` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
-| `lib/whispercpp.js` | Installing whisper.cpp itself: `install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
-| `lib/setup.js` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
-| `lib/media.js` | ffprobe durations, filename date parsing, formatting |
-| `lib/vtt.js` | Parse and serialize WebVTT cues |
-| `lib/notes.js` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
-| `cli/progress.js` | The terminal progress bar every slow per-file loop draws through |
-| `lib/open.js` | Opening a folder / revealing a file, per OS — behind `vno explore`, the UI's Explore button and `/api/reveal` alike |
-| `lib/ledger.js` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
-| `lib/themes.js` | The UI's theme ids/labels, and `themeOf(config)`. Ids only — each palette lives in `assets/app.css` as a `[data-theme="id"]` block, so colours have one home. Here rather than in `web/` because `vno setting` offers the same list |
-| `lib/special-case-handling.js` | Recovering Samsung Voice Recorder `.m4a` files whose index was truncated by an interrupted copy — see [Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe-and-a-repairedm4a-appeared) |
+| `lib/config.ts` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
+| `lib/volumes.ts` | Per-OS removable-volume detection |
+| `lib/sync.ts` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
+| `lib/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
+| `lib/whispercpp.ts` | Installing whisper.cpp itself: `install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
+| `lib/setup.ts` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
+| `lib/media.ts` | ffprobe durations, filename date parsing, formatting |
+| `lib/vtt.ts` | Parse and serialize WebVTT cues |
+| `lib/notes.ts` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
+| `cli/progress.ts` | The terminal progress bar every slow per-file loop draws through |
+| `lib/open.ts` | Opening a folder / revealing a file, per OS — behind `vno explore`, the UI's Explore button and `/api/reveal` alike |
+| `lib/ledger.ts` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
+| `lib/themes.ts` | The UI's theme ids/labels, and `themeOf(config)`. Ids only — each palette lives in `assets/app.css` as a `[data-theme="id"]` block, so colours have one home. Here rather than in `web/` because `vno setting` offers the same list |
+| `lib/special-case-handling.ts` | Recovering Samsung Voice Recorder `.m4a` files whose index was truncated by an interrupted copy — see [Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe-and-a-repairedm4a-appeared) |
 
 ## There is no build step
 
-`assets/app.css`, `assets/app.js` and every module under `assets/js/` are read
+Not for the CLI — Bun runs the TypeScript sources directly, and the published
+package ships them as-is — and not for the UI either.
+
+`assets/app.css`, `assets/app.ts` and every module under `assets/js/` are read
 from disk on **each request**, so a browser reload is enough to see a UI edit
 — no restart. Changes to anything in `web/server/` or `lib/` do need a
 restart.
 
-The client is plain ES5-flavoured JavaScript loaded as native ES modules
-(`<script type="module">`) — no bundler, no framework and no dependencies,
-just the browser resolving `import`/`export` directly off disk. Keep it that
-way: a new client file just needs an `import` from whichever module uses it,
-and `server/assets.js` serves anything under `assets/` by extension, so no
-server change is needed either.
+The client modules are TypeScript, and `server/assets.ts` type-strips them per
+request with `Bun.Transpiler` on the way out. The transpiler *only* removes
+types: it rewrites no specifiers, so `import "./deck.ts"` survives verbatim and
+the browser comes straight back for that module. Browsers key off the
+`Content-Type`, not the extension, so a `.ts` URL served as `text/javascript`
+is exactly what a native ES module loader wants. There's still no bundler, no
+framework and no dependencies — just the browser resolving `import`/`export`
+one module at a time.
 
-The session token is the one thing not in the assets: `page.js` inlines it into
+Two consequences worth knowing. Cross-module *type* imports must be written
+`import type`, so they're erased rather than left pointing at a module the
+server doesn't serve. And a syntax error in a client module comes back as a
+500 naming the file, instead of a blank page and an opaque parse failure.
+
+Adding a client file needs no server change: an `import` from whichever module
+uses it is enough, and `server/assets.ts` serves anything under `assets/` by
+extension.
+
+The session token is the one thing not in the assets: `page.ts` inlines it into
 the HTML, so it never travels in an asset URL — which is also why the two asset
 routes sit *ahead* of the token gate. `/sw.js` (the service worker) follows the
 same reasoning and sits ahead of the gate too, but is served at the *root*
 path rather than under `/assets/` so its default scope is the whole origin.
 
 `/manifest.webmanifest` is also ahead of the gate but, unlike the assets, is
-generated per request (`page.js:renderManifest`) rather than read off disk -
+generated per request (`page.ts:renderManifest`) rather than read off disk -
 its `start_url` has to carry the current token, since an installed PWA's
 shortcut has no other way to get one; a static file could only ever bake in
 whatever token happened to exist when it was written. The token itself is
 persisted in `~/.vno/session-token` and reused across `vno v` launches
-(`lib/sessionToken.js`) rather than regenerated per run, so that embedded
+(`lib/sessionToken.ts`) rather than regenerated per run, so that embedded
 `start_url` keeps working indefinitely instead of dying the moment the
 server restarts. (An *already-installed* PWA shortcut won't pick up a
 manifest fix like this on its own - most browsers cache the manifest from
 install time - so reinstalling the PWA is what actually applies a
 `start_url` change to an existing install.)
 
-`cli/visualize.js:openViewer()` is what actually hands the URL to the OS once
-the server is up: it calls `lib/open.js:findInstalledPwaShortcut()` (Windows
+`cli/visualize.ts:openViewer()` is what actually hands the URL to the OS once
+the server is up: it calls `lib/open.ts:findInstalledPwaShortcut()` (Windows
 only, matching `vno://`'s own scope) to look for the app's Start Menu shortcut
 (named after the manifest's `name`, "Voice Notes.lnk" — Chrome/Edge create it
 verbatim on install) and opens that instead of the plain URL when it exists,
 so a person who's installed the PWA always lands in the standalone window
-rather than a browser tab. `bin/vno.js`'s `open-protocol` handler (the `vno://`
+rather than a browser tab. `bin/vno.ts`'s `open-protocol` handler (the `vno://`
 target) never calls `runVisualize` in its own process at all: that process is
 the one the OS launches for the protocol, so it's stuck with whatever console
 window that invocation creates. Instead it immediately re-spawns a second,
@@ -119,7 +148,7 @@ outright. See the [UI's security model](ui.md#security-model).
 | Route | Method | Purpose |
 | --- | --- | --- |
 | `/` | GET | The page. Token required as `?t=` |
-| `/assets/*` | GET | Static assets (app.css, app.js, assets/js/**). **Not** token-gated, by design |
+| `/assets/*` | GET | Static assets (app.css, app.ts, assets/js/**). **Not** token-gated, by design |
 | `/manifest.webmanifest` | GET | PWA manifest, generated per request so `start_url` carries the current token. **Not** token-gated itself |
 | `/sw.js` | GET | Service worker (installability + offline fallback page). **Not** token-gated |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
@@ -153,12 +182,12 @@ folder and rejects anything that escapes it.
 - **Notes are cached, twice.** The in-memory model is rebuilt only when
   something actually changes it, then broadcast over SSE. Within a rebuild,
   the slow part (an ffprobe per file for duration) is itself cached on disk
-  keyed by size+mtime (`lib/notesCache.js`), so only new or changed files pay
+  keyed by size+mtime (`lib/notesCache.ts`), so only new or changed files pay
   for it. Selecting a note in the browser triggers `POST /api/notes/refresh`,
   a one-file recheck that bypasses the cache, so a file changed outside vno
   doesn't show stale data until the next full rebuild.
 - **The filter box is a full-text search, and it reads the transcripts.**
-  `assets/js/search.js` matches a take's name, folder path and transcript text
+  `assets/js/search.ts` matches a take's name, folder path and transcript text
   as one string — normalised so every run of whitespace is a single space,
   because a timed transcript is joined cue by cue and a phrase said across a
   cue boundary is only contiguous after that. Those strings are built once per
@@ -177,16 +206,16 @@ folder and rejects anything that escapes it.
   defining the same dozen semantic custom properties (`--bg`, `--surface`,
   `--ink`, `--accent`, …); nothing below those blocks writes a literal colour,
   which is what lets a theme swap the whole page by rewriting
-  `document.documentElement.dataset.theme` (`assets/js/theme.js`). Two
+  `document.documentElement.dataset.theme` (`assets/js/theme.ts`). Two
   consequences worth keeping: the blocks are written as `[data-theme=…]`
   rather than `:root[data-theme=…]`, so the settings dialog can preview a
   theme by putting its id on a swatch element instead of duplicating hex
-  values in JS; and the saved theme is stamped into `<html>` by `page.js`,
+  values in JS; and the saved theme is stamped into `<html>` by `page.ts`,
   because a theme that only arrived with `/api/state` would paint the default
-  palette first and then visibly swap. `lib/themes.js` holds the ids (shared
+  palette first and then visibly swap. `lib/themes.ts` holds the ids (shared
   with `vno setting`) — never the colours.
 - **The Samsung `.m4a` repair is a catch-block feature, and it re-frames with
-  ffmpeg rather than a native decoder.** `lib/special-case-handling.js` handles
+  ffmpeg rather than a native decoder.** `lib/special-case-handling.ts` handles
   recordings whose `moov` was cut off mid-`stsz` by an interrupted copy. The
   audio is intact; only the frame boundaries are lost, and an AAC
   `raw_data_block` has no length field to scan for. The trick is that vno
@@ -207,16 +236,16 @@ folder and rejects anything that escapes it.
   library scanned before this existed has durations cached) — which is why the
   structural check hangs off `buildNote`, the one call every recording passes
   through, rather than off `getDurationSeconds`.
-- **Dependency probing never runs the thing it's checking for.** `lib/setup.js`
+- **Dependency probing never runs the thing it's checking for.** `lib/setup.ts`
   scans `PATH` for ffmpeg (honouring `PATHEXT`, and `lstat` so Windows App
-  Execution Aliases resolve); `lib/whispercpp.js:resolveBinary` checks the
+  Execution Aliases resolve); `lib/whispercpp.ts:resolveBinary` checks the
   vendored `whisper-cpp/bin/` in both install roots, then PATH. Both are
   directory scans, not executions, which is what makes the check affordable
   at the start of every command and on every `/api/state`, with nothing to
   memoise or invalidate — an install done in another terminal shows up on the
   next refresh. It's also the same resolution `spawn` will do, so it predicts
   the real outcome.
-- **`lib/setup.js` decides, `cli/setup.js` asks.** Detection and install
+- **`lib/setup.ts` decides, `cli/setup.ts` asks.** Detection and install
   recipes are pure lib code; every prompt and every "shall I run this?" lives
   in the CLI module, which is what keeps the browser path able to use the
   detection half. The page can't install anything, so it reports and points at
@@ -241,7 +270,7 @@ folder and rejects anything that escapes it.
   `loadDeletionMatcher` to avoid deleting a source file whose imported copy
   was deliberately removed from `target`). See
   [Import & sync → Source folders](import-and-sync.md#source-folders).
-- **The ledger must never be load-bearing.** `lib/ledger.js` swallows its own
+- **The ledger must never be load-bearing.** `lib/ledger.ts` swallows its own
   read *and* write failures: missing, corrupt and unreadable all resolve to
   "nothing is remembered", and a failed write can't turn a successful delete
   into an error. Suppression is folded into `resolveFlatDest` so it reuses the

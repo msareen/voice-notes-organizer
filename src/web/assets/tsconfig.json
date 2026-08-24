@@ -1,0 +1,15 @@
+{
+  // The browser modules. These are transpiled per request by
+  // web/server/assets.ts and never bundled, so this project exists purely to
+  // typecheck them. No "bun" in `types`: client code that reached for `process`
+  // or `Bun` would typecheck here and then fail in the browser.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  // sw.ts is excluded: it runs in a ServiceWorkerGlobalScope and has its own
+  // project (tsconfig.sw.json) with the WebWorker lib instead of DOM.
+  "include": ["**/*.ts"],
+  "exclude": ["sw.ts"]
+}

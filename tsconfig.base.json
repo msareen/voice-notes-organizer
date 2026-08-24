@@ -1,0 +1,34 @@
+{
+  // Shared compiler options. Two projects extend this: the root tsconfig.json
+  // (CLI + server, Node/Bun globals, no DOM) and src/web/assets/tsconfig.json
+  // (browser modules, DOM globals, no Bun). Keeping them apart is what stops
+  // server code from reaching for `document` and client code from reaching for
+  // `process` and having it typecheck.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+
+    // Nothing is ever compiled: Bun runs the .ts sources directly and the
+    // browser modules are transpiled per request. tsc is only ever a checker,
+    // which is why importing a ".ts" specifier has to be legal.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+
+    // Deliberately off: on this codebase's array indexing and regex-match
+    // handling it forces hundreds of non-null assertions that document nothing
+    // and buy no real safety.
+    "noUncheckedIndexedAccess": false,
+    "noPropertyAccessFromIndexSignature": false,
+
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  }
+}

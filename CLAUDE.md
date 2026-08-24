@@ -187,7 +187,10 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
   ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
   `setup.js` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.js`
   (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
-  model resolution/download/validation), `themes.js` (the UI theme ids +
+  model resolution/download/validation; models come from Hugging Face with an
+  hf-mirror.com fallback and a `VNO_MODEL_BASE` override — note the HF repo is
+  still under `ggerganov` even though the GitHub org moved to `ggml-org`, so the
+  two URLs deliberately disagree), `themes.js` (the UI theme ids +
   `themeOf()` — ids only, never colours), `languages.js` (the whisper
   language vocabulary + `normalizeLanguageMap()`, shared by both settings
   surfaces for the same reason `themes.js` is) and `whisper.js` (resolving the installed

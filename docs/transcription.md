@@ -42,6 +42,26 @@ doing nothing while it downloads — that's expected. See [Installing
 whisper.cpp](#installing-whispercpp) for exactly where they live and how to
 pre-fetch or inspect them with `vno setup --list-models`.
 
+### Where models come from
+
+Hugging Face (`huggingface.co/ggerganov/whisper.cpp`) is the canonical source —
+it's what whisper.cpp's own download script uses. If it can't be reached, vno
+falls through to `hf-mirror.com`, a community mirror serving byte-identical
+files, so a blocked or throttled Hugging Face doesn't stop a download. A
+partially-downloaded file carries over to the fallback rather than restarting,
+which matters when a multi-gigabyte model fails near the end.
+
+Behind an internal mirror, or working offline from a pre-seeded copy? Set
+`VNO_MODEL_BASE` to a base URL and it replaces both sources:
+
+```bash
+VNO_MODEL_BASE=https://mirror.example.com/whisper vno setup --model small
+```
+
+vno expects to find `ggml-<name>.bin` directly under that URL — the same layout
+Hugging Face uses. If every source fails, the error lists what each one said,
+rather than reporting only the last failure.
+
 ## Getting the language right
 
 whisper.cpp auto-detects the spoken language per file, from the first 30

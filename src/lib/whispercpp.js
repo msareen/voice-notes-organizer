@@ -757,7 +757,34 @@ async function ensureGitignoreEntry(mode) {
 // Model resolution & download
 // ---------------------------------------------------------------------------
 
-const HUGGINGFACE_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+// Where ggml models come from, tried in order. Hugging Face is the canonical
+// home - whisper.cpp's own download-ggml-model.sh hardcodes it, and the old
+// ggml.ggerganov.com mirror it used to fall back to is gone (404s now), so
+// there is no official second source to point at. hf-mirror.com is a
+// community mirror with an identical path layout, which is what makes it a
+// usable fallback for networks where huggingface.co is blocked or throttled
+// rather than a different artifact entirely.
+//
+// Note the org mismatch is deliberate: the code moved to the ggml-org GitHub
+// org, but the *models* still live under `ggerganov` on Hugging Face
+// (huggingface.co/ggml-org/whisper.cpp 401s). Don't "fix" this to match
+// GITHUB_REPO above.
+const MODEL_SOURCES = [
+  { label: "Hugging Face", base: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main" },
+  { label: "hf-mirror.com", base: "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main" },
+];
+
+/**
+ * `VNO_MODEL_BASE` overrides the list entirely with a single base URL, for an
+ * internal mirror or an air-gapped copy. It's an env var rather than a config
+ * key because the people who need it are usually setting it machine-wide for
+ * every tool, not just this one.
+ */
+function modelSources() {
+  const override = process.env.VNO_MODEL_BASE?.trim();
+  if (override) return [{ label: override, base: override.replace(/\/+$/, "") }];
+  return MODEL_SOURCES;
+}
 
 // Friendly names this project already uses (matching the model picker in
 // cli/transcribe.js and server.js's MODELS list), plus their ggml filenames.
@@ -903,22 +930,47 @@ export async function downloadModel(name, { mode = "local", onProgress = null, o
   const root = resolveInstallRoot(mode);
   const { modelsDir } = installPaths(root);
   const destPath = path.join(modelsDir, modelFileName(stem));
-  const url = `${HUGGINGFACE_BASE}/${modelFileName(stem)}`;
+  const sources = modelSources();
+  const failures = [];
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    onLog(`Downloading ${modelFileName(stem)}${attempt > 1 ? " (retry)" : ""} from ${url}...`);
-    await downloadFile(url, destPath, { onProgress });
-    const result = await validateModelFile(destPath, stem);
-    if (result.valid) {
-      const manifest = (await readManifest(root)) || {};
-      manifest.models = { ...manifest.models, [stem]: destPath };
-      await writeManifest(root, manifest);
-      return destPath;
+  for (const source of sources) {
+    const url = `${source.base}/${modelFileName(stem)}`;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      onLog(`Downloading ${modelFileName(stem)}${attempt > 1 ? " (retry)" : ""} from ${source.label}...`);
+      try {
+        await downloadFile(url, destPath, { onProgress });
+      } catch (err) {
+        // A transport failure (blocked, DNS, 403, connection reset) won't fix
+        // itself on a second identical request, so move to the next mirror
+        // rather than spending another timeout here. The partial `.part` file
+        // is deliberately left in place: the mirrors serve byte-identical
+        // files, so the next source resumes instead of restarting a download
+        // that may already be gigabytes in.
+        failures.push(`${source.label}: ${err.message}`);
+        break;
+      }
+
+      const result = await validateModelFile(destPath, stem);
+      if (result.valid) {
+        const manifest = (await readManifest(root)) || {};
+        manifest.models = { ...manifest.models, [stem]: destPath };
+        await writeManifest(root, manifest);
+        return destPath;
+      }
+
+      onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
+      await fs.remove(destPath);
+      await fs.remove(`${destPath}.part`).catch(() => {});
+      if (attempt === 2) failures.push(`${source.label}: failed validation twice (${result.reason})`);
     }
-    onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
-    await fs.remove(destPath);
   }
-  throw new Error(`${modelFileName(stem)} failed validation twice in a row - giving up. Try again later, or check ${url} in a browser.`);
+
+  throw new Error(
+    `Could not download ${modelFileName(stem)} from any source.\n` +
+      failures.map((f) => `  - ${f}`).join("\n") +
+      `\nTry again later, or set VNO_MODEL_BASE to a mirror you can reach.`
+  );
 }
 
 /** The model names this project ensures are present unless told otherwise. */

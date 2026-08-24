@@ -131,6 +131,7 @@ whisper.cpp by hand instead of letting `vno setup` do it:
 | --- | --- | --- |
 | `vno` | `vno import` | Detect your recorder, import anything new, open the UI |
 | `vno transcribe` | `vno t`, `vno --t` | Pick recordings and transcribe (or translate) them |
+| `vno transcribe <file>` | `vno t <file>` | Transcribe one file directly — no picker, no prompts |
 | `vno visualize` | `vno v`, `vno viz`, `vno vis`, `vno --v` | Open the browser UI |
 | `vno cleanup` | — | Delete recordings shorter than 3 seconds, after confirming |
 | `vno cleanup -f <files>` | — | Delete named recordings and their transcripts |
@@ -152,6 +153,15 @@ A few things worth knowing up front:
 - **Transcribe has a searchable picker.** Just start typing to filter; `Space`
   to toggle, `Ctrl+A` for all, `Enter` to go. One `.vtt` is written next to
   each audio file.
+- **Or name a file and skip all of it.** No picker, no model prompt, and the
+  file doesn't have to live in your target folder — so it works on any audio
+  lying around, not just what you've imported.
+
+  ```bash
+  vno t interview.mp3                  # transcript lands next to the audio
+  vno t interview.mp3 -o notes.vtt     # ...or wherever you point -o
+  vno t interview.mp3 -m small         # pick the model for this run only
+  ```
 - **Nothing deletes without asking.** Only `cleanup` and the UI's delete
   buttons remove files, always behind a confirmation. Import and transcribe
   never delete anything.

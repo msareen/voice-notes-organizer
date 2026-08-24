@@ -34,12 +34,41 @@ if (SHORTCUTS[process.argv[2]]) {
   process.argv[2] = SHORTCUTS[process.argv[2]];
 }
 
+/**
+ * Commander's generated help lists every flag but never shows what an actual
+ * invocation looks like, which is the part people are missing when they reach
+ * for `--help`. It matters most for `transcribe`, where one command covers two
+ * quite different modes (pick from a list, or name a single file) that the
+ * flag list alone doesn't distinguish.
+ *
+ * Pads before colouring, since chalk's escape codes would otherwise count
+ * toward the column width and misalign everything.
+ */
+function examples(rows, { heading = "Examples" } = {}) {
+  const width = Math.max(...rows.map(([command]) => command.length)) + 2;
+  const body = rows
+    .map(([command, note]) => `  ${command.padEnd(width)}${chalk.dim(note)}`)
+    .join("\n");
+  return `\n${heading}:\n${body}\n`;
+}
+
 program
   .name("vno")
   .description(
     "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards."
   )
-  .option("-v, --version", "output the version number");
+  .option("-v, --version", "output the version number")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno", "import from a connected recorder, then open the UI"],
+      ["vno v", "just open the UI"],
+      ["vno t", "pick recordings from a list and transcribe them"],
+      ["vno t interview.mp3", "transcribe one file directly"],
+      ["vno setup", "check ffmpeg + whisper.cpp, install what's missing"],
+      ["vno cleanup --dry-run", "list the very short recordings, delete nothing"],
+    ]) + chalk.dim("\nRun `vno help <command>` for the detail on any one of these.\n")
+  );
 
 // Not `.version()`'s built-in handler: that prints and exits with no room for
 // the hint below, and `-v` is the flag people are most likely to reach for
@@ -54,6 +83,18 @@ program
   .command("import", { isDefault: true })
   .description("Detect connected volumes and import voice notes (default command)")
   .option("--no-open", "don't open the target folder(s) and index.html when the run finishes")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno", "same as `vno import` - this is the default command"],
+      ["vno import --no-open", "import, but don't open the UI afterwards"],
+    ]) +
+      chalk.dim(
+        "\nThe first time a volume appears you're asked whether to import it and\n" +
+          "whether to pin a subfolder; after that it runs silently. Files land flat,\n" +
+          "one folder per device, and re-running never copies the same file twice.\n"
+      )
+  )
   .action(async (opts) => {
     await runImport({ open: opts.open });
   });
@@ -81,6 +122,31 @@ program
     "write the transcript to this path instead of next to the source file (only with a direct file argument)"
   )
   .option("--no-open", "don't open the target folder(s) and index.html when the run finishes")
+  .addHelpText(
+    "after",
+    chalk.dim(
+      "\nTwo modes:\n" +
+        "  With no [file], this opens a searchable picker over everything not yet\n" +
+        "  transcribed - type to filter, Space toggles, Ctrl+A selects all, Enter runs.\n" +
+        "  Naming a [file] skips all of that and transcribes exactly that one, using\n" +
+        "  your default model. That file doesn't have to live in your target folder,\n" +
+        "  so it works on any audio lying around.\n"
+    ) +
+      examples([
+        ["vno t", "open the picker"],
+        ["vno t 250810_1328", "one imported recording, matched by name"],
+        ["vno t ~/Desktop/interview.mp3", "...or any audio file, anywhere"],
+        ["vno t interview.mp3 -o notes.vtt", "put the transcript somewhere specific"],
+        ["vno t interview.mp3 -m small", "use a different model for this run"],
+        ["vno t --translate", "translate to English instead of verbatim"],
+        ["vno t -s \"Feb 2023\"", "pre-filter the picker by name or date"],
+        ["vno t -f", "pick from every file, including already-done ones"],
+      ]) +
+      chalk.dim(
+        "\nTranscripts are .vtt files written next to the audio unless -o says otherwise.\n" +
+          "A name can be a full filename, just the stem, or any unique fragment of one.\n"
+      )
+  )
   .action(async (file, opts) => {
     await runTranscribe({
       model: opts.model,
@@ -110,6 +176,22 @@ program
     "also offer the damaged pre-repair originals (*.original.m4a) kept beside repaired Samsung recordings"
   )
   .option("--dry-run", "list what would be deleted without deleting anything")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno cleanup --dry-run", "list what would go, delete nothing"],
+      ["vno cleanup", "find recordings under 3s and confirm before deleting"],
+      ["vno cleanup -t 5", "use a 5-second threshold instead"],
+      ["vno cleanup -f 250810_1328", "delete named recordings, no duration scan"],
+      ["vno cleanup --originals", "also offer the *.original.m4a repair backups"],
+      ["vno cleanup ledger", "forget what was deleted, so it can import again"],
+    ]) +
+      chalk.dim(
+        "\nEvery form confirms first, and the confirmation defaults to no. Deleting a\n" +
+          "recording removes its .vtt transcript too. `ledger` touches no recordings at\n" +
+          "all - it only clears vno's memory of what you deleted.\n"
+      )
+  )
   .action(async (what, opts) => {
     if (what === "ledger") {
       await runLedgerCleanup();
@@ -140,6 +222,20 @@ program
     String(DEFAULT_PORT)
   )
   .option("--no-open", "start the server without opening a browser")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno v", "open the UI (viz / vis / --v all work too)"],
+      ["vno v --no-open", "start the server without opening a browser"],
+      ["vno v -p 0", "pick any free port instead of the fixed one"],
+    ]) +
+      chalk.dim(
+        `\nThe port is fixed at ${DEFAULT_PORT} so bookmarks and an installed app keep working.\n` +
+          "If another vno v already holds it, this opens a tab to that one rather than\n" +
+          "starting a second server. The command blocks until you close the tab, press\n" +
+          "the page's Quit button, or hit Ctrl+C.\n"
+      )
+  )
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
     await runVisualize({ open: opts.open, port: Number.isNaN(port) ? DEFAULT_PORT : port });
@@ -183,6 +279,17 @@ program
     "reveal this recording (name, relative path, or absolute path) instead of just opening the target folder"
   )
   .description("Open the target folder in your file manager, or reveal one recording in it (alias: open)")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno explore", "open the target folder"],
+      ["vno open 250810_1328", "open the folder that recording lives in"],
+    ]) +
+      chalk.dim(
+        "\nThe path is printed before the window opens, so you still have something to\n" +
+          "copy if no file manager is available.\n"
+      )
+  )
   .action(async (file) => {
     await runExplore({ file: file || null });
   });
@@ -208,6 +315,22 @@ program
   .option("--global", "install whisper.cpp under the user's home directory, without asking")
   .option("--model <name>", "fetch just this model instead of the defaults")
   .option("--list-models", "print the model inventory and exit; installs nothing")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno setup", "check, and offer to install anything missing"],
+      ["vno setup --check", "report only - installs and downloads nothing"],
+      ["vno setup --global", "put whisper.cpp under your home dir, not beside vno"],
+      ["vno setup --model small", "fetch one model instead of the default set"],
+      ["vno setup --list-models", "show which models are already on disk"],
+    ]) +
+      chalk.dim(
+        "\nNothing installs without you confirming it. This same check runs by itself\n" +
+          "before transcribe, cleanup's duration scan and an auto-translating import, so\n" +
+          "a missing tool surfaces as an offer rather than a failure part-way through.\n" +
+          "Re-run it after adding a GPU or changing drivers to pick up a better backend.\n"
+      )
+  )
   .action(async (opts) => {
     await runSetup({
       check: Boolean(opts.check),

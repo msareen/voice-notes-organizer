@@ -3,7 +3,7 @@
 import { state } from "../state.ts";
 import { api, toast } from "../api.ts";
 import { modal, selectField, pickList, checkbox } from "../widgets.ts";
-import { modelOptions } from "../models.ts";
+import { modelOptions, languageOptions } from "../models.ts";
 import { missingDeps } from "../deps.ts";
 import type { Note } from "../../../../types.ts";
 import type { PickHandle } from "../widgets.ts";
@@ -20,6 +20,7 @@ export function openTranscribe(onlyRel: string | null): void {
 
   var picks: PickHandle;
   var modelSel: HTMLSelectElement;
+  var languageSel: HTMLSelectElement | null;
   var translateChk: HTMLInputElement;
   modal({
     title: onlyRel ? "Transcribe this take" : "Transcribe",
@@ -38,15 +39,23 @@ export function openTranscribe(onlyRel: string | null): void {
       modelSel = selectField(host, "Whisper model",
         modelOptions(),
         state.CONFIG.defaultModel);
+      // Only for a single take: re-running one recording is exactly when a
+      // one-off pin makes sense (auto-detect got it wrong, or Settings'
+      // pin/cross-language plan doesn't apply here) - batch runs keep using
+      // Settings' language plan for every file, same as before.
+      languageSel = onlyRel
+        ? selectField(host, "Language", [{ label: "Auto-detect", value: "auto" }].concat(languageOptions()),
+            state.CONFIG.transcribeLanguage || "auto")
+        : null;
       translateChk = checkbox(host, "Translate to English instead of a verbatim transcript", false);
     },
     onConfirm: function () {
       var rels = picks.selected();
       if (!rels.length) throw new Error("Nothing selected");
-      return api("/api/transcribe", {
-        method: "POST",
-        body: { rels: rels, model: modelSel.value, translate: translateChk.checked }
-      }).then(function () { toast("Started on " + rels.length + " file(s)"); });
+      var body: Record<string, unknown> = { rels: rels, model: modelSel.value, translate: translateChk.checked };
+      if (languageSel) body.language = languageSel.value;
+      return api("/api/transcribe", { method: "POST", body: body })
+        .then(function () { toast("Started on " + rels.length + " file(s)"); });
     }
   });
 }

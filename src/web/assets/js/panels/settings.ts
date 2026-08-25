@@ -2,8 +2,8 @@
 // the source-folders editor (including its own server-side folder browser).
 import { state } from "../state.ts";
 import { api, toast } from "../api.ts";
-import { button, modal, selectField, helpToggle } from "../widgets.ts";
-import { modelOptions } from "../models.ts";
+import { button, modal, selectField, textareaField, helpToggle } from "../widgets.ts";
+import { modelOptions, languageOptions } from "../models.ts";
 import { applyTheme, currentTheme } from "../theme.ts";
 import type { Source, StateConfig, ThemeId } from "../../../../types.ts";
 import type { Option } from "../models.ts";
@@ -30,6 +30,7 @@ interface SettingsPatch {
   rememberDeletions: boolean;
   useGpu?: boolean;
   summaryModel?: string | null;
+  summaryPrompt?: string | null;
 }
 
 /** One level of the unconfined filesystem browser (GET /api/browse-fs). */
@@ -46,13 +47,6 @@ interface TargetLevel {
   current: string;
   sub: string;
   folders: string[];
-}
-
-// state.LANGUAGES is lib/languages.ts's list, sent whole by /api/state:
-// [{ code, label }]. "auto" isn't in it - it isn't a language, it's the
-// absence of a pin - so the pin menu prepends it.
-function languageOptions(): Option[] {
-  return state.LANGUAGES.map(function (l) { return { label: l.label, value: l.code }; });
 }
 
 function languageLabel(code: string): string {
@@ -72,6 +66,7 @@ export function openSettings(): void {
     crossToSel: HTMLSelectElement,
     crossAddBtn: HTMLButtonElement;
   var summaryModelSel: HTMLSelectElement | null;
+  var summaryPromptTa: HTMLTextAreaElement | null;
   var crossMap: Record<string, string> = {};
   var sourceRows: SourceRow[] = [];
   // Theme is previewed live on the whole page, so the panel has to remember
@@ -145,25 +140,6 @@ export function openSettings(): void {
         transcriptionCol.appendChild(gh);
       }
 
-      // Optional feature - hidden behind its own availability check rather
-      // than erroring, same treatment as the GPU field above when the engine
-      // isn't there at all. See lib/llamacpp.ts.
-      var summarization = state.SUMMARIZATION;
-      summaryModelSel = null;
-      if (summarization && summarization.available) {
-        summaryModelSel = selectField(transcriptionCol, "Summarization model", [
-          { label: "None", value: "" }
-        ].concat(summarization.models.map(function (m) { return { label: m, value: m }; })),
-          CONFIG.summaryModel || "",
-          "Used by the deck's Summarize button (optional) and \`vno summarize\`. Drop more .gguf files " +
-          "into the llama.cpp models folder, or run \`vno setup --summary-model <name>\`, to add more choices here.");
-      } else {
-        var sh = document.createElement("p");
-        sh.className = "hint";
-        sh.textContent = "Summarization: optional, not set up - run \"vno setup --llama\" in a terminal to add it.";
-        transcriptionCol.appendChild(sh);
-      }
-
       var importCol = document.createElement("div");
       importCol.className = "settings-col";
       var ih = document.createElement("h4");
@@ -197,6 +173,41 @@ export function openSettings(): void {
       ], String(CONFIG.rememberDeletions !== false),
         "Deletes made here and by cleanup are logged, so importing again won't copy them back. " +
         "\"vno cleanup ledger\" forgets them.");
+
+      // Summarization. Its own full-width section rather than a field in the
+      // Transcription column - the prompt override needs room a half-width
+      // column doesn't have. Optional feature, hidden behind its own
+      // availability check the same way the GPU field above is when the
+      // engine isn't there at all. See lib/llamacpp.ts.
+      var summarySection = document.createElement("div");
+      summarySection.className = "settings-full";
+      host.appendChild(summarySection);
+
+      var sumLabel = document.createElement("h4");
+      sumLabel.textContent = "Summarization";
+      summarySection.appendChild(sumLabel);
+
+      var summarization = state.SUMMARIZATION;
+      summaryModelSel = null;
+      summaryPromptTa = null;
+      if (summarization && summarization.available) {
+        summaryModelSel = selectField(summarySection, "Default model", [
+          { label: "None", value: "" }
+        ].concat(summarization.models.map(function (m) { return { label: m, value: m }; })),
+          CONFIG.summaryModel || "",
+          "Used by the deck's Summarize button (optional) and \`vno summarize\`. Drop more .gguf files " +
+          "into the llama.cpp models folder, or run \`vno setup --summary-model <name>\`, to add more choices here.");
+
+        summaryPromptTa = textareaField(summarySection, "Override prompt", CONFIG.summaryPrompt || "",
+          summarization.defaultPrompt,
+          "Replaces the instruction sent to the model before each transcript. Leave blank to use the " +
+          "default shown as placeholder above. Whitespace-only input is treated the same as blank.");
+      } else {
+        var sh = document.createElement("p");
+        sh.className = "hint";
+        sh.textContent = "Summarization: optional, not set up - run \"vno setup --llama\" in a terminal to add it.";
+        summarySection.appendChild(sh);
+      }
 
       // Cross-language detection. A full-width row rather than a field in the
       // Transcription column: three dropdowns and a button don't fit in half
@@ -434,6 +445,7 @@ export function openSettings(): void {
       };
       if (gpuSel) patch.useGpu = gpuSel.value === "true";
       if (summaryModelSel) patch.summaryModel = summaryModelSel.value || null;
+      if (summaryPromptTa) patch.summaryPrompt = summaryPromptTa.value.trim() || null;
       var sources = sourceRows
         .map(function (r) {
           return {

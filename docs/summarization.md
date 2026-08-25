@@ -1,10 +1,14 @@
 # Summarization (optional)
 
 Summarization is [llama.cpp](https://github.com/ggml-org/llama.cpp), running
-**locally** the same way transcription does — a vendored binary, no Python, no
-account, no upload. Unlike whisper.cpp, it's **entirely optional**: nothing in
-vno requires it, and the app behaves exactly as it always did if you never set
-it up.
+**locally** the same way transcription does — no Python, no account, no
+upload. Unlike whisper.cpp, it's **entirely optional**: nothing in vno
+requires it, and the app behaves exactly as it always did if you never set it
+up.
+
+Unlike whisper.cpp, vno doesn't install or manage the binary itself — the OS
+package manager does, and you manage your own model files. This keeps the
+whole thing bare and easy to reason about.
 
 ## Installing llama.cpp
 
@@ -13,69 +17,63 @@ vno setup --llama
 ```
 
 `vno setup` on its own asks too — once, only if llama.cpp isn't installed yet
-— right after it finishes with ffmpeg/whisper.cpp:
+— right after it finishes with ffmpeg/whisper.cpp. Say no and nothing
+installs; you're asked again the next time you run `vno setup` with it still
+missing. `--llama` skips straight past the question.
 
-```
-? Set up llama.cpp for optional transcript summarization? (Use arrow keys)
-  Yes, set it up now
-❯ Not now
-```
+| Platform | How |
+| --- | --- |
+| macOS | `brew install llama.cpp` (Metal-accelerated automatically on Apple silicon) |
+| Windows | `winget install --id ggml.llamacpp` |
+| Linux | Not automated — install it yourself (your distro's package manager, or build from source), then either open a new terminal or give `vno setup --llama` the binary's path |
 
-Say no and nothing installs; you're asked again the next time you run
-`vno setup` with it still missing. `--llama` skips straight past the question.
-Either way, installing the binary walks you through picking a summarization
-model next — a short list of curated models to download, or a `.gguf` file
-you already have. Nothing downloads without that explicit choice.
+If the install succeeds but the binary isn't visible on this shell's PATH yet
+(common right after a fresh `winget install`), `vno setup --llama` asks for
+the path directly and remembers it in config (`llamaCliPath`) rather than
+re-probing PATH forever — open a new terminal first if you'd rather it find
+the binary itself.
 
-| Platform | How | Accelerator |
-| --- | --- | --- |
-| macOS | `brew install llama.cpp` | Metal, automatically, on Apple silicon |
-| Windows | A prebuilt release zip, CUDA build matched to your driver if you have an NVIDIA GPU | CUDA (NVIDIA), or a CPU build otherwise |
-| Linux | A prebuilt CPU binary, or built from source with `cmake` if you have an NVIDIA GPU | CUDA if `nvidia-smi` finds a card, else CPU |
+## Bring your own model
 
-By default it installs **locally**, alongside this install of vno, under
-`llama-cpp/` — the same construct as whisper.cpp's `whisper-cpp/`, just its
-own root and its own `vno-install.json` (the file's `description` field says
-what it's for, so the two are easy to tell apart if you ever open one).
-`--global` puts it under your home directory instead. The layout:
+vno never downloads a summarization model for you. `vno setup --llama` asks
+whether your models should live locally (beside this vno install) or
+globally (under your home directory), creates that folder, and prints its
+path:
 
 ```
 llama-cpp/
-├── bin/          # the llama.cpp binary (+ its .dll/.so files, when vendored)
-├── models/       # .gguf model files
-└── vno-install.json  # what setup found or built: version, platform, binary path, accelerator, models
+└── models/       # drop your .gguf file(s) in here
 ```
 
-**Bring your own model.** Drop any `.gguf` file into `llama-cpp/models/`
-(local or global root) and it's discovered automatically — `vno setup
---list-models` shows it alongside the curated ones, validated the same way
-(magic bytes, and a size check for the curated aliases only). There's no
-catalog you're limited to.
+Drop any `.gguf` file into that folder (or point the `VNO_LLAMA_MODEL_PATH`
+env var at one) and it's discovered automatically — `vno setup --list-models`
+shows it, validated only for readability and the GGUF magic bytes (no
+catalog, no checksum — it's your file). Get one from wherever you like, e.g.
+[Hugging Face's GGUF models](https://huggingface.co/models?library=gguf) —
+a small instruct model (2-5 GB, Q4_K_M quant) summarizes reasonably on CPU.
+Avoid "thinking"/reasoning variants — they write a long chain of thought to
+stdout before the actual answer, which doesn't fit a `.summary.txt` sidecar.
 
-Already have a llama.cpp binary from somewhere else? When `vno setup --llama`
-asks where it should come from, choose **"I already have it installed"** and
-give it a path. Nothing is copied.
-
-Re-run `vno setup --llama` any time to pick a different model, or fetch one
+Set your default with `vno setting` → *Summarization model* (only shown once
+at least one model is present) or the UI's Settings dialog, or point at one
 non-interactively:
 
 ```bash
-vno setup --summary-model phi4-mini
+vno setup --summary-model my-model-Q4_K_M.gguf
 ```
 
-Models are the one thing here that grows without bound — a couple of whisper
-models plus a summarization GGUF is comfortably 10 GB — so they can be
-deleted again:
+This only checks the file is there — it never downloads. Delete models you no
+longer want the same way as whisper's:
 
 ```bash
-vno setup --remove-model                       # picker over everything installed
-vno setup --remove-model gemma-4-E2B-it-Q4_K_M.gguf
+vno setup --remove-model                              # picker over everything installed
+vno setup --remove-model my-model-Q4_K_M.gguf
 ```
 
-Both whisper and summarization models show up in the picker with their sizes.
-Deletion is confirmed, defaults to *no*, and only touches models vno
-installed itself — see [the CLI reference](cli-reference.md#vno-setup-doctor).
-If you delete the model `summaryModel` points at, the setting is cleared.
+Both whisper and summarization models show up in the picker with their
+sizes. Deletion is confirmed, defaults to *no*, and only touches files inside
+vno's own local/global `models/` folders. If you delete the model
+`summaryModel` points at, the setting is cleared.
 
 `vno status` and plain `vno setup` show summarization as one informational
 line — never a blocker, since it's optional:
@@ -84,36 +82,12 @@ line — never a blocker, since it's optional:
   ? summarize    optional, not installed — run `vno setup --llama`
 ```
 
-## Choosing a model
+## Overriding the prompt
 
-`vno setup --llama` offers a short starting set — small instruct models that
-run reasonably on CPU:
-
-| Alias | Size (Q4_K_M) | Notes |
-| --- | --- | --- |
-| `phi4-mini` | ~2.5 GB | 131K context — the smallest of these, and a good default |
-| `gemma4-e2b` | ~3.1 GB | 131K context |
-| `gemma4-e4b` | ~5.0 GB | 131K context |
-| `qwen2.5-3b` | ~2.1 GB | |
-| `llama3.2-3b` | ~2.0 GB | |
-
-Summarizing a transcript leans on instruction-following and context length
-rather than raw parameter count, so the list is ordered smallest-first — the
-top entry is a fine place to start, and there's little reason to sit through a
-bigger download unless you've tried one and want better prose. Reasoning
-models (`Phi-4-mini-reasoning`, the Qwen3 `*-Thinking` builds, and friends)
-are deliberately not here: they write their chain of thought to stdout, which
-is the wrong shape for something saved straight into a `.summary.txt`.
-
-Each curated download is verified against a known SHA-256 (read straight off
-Hugging Face's own `X-Linked-ETag` header for that file, not guessed) rather
-than just a size check — a truncated or corrupted download is rejected and
-retried even if it happens to land close to the expected byte count.
-
-Set your default with `vno setting` → *Summarization model* (only shown once
-at least one model is installed) or the UI's Settings dialog. It's stored as
-[`summaryModel`](configuration.md#summarymodel). Override per run with
-`vno summarize -m <name>`.
+Settings' Summarization section has an *Override prompt* field — replaces the
+built-in instruction wholesale for every summary. Leave it blank to use the
+default (shown as the field's placeholder). Stored as
+[`summaryPrompt`](configuration.md#summaryprompt).
 
 ## Using it
 
@@ -127,7 +101,7 @@ a small explanation instead of erroring.
 
 ```bash
 vno summarize 250810_1328
-vno summarize interview.mp3 -m phi4-mini
+vno summarize interview.mp3 -m my-model-Q4_K_M.gguf
 ```
 
 The recording needs a transcript first (`vno t`) — summarization reads the
@@ -150,8 +124,6 @@ recording removes it along with the transcript.
 - **One recording at a time.** There's no batch/mass-summarize mode.
 - **Long transcripts are truncated** to fit the model's context window rather
   than summarized in chunks — a v1 limitation, not a bug.
-- The model runs against a fixed instruction ("summarize this transcript in a
-  few sentences") — there's no custom-prompt UI yet.
 
 ---
 

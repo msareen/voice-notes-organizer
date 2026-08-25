@@ -124,6 +124,13 @@ function defaultConfig(): Config {
     // llama.cpp are installed separately, so a machine can be accelerated for
     // one and not the other.
     llamaAccel: { backend: null, name: null, use: null, resolvedAt: null },
+    // Replaces lib/llama.ts's built-in summarization instruction wholesale
+    // when set. null (the default) means "use the built-in one" - Settings
+    // treats a whitespace-only value the same way rather than storing it.
+    summaryPrompt: null,
+    // Manual override for the llama.cpp binary's path - see the field comment
+    // on types.ts's Config. null means "trust PATH".
+    llamaCliPath: null,
   };
 }
 

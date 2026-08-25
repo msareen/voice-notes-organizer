@@ -15,6 +15,7 @@ interface SettingsBody {
   crossLanguageModel?: string | null;
   crossLanguageMap?: unknown;
   summaryModel?: string | null;
+  summaryPrompt?: string | null;
   theme?: string;
   openWhenDone?: unknown;
   rememberDeletions?: unknown;
@@ -50,6 +51,13 @@ export function createSettingsRoutes(ctx: ServerContext) {
     if ("summaryModel" in body) {
       const { models } = await ctx.summarizationStatus();
       config.summaryModel = body.summaryModel && models.includes(body.summaryModel) ? body.summaryModel : null;
+    }
+    // A whitespace-only override is silently treated as "not set" rather than
+    // rejected - it's what you get from typing then deleting, and storing it
+    // verbatim would prefix every summarization prompt with blank lines.
+    if ("summaryPrompt" in body) {
+      const trimmed = typeof body.summaryPrompt === "string" ? body.summaryPrompt.trim() : "";
+      config.summaryPrompt = trimmed || null;
     }
     if ("theme" in body && (THEME_IDS as readonly string[]).includes(body.theme!)) {
       config.theme = body.theme as ThemeId;

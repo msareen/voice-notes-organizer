@@ -211,7 +211,7 @@ no batch mode.
 
 ```bash
 vno summarize 250810_1328
-vno summarize interview.mp3 -m phi4-mini
+vno summarize interview.mp3 -m my-model-Q4_K_M.gguf
 ```
 
 | Flag | Effect |
@@ -435,8 +435,8 @@ vno setup --global        # install whisper.cpp under your home directory instea
 vno setup --model small   # fetch just this model instead of the defaults
 vno setup --list-models   # print the model inventory and exit; installs nothing
 vno setup --remove-model  # pick installed models to delete and reclaim the space
-vno setup --llama         # optional: install llama.cpp and pick a summarization model
-vno setup --llama --summary-model phi4-mini    # ...with a specific model, no prompts
+vno setup --llama         # optional: install llama.cpp (brew/winget) and show where models go
+vno setup --llama --summary-model my-model-Q4_K_M.gguf    # ...and set a specific model, no prompts
 ```
 
 | Flag | Effect |
@@ -447,17 +447,18 @@ vno setup --llama --summary-model phi4-mini    # ...with a specific model, no pr
 | `--model <name>` | Fetch just this model instead of the default set (`small` + `turbo`) |
 | `--list-models` | Print the model inventory (whisper **and** summarization) and exit |
 | `--remove-model [name]` | Delete installed models to reclaim disk space. **Bare**, opens a picker over everything installed; with a name, targets that one. Always confirmed, defaulting to *no* |
-| `--llama` | Install llama.cpp for transcript summarization (optional), then walk through picking a model. Re-run any time to pick a different one |
-| `--summary-model <name>` | Fetch this summarization model non-interactively, skipping the picker (implies `--llama` if the binary isn't installed yet) |
+| `--llama` | Install llama.cpp for transcript summarization (optional) via `brew`/`winget`, then show where to drop your `.gguf` model files. Re-run any time |
+| `--summary-model <name>` | Set this as the summarization model non-interactively — just confirms the file is already in your models folder, never downloads it |
 
-`--remove-model` only ever deletes models **vno installed itself**, under
-either install root's `models/`. One found through Homebrew's share directory
-or a `WHISPER_MODEL_PATH` / `VNO_LLAMA_MODEL_PATH` override belongs to
-whatever put it there — those are listed by `--list-models` but never offered
-for deletion. It needs a terminal to confirm in, so it refuses in a pipe or
-CI rather than deleting unprompted. If the model you delete is the one
-`summaryModel` names, that setting is cleared; if it's the one `defaultModel`
-names, you're told the next transcribe will offer to download it again.
+`--remove-model` only ever deletes model files sitting inside vno's own
+local/global `models/` folders (whisper's or llama's). One found through
+Homebrew's share directory or a `WHISPER_MODEL_PATH` / `VNO_LLAMA_MODEL_PATH`
+override belongs to whatever put it there — those are listed by
+`--list-models` but never offered for deletion. It needs a terminal to
+confirm in, so it refuses in a pipe or CI rather than deleting unprompted. If
+the model you delete is the one `summaryModel` names, that setting is
+cleared; if it's the one `defaultModel` names, you're told the next
+transcribe will offer to download it again.
 
 Plain `vno setup` (neither flag passed) still asks — once, and only if
 llama.cpp isn't installed yet — whether to set it up, right after the

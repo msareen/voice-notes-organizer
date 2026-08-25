@@ -11,6 +11,7 @@ import { renderList, markActive } from "./list.ts";
 import { markInto } from "./search.ts";
 import { revealFile } from "./actions.ts";
 import { openTranscribe } from "./panels/transcribe.ts";
+import { renderMarkdown } from "./markdown.ts";
 import type { Cue, Note } from "../../../types.ts";
 
 /**
@@ -404,10 +405,12 @@ function renderSummaryTab(host: TranscriptHost, note: Note): void {
   host.textContent = "";
   host._hlTargets = [];
   if (note.summary) {
-    var plain = document.createElement("div");
-    plain.className = "plain";
-    plain.textContent = note.summary;
-    host.appendChild(plain);
+    var rendered = document.createElement("div");
+    rendered.className = "summary-md";
+    // note.summary is the model's own output, never trusted markup -
+    // renderMarkdown escapes all text before composing any HTML around it.
+    rendered.innerHTML = renderMarkdown(note.summary);
+    host.appendChild(rendered);
     return;
   }
   var empty = document.createElement("div");

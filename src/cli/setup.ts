@@ -27,15 +27,17 @@ import {
   DEFAULT_MODELS,
 } from "../lib/whispercpp.ts";
 import {
-  installLlamaCpp,
-  registerExternalBinary as registerExternalLlamaBinary,
+  installMacBinary as installLlamaMacBinary,
+  installWindowsBinary as installLlamaWindowsBinary,
+  manualInstallHint as llamaManualInstallHint,
+  platformInstallDescription as platformLlamaInstallDescription,
   resolveBinary as resolveLlamaBinary,
+  isLlamaInstalled,
   resolveInstallRoot as resolveLlamaInstallRoot,
-  readManifest as readLlamaManifest,
+  installPaths as llamaInstallPaths,
+  bothInstallRoots as bothLlamaInstallRoots,
   resolveModel as resolveLlamaModel,
-  downloadModel as downloadLlamaModel,
   listModels as listLlamaModels,
-  listModelAliases,
   isManagedModel as isManagedLlamaModel,
   removeModel as removeLlamaModel,
 } from "../lib/llamacpp.ts";
@@ -298,48 +300,68 @@ async function registerExistingWhisper(mode: InstallMode): Promise<boolean> {
   }
 }
 
-/** What the "where should llama.cpp come from?" prompt can answer. */
-type LlamaChoice = InstallMode | "existing" | "skip";
-
 /**
  * llama.cpp's install, entirely optional and only ever run when explicitly
  * asked for (`vno setup --llama`) - never part of `ensureDependencies`'s
- * REQUIRED list. Mirrors `installWhisper`'s shape exactly (per-platform
- * acquisition, "local"/"global"/"existing"/"skip" prompt), with one addition:
- * a fresh install walks straight into `runLlamaModelWizard` afterward, since
- * a binary with no model isn't yet useful for anything.
+ * REQUIRED list. Unlike whisper.cpp, there's no vno-managed install
+ * location to choose: the OS package manager (`brew`/`winget`) installs it
+ * system-wide, so this just confirms, runs that one command, and falls back
+ * to asking for a path if the binary still isn't on PATH afterward (winget in
+ * particular often only updates PATH for a new shell).
  */
-async function installLlama(mode: InstallMode | null): Promise<boolean> {
+async function installLlama(): Promise<boolean> {
   if (!process.stdin.isTTY) {
     console.log(chalk.dim("\nllama.cpp isn't installed, and there's no terminal to ask how."));
     printManual("llama");
     return false;
   }
 
-  const choice: LlamaChoice = mode || (await promptLlamaChoice());
-  if (choice === "skip") {
+  const platform = os.platform();
+  if (platform !== "darwin" && platform !== "win32") {
+    console.log(chalk.dim(`\n${llamaManualInstallHint()}`));
+    return await promptLlamaPath();
+  }
+
+  console.log();
+  console.log(chalk.bold("Install llama.cpp?"));
+  console.log(chalk.dim(`  ${platformLlamaInstallDescription()}`));
+
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "choice",
+      message: "Run this now?",
+      choices: [
+        { name: "Yes, install it", value: "install" },
+        { name: "No, I already have it — let me give the path", value: "existing" },
+        { name: "Skip for now", value: "skip" },
+      ],
+      default: "install",
+    },
+  ]);
+  if (answer === CANCELLED || answer.choice === "skip") {
     console.log(chalk.dim("Skipped - llama.cpp is still missing. Summarization stays unavailable."));
     return false;
   }
-  if (choice === "existing") {
-    return registerExistingLlama(mode || "local");
+  if (answer.choice === "existing") {
+    return promptLlamaPath();
   }
 
-  const resolvedMode: InstallMode = choice; // "local" | "global"
-  const root = resolveLlamaInstallRoot(resolvedMode);
-  console.log();
-  console.log(chalk.bold(`Installing llama.cpp (${resolvedMode}, into ${root})`));
-  console.log(chalk.dim(`  ${platformLlamaInstallDescription()}`));
   console.log(chalk.dim("\nInstalling llama.cpp..."));
   try {
-    const manifest = await installLlamaCpp({
-      mode: resolvedMode,
-      onLog: (line) => console.log(chalk.dim(`  ${line}`)),
-      onStep: (step) => console.log(chalk.dim(`$ ${step.command} ${step.args.join(" ")}`)),
-      onProgress: progressPrinter(),
-    });
-    console.log(chalk.green(`\nllama.cpp is ready: ${manifest.binary?.path} (${manifest.accel?.backend}).`));
-    await runLlamaModelWizard(resolvedMode);
+    const resolved = platform === "darwin" ? await installLlamaMacBinary() : await installLlamaWindowsBinary();
+    if (!resolved) {
+      console.log(
+        chalk.yellow(
+          "\nInstalled, but it isn't on this shell's PATH yet. Open a new terminal and run `vno setup --llama` again, " +
+            "or give vno the path now."
+        )
+      );
+      return await promptLlamaPath();
+    }
+    console.log(chalk.green(`\nllama.cpp is ready: ${resolved}.`));
+    await setLlamaAccel(platform === "darwin" ? "metal" : "ask");
+    await runLlamaModelStep();
     return true;
   } catch (err) {
     console.log(chalk.red(`\nllama.cpp install failed: ${errorMessage(err)}`));
@@ -348,36 +370,46 @@ async function installLlama(mode: InstallMode | null): Promise<boolean> {
   }
 }
 
-/** Asks where llama.cpp should come from - install fresh, or point at one already on the machine. */
-async function promptLlamaChoice(): Promise<LlamaChoice> {
+/** Saves a manually-given llama.cpp binary path into config, replacing PATH lookup. */
+async function promptLlamaPath(): Promise<boolean> {
   const answer = await prompt([
-    {
-      type: "list",
-      name: "choice",
-      message: "llama.cpp isn't installed. What would you like to do?",
-      choices: [
-        { name: `Install it locally, beside this vno install (${resolveLlamaInstallRoot("local")})`, value: "local" },
-        { name: `Install it globally (${resolveLlamaInstallRoot("global")})`, value: "global" },
-        { name: "I already have it installed — let me give the path", value: "existing" },
-        { name: "Skip for now", value: "skip" },
-      ],
-      default: "local",
-    },
-  ]);
-  return answer === CANCELLED ? "skip" : (answer.choice as LlamaChoice);
-}
-
-/** Points vno at a llama.cpp binary the user already has, instead of installing one. */
-async function registerExistingLlama(mode: InstallMode): Promise<boolean> {
-  const answer = await prompt([
-    { type: "input", name: "path", message: "Path to your llama.cpp binary (or the folder containing it)" },
+    { type: "input", name: "path", message: "Path to your llama.cpp binary (llama-cli)" },
   ]);
   if (answer === CANCELLED || !answer.path?.trim()) {
     console.log(chalk.dim("Skipped - llama.cpp is still missing."));
     return false;
   }
+  const given = answer.path.trim();
+  if (!(await fs.pathExists(given))) {
+    console.log(chalk.red(`\n${given} doesn't exist.`));
+    return false;
+  }
 
-  const accelAnswer = await prompt([
+  const config = await loadConfig();
+  config.llamaCliPath = given;
+  await saveConfig(config);
+  console.log(chalk.green(`\nUsing ${given} for summarization.`));
+  await setLlamaAccel("ask");
+  await runLlamaModelStep();
+  return true;
+}
+
+/**
+ * Sets `config.llamaAccel.backend` right after an install - `"metal"` is a
+ * safe assumption for Homebrew's formula on Apple silicon (same as before),
+ * but a winget/manually-given binary's GPU support isn't knowable without
+ * asking, so `"ask"` reuses the same yes/no/unsure question the old
+ * "register an existing binary" flow used.
+ */
+async function setLlamaAccel(mode: "metal" | "ask"): Promise<void> {
+  const config = await loadConfig();
+  if (mode === "metal") {
+    config.llamaAccel = { ...llamaAccelState(config), backend: "metal", name: "Apple Metal", resolvedAt: new Date().toISOString() };
+    await saveConfig(config);
+    return;
+  }
+  if (!process.stdin.isTTY) return;
+  const answer = await prompt([
     {
       type: "list",
       name: "backend",
@@ -389,20 +421,14 @@ async function registerExistingLlama(mode: InstallMode): Promise<boolean> {
       default: "unknown",
     },
   ]);
-  const backend: AccelRecord["backend"] =
-    accelAnswer === CANCELLED ? "unknown" : (accelAnswer.backend as AccelBackend);
-
-  try {
-    const manifest = await registerExternalLlamaBinary(answer.path.trim(), { mode, backend });
-    console.log(chalk.green(`\nUsing your existing llama.cpp: ${manifest.binary?.path}.`));
-    // Someone pointing vno at a binary they already have presumably already
-    // has models to go with it too - the wizard is still one `vno setup --llama`
-    // away if they don't, rather than forced here.
-    return true;
-  } catch (err) {
-    console.log(chalk.red(`\nCouldn't use that: ${errorMessage(err)}`));
-    return false;
-  }
+  if (answer === CANCELLED) return;
+  config.llamaAccel = {
+    ...llamaAccelState(config),
+    backend: answer.backend as AccelBackend,
+    name: null,
+    resolvedAt: new Date().toISOString(),
+  };
+  await saveConfig(config);
 }
 
 /**
@@ -412,80 +438,57 @@ async function registerExistingLlama(mode: InstallMode): Promise<boolean> {
  * `vno setup --llama` even once the binary is already installed, so skipping
  * here isn't a dead end.
  */
-async function runLlamaModelWizard(mode: InstallMode): Promise<void> {
-  if (!process.stdin.isTTY) {
-    console.log(chalk.dim("\nNo terminal to ask which summarization model to use - skipping. Run `vno setup --summary-model <name>` later."));
+async function runLlamaModelStep(): Promise<void> {
+  const existing = (await listLlamaModels()).filter((m) => m.valid);
+  if (existing.length > 0) {
+    console.log(chalk.dim(`\nFound ${existing.length} model(s) already: ${existing.map((m) => m.filename).join(", ")}`));
+    console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
     return;
   }
 
-  const aliases = listModelAliases();
+  if (!process.stdin.isTTY) {
+    console.log(chalk.dim("\nNo terminal to ask where to put summarization models - skipping."));
+    return;
+  }
+
   const answer = await prompt([
     {
       type: "list",
-      name: "choice",
-      message: "Pick a summarization model to download, point at one you already have, or skip for now:",
+      name: "mode",
+      message: "Where should summarization models live? Drop your own .gguf file(s) in afterward - vno never downloads one for you.",
       choices: [
-        ...aliases.map((a) => ({
-          name: `${a.alias} — ${a.size ? `${(a.size / 1e9).toFixed(1)} GB` : "size unconfirmed"}${a.note ? `, ${a.note}` : ""}`,
-          value: a.alias,
-        })),
-        { name: "I already have a .gguf file — let me give the path", value: "existing" },
-        { name: "Skip for now — I'll add a model later", value: "skip" },
+        { name: `Locally, beside this vno install (${resolveLlamaInstallRoot("local")})`, value: "local" },
+        { name: `Globally (${resolveLlamaInstallRoot("global")})`, value: "global" },
       ],
-      default: aliases[0]?.alias || "skip",
+      default: "local",
     },
   ]);
-  if (answer === CANCELLED || answer.choice === "skip") {
-    console.log(chalk.dim("Skipped - no summarization model yet. Run `vno setup --llama` again any time to pick one."));
-    return;
-  }
+  if (answer === CANCELLED) return;
 
-  if (answer.choice === "existing") {
-    const pathAnswer = await prompt([
-      { type: "input", name: "path", message: "Path to your .gguf model file" },
-    ]);
-    if (pathAnswer === CANCELLED || !pathAnswer.path?.trim()) {
-      console.log(chalk.dim("Skipped."));
-      return;
-    }
-    const resolved = await resolveLlamaModel(pathAnswer.path.trim());
-    if (!resolved) {
-      console.log(chalk.red(`\nCouldn't use ${pathAnswer.path.trim()} - it doesn't look like a valid GGUF file.`));
-      return;
-    }
-    console.log(chalk.green(`\nUsing ${resolved} for summarization. Set it as the default in Settings or \`vno setting\`.`));
-    return;
-  }
-
-  await ensureLlamaModel(mode, answer.choice as string);
+  const root = resolveLlamaInstallRoot(answer.mode as InstallMode);
+  const { modelsDir } = llamaInstallPaths(root);
+  await fs.ensureDir(modelsDir);
+  console.log(chalk.green(`\nModels folder: ${modelsDir}`));
+  console.log(
+    chalk.dim(
+      "Drop a .gguf file in there (or set VNO_LLAMA_MODEL_PATH), then run " +
+        "`vno setup --summary-model <filename>` or pick it in Settings."
+    )
+  );
 }
 
-/** Downloads one named llama model if it isn't already present, printing progress the same way `ensureModels` does. */
-async function ensureLlamaModel(mode: InstallMode, name: string): Promise<void> {
+/** `vno setup --summary-model <name>` - confirms the file is there, never downloads it. */
+async function ensureLlamaModel(name: string): Promise<void> {
   const existing = await resolveLlamaModel(name);
   if (existing) {
-    console.log(chalk.dim(`\n"${name}" is already downloaded: ${existing}`));
+    console.log(chalk.green(`\n"${name}" is available: ${existing}`));
     return;
   }
-  console.log(chalk.dim(`\nDownloading "${name}"...`));
-  try {
-    await downloadLlamaModel(name, {
-      mode,
-      onLog: (line) => console.log(chalk.dim(`  ${line}`)),
-      onProgress: progressPrinter(),
-    });
-    console.log(chalk.green(`  ${name} ready. Set it as the default in Settings or \`vno setting\`.`));
-  } catch (err) {
-    console.log(chalk.red(`  Couldn't download "${name}": ${errorMessage(err)}`));
+  console.log(chalk.red(`\n"${name}" isn't in your models folder yet. Drop it into one of:`));
+  for (const root of bothLlamaInstallRoots()) {
+    console.log(chalk.dim(`  ${llamaInstallPaths(root).modelsDir}`));
   }
-}
-
-function platformLlamaInstallDescription(): string {
-  const platform = os.platform();
-  if (platform === "darwin") return "Installs via Homebrew (brew install llama.cpp), Metal-accelerated on Apple silicon.";
-  if (platform === "win32")
-    return "Downloads a prebuilt release zip - CUDA-matched to this machine's driver if it has an NVIDIA GPU, an AVX2 CPU build otherwise.";
-  return "Downloads a prebuilt CPU binary, or builds from source with CUDA support if this machine has an NVIDIA GPU (needs cmake, git and a C++ compiler).";
+  console.log(chalk.dim("(or point VNO_LLAMA_MODEL_PATH at it), then run this again."));
 }
 
 function platformInstallDescription(): string {
@@ -562,7 +565,7 @@ export async function collectStatus(): Promise<VnoStatus> {
   const usable = models.filter((m) => m.valid);
   const accel = accelState(config);
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
-  const llamaInstalled = Boolean(await resolveLlamaBinary({}));
+  const llamaInstalled = await isLlamaInstalled(config);
   const llamaModels = llamaInstalled ? (await listLlamaModels()).filter((m) => m.valid).map((m) => m.filename) : [];
 
   const blockers: string[] = [];
@@ -627,10 +630,11 @@ export async function runStatus({ json = false }: { json?: boolean } = {}): Prom
 
   console.log(chalk.bold(`vno status — ${os.platform()} ${os.arch()}\n`));
   await report();
-  reportAccel(await loadConfig());
+  const statusConfig = await loadConfig();
+  reportAccel(statusConfig);
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
   if (protocol) reportProtocol(protocol);
-  await reportSummarization();
+  await reportSummarization(statusConfig);
 
   const modelCount = status.required.models.length;
   console.log(
@@ -715,7 +719,7 @@ export async function runSetup({
   // Windows only for now - see lib/protocol.ts for why macOS/Linux aren't here yet.
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
   if (protocol) reportProtocol(protocol);
-  await reportSummarization();
+  await reportSummarization(config);
 
   if (check) {
     // Report-only: never installs or downloads anything.
@@ -757,9 +761,9 @@ export async function runSetup({
   // so the feature is actually discoverable rather than a hint someone has
   // to already know to act on.
   if (llama || summaryModel) {
-    await runLlamaSetup({ mode, llama, summaryModel });
+    await runLlamaSetup({ llama, summaryModel });
   } else {
-    await offerLlamaSetup(mode);
+    await offerLlamaSetup();
   }
 }
 
@@ -770,8 +774,8 @@ export async function runSetup({
  * months without registering it as an offer. Skipped entirely once llama.cpp
  * is already installed (nothing new to ask), and in any non-interactive run.
  */
-async function offerLlamaSetup(mode: InstallMode | null): Promise<void> {
-  if (await resolveLlamaBinary({})) return;
+async function offerLlamaSetup(): Promise<void> {
+  if (await isLlamaInstalled(await loadConfig())) return;
   if (!process.stdin.isTTY) return;
 
   const answer = await prompt([
@@ -788,7 +792,7 @@ async function offerLlamaSetup(mode: InstallMode | null): Promise<void> {
   ]);
   if (answer === CANCELLED || !answer.choice) return;
 
-  await runLlamaSetup({ mode, llama: true, summaryModel: null });
+  await runLlamaSetup({ llama: true, summaryModel: null });
 }
 
 /**
@@ -798,70 +802,36 @@ async function offerLlamaSetup(mode: InstallMode | null): Promise<void> {
  * `installLlama` for why this never joins `REQUIRED`.
  */
 async function runLlamaSetup({
-  mode,
   llama,
   summaryModel,
 }: {
-  mode: InstallMode | null;
   llama: boolean;
   summaryModel: string | null;
 }): Promise<void> {
   if (!llama && !summaryModel) return;
 
-  const existingBinary = await resolveLlamaBinary({});
-  if (!existingBinary) {
+  const installed = await isLlamaInstalled(await loadConfig());
+  if (!installed) {
     if (!llama) {
       console.log(
         chalk.yellow(`\nllama.cpp isn't installed. Run \`vno setup --llama --summary-model ${summaryModel}\` to add it and this model together.`)
       );
       return;
     }
-    const installed = await installLlama(mode);
-    if (!installed) return;
-    const binary = await resolveLlamaBinary({});
-    const activeMode = binary?.root ? modeForLlamaRoot(binary.root) : mode || "local";
-    await checkLlamaAccel(activeMode);
-    // installLlama already ran the model wizard on a fresh install; an
-    // explicit --summary-model on top of that fetches (or confirms) that
-    // specific one non-interactively rather than trusting the wizard alone.
-    if (summaryModel) await ensureLlamaModel(activeMode, summaryModel);
+    const ok = await installLlama();
+    if (!ok) return;
+    // installLlama already ran the models-folder step on success; an
+    // explicit --summary-model on top of that confirms that specific one
+    // non-interactively rather than trusting the step alone.
+    if (summaryModel) await ensureLlamaModel(summaryModel);
     return;
   }
 
-  // Binary already installed: `--llama` re-run means "let me pick another
-  // model" (the wizard), while `--summary-model` alone is the quiet,
-  // scriptable path - see SetupOptions's doc comments.
-  const activeMode = modeForLlamaRoot(existingBinary.root || resolveLlamaInstallRoot(mode || "local"));
-  await checkLlamaAccel(activeMode);
-  if (llama) await runLlamaModelWizard(activeMode);
-  if (summaryModel) await ensureLlamaModel(activeMode, summaryModel);
-}
-
-/**
- * llama.cpp's equivalent of `checkAccel`: reads the accelerator backend out
- * of llama-cpp/vno-install.json into config.llamaAccel. No interactive
- * "use it?" prompt here (unlike whisper's checkAccel) - summarization is
- * opt-in already, so asking a second yes/no about the accelerator on top of
- * `vno setup --llama` would be one confirmation too many; it defaults to
- * "use it" the same way resolveLlamaAccel does when unasked, and Settings is
- * where that's changed.
- */
-async function checkLlamaAccel(mode: InstallMode): Promise<void> {
-  const manifest = await readLlamaManifest(resolveLlamaInstallRoot(mode));
-  if (!manifest?.accel) return;
-  const config = await loadConfig();
-  config.llamaAccel = {
-    ...llamaAccelState(config),
-    backend: manifest.accel.backend,
-    name: manifest.accel.name,
-    resolvedAt: new Date().toISOString(),
-  };
-  await saveConfig(config);
-}
-
-/** Which of the two known llama.cpp install roots a resolved path belongs to. */
-function modeForLlamaRoot(root: string): InstallMode {
-  return root === resolveLlamaInstallRoot("global") ? "global" : "local";
+  // Binary already installed: `--llama` re-run means "show me the models
+  // folder again", while `--summary-model` alone is the quiet, scriptable
+  // path - see SetupOptions's doc comments.
+  if (llama) await runLlamaModelStep();
+  if (summaryModel) await ensureLlamaModel(summaryModel);
 }
 
 /** Which of the two known install roots a resolved path belongs to. */
@@ -913,8 +883,8 @@ function reportAccel(config: Config): void {
  * informational (never red) shape as the accel/protocol lines - a machine
  * that never opted in should never look broken over this.
  */
-async function reportSummarization(): Promise<void> {
-  const binary = await resolveLlamaBinary({});
+async function reportSummarization(config: Config): Promise<void> {
+  const binary = await resolveLlamaBinary(config);
   if (!binary) {
     console.log(
       `  ${chalk.dim("?")} ${"summarize".padEnd(12)} ${chalk.dim("optional, not installed — run `vno setup --llama`")}`

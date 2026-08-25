@@ -65,8 +65,8 @@ so anything there is safe to reuse from either side.
 | `lib/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
 | `lib/whispercpp.ts` | Installing whisper.cpp itself: `vno-install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
 | `lib/llama.ts` | Resolving the installed llama.cpp binary/model and running a summarization (no ffmpeg step — text in, text out). Optional; see [summarization.md](summarization.md) |
-| `lib/llamacpp.ts` | Installing llama.cpp itself, mirroring `lib/whispercpp.ts` — its own `llama-cpp/vno-install.json`, curated model aliases, drop-in `.gguf` discovery. Entirely optional, never touched unless `vno setup --llama` is run |
-| `lib/engineInstall.ts` | The install-root/manifest/download/archive-extraction/GPU-detection primitives shared by `whispercpp.ts` and `llamacpp.ts` — everything genuinely engine-agnostic about "vendor a binary + models under a vno-managed folder" |
+| `lib/llamacpp.ts` | Finding the llama.cpp binary (PATH, or a manual `config.llamaCliPath` override) and drop-in `.gguf` model discovery under a local/global `models/` folder — no install-manifest, no download, no curated catalog. The binary itself is installed by `brew`/`winget`, not vno |
+| `lib/engineInstall.ts` | The install-root/models-folder primitives `whispercpp.ts` and `llamacpp.ts` share (only `llamacpp.ts` uses the models-folder half now — its binary isn't vendored) |
 | `lib/setup.ts` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.ts` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.ts` | Parse and serialize WebVTT cues |

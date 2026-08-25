@@ -6,7 +6,7 @@ import { saveConfig, configFilePath } from "../../lib/config.ts";
 import { buildNotes, TRANSCRIPT_EXTS, SUMMARY_EXT } from "../../lib/notes.ts";
 import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper.ts";
 import { resolveModel } from "../../lib/whispercpp.ts";
-import { isLlamaInstalled } from "../../lib/llama.ts";
+import { isLlamaInstalled, DEFAULT_SUMMARY_PROMPT } from "../../lib/llama.ts";
 import { listModels as listLlamaModels } from "../../lib/llamacpp.ts";
 import { checkDependencies } from "../../lib/setup.ts";
 import { recordDeletions } from "../../lib/ledger.ts";
@@ -52,7 +52,7 @@ export interface ServerContext {
   dependencyStatus(): Promise<{ ffmpeg: boolean; whisper: boolean; llama: boolean }>;
   modelAvailability(): Promise<Record<string, boolean>>;
   /** Optional: whether summarization (llama.cpp + at least one valid model) is usable right now. */
-  summarizationStatus(): Promise<{ available: boolean; models: string[] }>;
+  summarizationStatus(): Promise<{ available: boolean; models: string[]; defaultPrompt: string }>;
   stateResponse(): Promise<StateResponse>;
   startJob(kind: string, title: string, total: number): Job;
   jobLog(line: string): void;
@@ -149,19 +149,19 @@ export async function createContext({
     // llama.cpp is optional, so unlike ffmpeg/whisper this never gates
     // anything on its own - callers decide what "not installed" means for
     // them (the summarize route 412s; everything else ignores it).
-    const llama = await isLlamaInstalled();
+    const llama = await isLlamaInstalled(currentConfig);
     return { ffmpeg: ffmpeg.found, whisper: whisper.found, llama };
   }
 
   // Mirrors dependencyStatus's llama check but also requires at least one
   // valid model - the deck's Summarize action and Settings' model picker
   // both need "genuinely usable right now", not just "the binary exists".
-  async function summarizationStatus(): Promise<{ available: boolean; models: string[] }> {
-    const llama = await isLlamaInstalled();
-    if (!llama) return { available: false, models: [] };
+  async function summarizationStatus(): Promise<{ available: boolean; models: string[]; defaultPrompt: string }> {
+    const llama = await isLlamaInstalled(currentConfig);
+    if (!llama) return { available: false, models: [], defaultPrompt: DEFAULT_SUMMARY_PROMPT };
     const entries = await listLlamaModels();
     const models = entries.filter((m) => m.valid).map((m) => m.filename);
-    return { available: models.length > 0, models };
+    return { available: models.length > 0, models, defaultPrompt: DEFAULT_SUMMARY_PROMPT };
   }
 
   // Whether each model is already downloaded, so the picker can say so rather
@@ -185,6 +185,7 @@ export async function createContext({
         defaultModel: currentConfig.defaultModel || "turbo",
         transcribeLanguage: currentConfig.transcribeLanguage || "auto",
         summaryModel: currentConfig.summaryModel ?? null,
+        summaryPrompt: currentConfig.summaryPrompt ?? null,
         // Guides auto-detect rather than overriding it - see
         // lib/config.ts:crossLanguage. Sent through the same defaulting
         // helper the transcribe path uses, so the dialog and the job can't

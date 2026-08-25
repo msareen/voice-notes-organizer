@@ -83,6 +83,14 @@ export interface Config {
   summaryModel: string | null;
   /** llama.cpp's accelerator backend, fixed at install time, mirroring `accel` above. */
   llamaAccel: AccelState;
+  /** Replaces lib/llama.ts's default instruction wholesale when set - null (or whitespace-only) means "use the built-in one". */
+  summaryPrompt: string | null;
+  /**
+   * Manual override for where the llama.cpp binary lives - set when PATH
+   * lookup right after a fresh `winget`/`brew` install isn't reliable in the
+   * same shell session. Checked before PATH; null means "trust PATH".
+   */
+  llamaCliPath: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +259,7 @@ export interface StateConfig {
   transcribeLanguage: string;
   crossLanguage: CrossLanguage;
   summaryModel: string | null;
+  summaryPrompt: string | null;
   openWhenDone: boolean;
   rememberDeletions: boolean;
   theme: ThemeId;
@@ -278,7 +287,7 @@ export interface StateResponse {
   ffmpeg: boolean;
   whisper: boolean;
   /** Optional: whether summarization (llama.cpp + at least one valid model) is usable right now. */
-  summarization: { available: boolean; models: string[] };
+  summarization: { available: boolean; models: string[]; defaultPrompt: string };
   job: Job | null;
 }
 

@@ -36,7 +36,7 @@ export async function runSummarize({ file, model }: RunSummarizeOptions): Promis
     return false;
   }
 
-  if (!(await isLlamaInstalled())) {
+  if (!(await isLlamaInstalled(config))) {
     console.log(chalk.yellow("llama.cpp isn't installed. Run `vno setup --llama` to add it."));
     return false;
   }
@@ -60,7 +60,13 @@ export async function runSummarize({ file, model }: RunSummarizeOptions): Promis
   const device = resolveLlamaAccel(config);
   console.log(chalk.dim(`Summarizing ${path.basename(resolved)}...`));
   try {
-    const summary = await summarizeText(transcript.text, { model: chosenModel, device, onOutput: (line) => console.log(chalk.dim(line)) });
+    const summary = await summarizeText(transcript.text, {
+      model: chosenModel,
+      device,
+      prompt: config.summaryPrompt,
+      llamaCliPath: config.llamaCliPath,
+      onOutput: (line) => console.log(chalk.dim(line)),
+    });
     await writeSummary(resolved, summary);
     console.log(chalk.green(`\n${summary}`));
     console.log(chalk.dim(`\nSaved -> ${summaryPathFor(resolved)}`));

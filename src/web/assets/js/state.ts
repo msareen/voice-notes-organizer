@@ -23,7 +23,7 @@ export interface AppState {
   WHISPER: boolean;
   FFMPEG: boolean;
   /** Optional feature - see lib/llama.ts. null until the first /api/state lands. */
-  SUMMARIZATION: { available: boolean; models: string[] } | null;
+  SUMMARIZATION: { available: boolean; models: string[]; defaultPrompt: string } | null;
   selectedRel: string | null;
   searchTerm: string;
   alive: boolean;

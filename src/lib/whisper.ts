@@ -452,9 +452,14 @@ export interface LanguagePlan {
  *
  * A pinned `transcribeLanguage` wins outright: it's the more specific
  * instruction, and detecting only to overrule it would waste a model load.
+ *
+ * `override` is a per-job pin from the Transcribe dialog's own language
+ * dropdown (single-take re-transcribe only) - it takes the same "wins
+ * outright" treatment as the configured pin, without writing it back to
+ * config, since it's a one-off for this run rather than a standing setting.
  */
-export function resolveLanguagePlan(config: Partial<Config> | null | undefined): LanguagePlan {
-  const language = config?.transcribeLanguage || "auto";
+export function resolveLanguagePlan(config: Partial<Config> | null | undefined, override?: string | null): LanguagePlan {
+  const language = override || config?.transcribeLanguage || "auto";
   const cross = crossLanguageState(config);
   return { language, crossLanguage: language === "auto" ? cross : { model: null, map: {} } };
 }

@@ -70,51 +70,5 @@ export function modelSources(): ModelSource[] {
   return MODEL_SOURCES;
 }
 
-// ---------------------------------------------------------------------------
-// llama.cpp (optional summarization engine)
-// ---------------------------------------------------------------------------
-
-// Bumped from b4079 (2026-08-25): that build predates Gemma 3n support
-// entirely ("unknown model architecture: 'gemma3n'"), and upstream also
-// renamed every release asset since then - see the doc comment on
-// pickWindowsAsset in lib/llamacpp.ts for what changed.
-export const LLAMACPP_VERSION = "b10618";
-export const LLAMACPP_REPO = "ggml-org/llama.cpp";
-
-/** Human-facing link to the release page, e.g. for error messages. */
-export function llamacppReleaseTagUrl(version: string = LLAMACPP_VERSION): string {
-  return `${GITHUB_BASE}/${LLAMACPP_REPO}/releases/tag/${version}`;
-}
-
-/** GitHub API endpoint listing a release's downloadable assets. */
-export function llamacppReleaseApiUrl(version: string = LLAMACPP_VERSION): string {
-  return `${GITHUB_API_BASE}/repos/${LLAMACPP_REPO}/releases/tags/${version}`;
-}
-
-/** Direct download URL for one named asset in a release. */
-export function llamacppReleaseAssetUrl(assetName: string, version: string = LLAMACPP_VERSION): string {
-  return `${GITHUB_BASE}/${LLAMACPP_REPO}/releases/download/${version}/${assetName}`;
-}
-
-/** Clone URL for a source build. */
-export function llamacppCloneUrl(): string {
-  return `${GITHUB_BASE}/${LLAMACPP_REPO}`;
-}
-
-/**
- * Unlike whisper.cpp's ggml models (one canonical path layout per size),
- * llama.cpp GGUF models come from per-model Hugging Face repos with
- * quant-specific filenames - there's no single `${base}/name.gguf` formula.
- * A source here is a full resolve/main base for one specific repo; the
- * caller appends the exact filename. `VNO_LLAMA_MODEL_BASE`, when set,
- * replaces the repo entirely with one override base (an internal mirror or
- * an air-gapped copy that reproduces the same repo's file layout).
- */
-export function llamaModelSources(repo: string): ModelSource[] {
-  const override = process.env.VNO_LLAMA_MODEL_BASE?.trim();
-  if (override) return [{ label: override, base: override.replace(/\/+$/, "") }];
-  return [
-    { label: "Hugging Face", base: `https://huggingface.co/${repo}/resolve/main` },
-    { label: "hf-mirror.com", base: `https://hf-mirror.com/${repo}/resolve/main` },
-  ];
-}
+// llama.cpp (optional summarization engine) is installed via `brew`/`winget`
+// now - see lib/llamacpp.ts - so it has no release/model URLs of its own here.

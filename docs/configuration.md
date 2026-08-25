@@ -28,7 +28,9 @@ rather than crashing the tool.
   "theme": "tape",
   "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
   "summaryModel": null,
-  "llamaAccel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
+  "llamaAccel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
+  "summaryPrompt": null,
+  "llamaCliPath": null
 }
 ```
 
@@ -53,6 +55,8 @@ time.
 | `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
 | `summaryModel` | ✅ (once installed) | ✅ (once installed) | ✅ |
 | `llamaAccel` | on/off only | on/off only | ✅ (set by `vno setup --llama`) |
+| `summaryPrompt` | — | ✅ | ✅ |
+| `llamaCliPath` | — | — | ✅ (set by `vno setup --llama` when asked) |
 
 ---
 
@@ -251,21 +255,36 @@ different backend (e.g. after adding a GPU) by running `vno setup` again. See
 
 ## `summaryModel`
 
-The llama.cpp model used for transcript summarization — an alias
-(`"phi4-mini"`) or a dropped-in `.gguf` filename. `null` until you set one;
-unlike `defaultModel` there's no forced default, since summarization is
-entirely optional and unset just means "not configured yet".
+The llama.cpp model used for transcript summarization — a dropped-in `.gguf`
+filename you placed in your models folder yourself (see
+[Summarization](summarization.md)). `null` until you set one; unlike
+`defaultModel` there's no forced default, since summarization is entirely
+optional and unset just means "not configured yet".
 
 Set from `vno setting` → *Summarization model* (shown only once at least one
-model is installed) or the UI's Settings dialog. See
-[Summarization](summarization.md#choosing-a-model).
+model is present) or the UI's Settings dialog.
 
 ## `llamaAccel`
 
 llama.cpp's accelerator backend, mirroring [`accel`](#accel) exactly but
 independent of it — whisper.cpp and llama.cpp are installed separately, so a
-machine can be accelerated for one and not the other. Set by `vno setup
---llama`, toggled the same way `accel` is.
+machine can be accelerated for one and not the other. Unlike `accel`,
+llama.cpp's backend isn't detected (there's no vno-picked binary variant to
+read it from) — it's whatever you answer when `vno setup --llama` asks
+whether your build has GPU acceleration.
+
+## `llamaCliPath`
+
+Manual override for where the llama.cpp binary lives, for when a fresh
+`winget install`/`brew install` isn't visible on PATH in the same shell
+session. `null` means "trust PATH". Set automatically when `vno setup
+--llama` asks for the path after an install; editable by hand.
+
+## `summaryPrompt`
+
+Replaces the built-in summarization instruction wholesale when set. `null`
+(the default) means "use the built-in one" — a whitespace-only value is
+treated the same way. Set from the UI's Settings dialog (*Override prompt*).
 
 ## `openWhenDone`
 

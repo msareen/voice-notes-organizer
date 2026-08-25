@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import fs from "fs-extra";
-import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl, LLAMACPP_VERSION, llamacppReleaseTagUrl, llamacppCloneUrl } from "./webSources.ts";
+import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources.ts";
 
 export type DependencyName = "ffmpeg" | "whisper" | "llama";
 
@@ -121,17 +121,21 @@ export async function checkDependency(name: DependencyName): Promise<DependencyS
   }
 
   if (name === "llama") {
-    // Same vendored-not-PATH resolution as whisper.cpp, imported lazily for
-    // the same import-cycle reason.
+    // llama.cpp is found on PATH (or config.llamaCliPath) rather than
+    // vendored - see lib/llamacpp.ts. Nothing calls this with "llama" today
+    // (it's not in REQUIRED, and cli/setup.ts's own llama flow calls
+    // llamacpp.ts directly with the real config), but it's kept correct for
+    // DependencyName's sake. Imported lazily for the same import-cycle
+    // reason as whisper.cpp above.
     const { resolveBinary } = await import("./llamacpp.ts");
-    const binary = await resolveBinary({});
+    const binaryPath = await resolveBinary(null);
     return {
       name,
       label: meta.label,
       usedFor: meta.usedFor,
-      found: Boolean(binary),
-      missing: binary ? [] : ["llama-cli"],
-      path: binary?.path || null,
+      found: Boolean(binaryPath),
+      missing: binaryPath ? [] : ["llama-cli"],
+      path: binaryPath,
     };
   }
 
@@ -357,14 +361,13 @@ export function manualHelp(name: DependencyName): string[] {
     }
     if (platform === "win32") {
       return [
-        `Download a release zip from ${llamacppReleaseTagUrl()}`,
-        "…and extract it (keeping every .dll beside llama-cli.exe) into the location `vno setup --llama` reports",
+        "winget install --id ggml.llamacpp -e",
+        "…then either open a new terminal, or give vno the binary's path when `vno setup --llama` asks",
       ];
     }
     return [
-      `git clone --depth 1 --branch ${LLAMACPP_VERSION} ${llamacppCloneUrl()}`,
-      "cmake -B build -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON for an NVIDIA GPU",
-      "cmake --build build -j --config Release",
+      "install it via your distro's package manager or build it yourself:",
+      "https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md",
     ];
   }
   return [];

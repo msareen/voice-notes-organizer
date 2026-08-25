@@ -196,6 +196,34 @@ export function selectField(
   return sel;
 }
 
+export function textareaField(
+  host: HTMLElement,
+  labelText: string,
+  value: string | null | undefined,
+  placeholder?: string,
+  helpText?: string
+): HTMLTextAreaElement {
+  var field = document.createElement("div");
+  field.className = "field";
+  var label = document.createElement("label");
+  label.textContent = labelText;
+  field.appendChild(label);
+  var helpHint: HTMLParagraphElement | null = null;
+  if (helpText) {
+    var h = helpToggle(helpText);
+    label.appendChild(h.button);
+    helpHint = h.hint;
+  }
+  var ta = document.createElement("textarea");
+  ta.value = value || "";
+  if (placeholder) ta.placeholder = placeholder;
+  ta.rows = 4;
+  field.appendChild(ta);
+  if (helpHint) field.appendChild(helpHint);
+  host.appendChild(field);
+  return ta;
+}
+
 /* ---- Reusable checkbox list for the command modals ---- */
 export interface PickItem {
   value: string;

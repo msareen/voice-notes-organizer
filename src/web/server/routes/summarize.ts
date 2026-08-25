@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "fs-extra";
+import chalk from "chalk";
 import { summarizeText, resolveLlamaAccel, llamaAccelState, llamaAccelUnasked, isDeviceError, lastLine } from "../../../lib/llama.ts";
 import { readSummary, writeSummary, findSummary } from "../../../lib/notes.ts";
 import type { ServerContext } from "../context.ts";
@@ -32,15 +33,17 @@ export function createLlamaRunner(ctx: ServerContext) {
     }
 
     return async function run(text: string): Promise<string> {
+      const prompt = ctx.config.summaryPrompt;
+      const llamaCliPath = ctx.config.llamaCliPath;
       try {
-        return await summarizeText(text, { model, device, onOutput: (line) => ctx.jobLog(line) });
+        return await summarizeText(text, { model, device, prompt, llamaCliPath, onOutput: (line) => ctx.jobLog(line) });
       } catch (err) {
         if (device === "cpu" || !isDeviceError(errorMessage(err))) throw err;
         ctx.jobLog(`Accelerator run failed: ${lastLine(errorMessage(err))}`);
         ctx.jobLog("Falling back to the CPU.");
         device = "cpu";
       }
-      return summarizeText(text, { model, device: "cpu", onOutput: (line) => ctx.jobLog(line) });
+      return summarizeText(text, { model, device: "cpu", prompt, llamaCliPath, onOutput: (line) => ctx.jobLog(line) });
     };
   };
 }
@@ -93,14 +96,18 @@ export function createSummarizeRoutes(ctx: ServerContext) {
 
     (async () => {
       ctx.jobLog(`Summarizing ${rel}`);
+      console.log(chalk.cyan(`\nSummarizing ${rel} (from the browser)...`));
       try {
         const run = llamaRunner({ model });
         const summary = await run(note.text);
         await writeSummary(full, summary);
+        const savedTo = rel.replace(/\.[^.]+$/, ".summary.txt");
         ctx.jobProgress(1, `Summarized ${path.basename(rel)}`);
-        ctx.jobLog(`Saved ${rel.replace(/\.[^.]+$/, ".summary.txt")}`);
+        ctx.jobLog(`Saved ${savedTo}`);
+        console.log(chalk.green(`Saved -> ${savedTo}`));
       } catch (err) {
         ctx.jobLog(`FAILED ${rel}: ${errorMessage(err)}`);
+        console.log(chalk.red(`Failed to summarize ${rel}: ${errorMessage(err)}`));
         await ctx.endJob(err);
         return;
       }

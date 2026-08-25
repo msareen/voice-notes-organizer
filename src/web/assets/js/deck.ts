@@ -4,7 +4,7 @@
 import { state, noteFor, mergeNote } from "./state.ts";
 import { dom } from "./dom.ts";
 import { api, toast, fail } from "./api.ts";
-import { fmt, fmtDur, fmtSize, extOf } from "./format.ts";
+import { fmt, fmtDur, fmtSize, extOf, isVideo } from "./format.ts";
 import { button, modal, chip } from "./widgets.ts";
 import { icon } from "./icons.ts";
 import { renderList, markActive } from "./list.ts";
@@ -14,10 +14,15 @@ import { openTranscribe } from "./panels/transcribe.ts";
 import type { Cue, Note } from "../../../types.ts";
 
 /**
- * The deck's <audio>, with the hook that lets a transcript arriving after the
- * deck was drawn re-tick the scrub rail without disturbing playback.
+ * The deck's playback element - an <audio> for most recordings, a <video> for
+ * one of the video extensions in format.ts:isVideo. Both are HTMLMediaElement,
+ * so everything past `buildTransport` (play/pause, currentTime, playbackRate,
+ * the timeupdate/ended events) works identically either way; only the element
+ * tag and whether it's visible differ. Also carries the hook that lets a
+ * transcript arriving after the deck was drawn re-tick the scrub rail without
+ * disturbing playback.
  */
-interface DeckAudio extends HTMLAudioElement {
+interface DeckMedia extends HTMLMediaElement {
   _retick?: (cues: Cue[] | null | undefined) => void;
 }
 
@@ -114,16 +119,28 @@ export function select(rel: string): void {
 
 /* ---- Transport ----------------------------------------------------------
    The deck plays through its own controls rather than the browser's default
-   <audio controls> chrome, which can't be themed and looks like a different
-   application on every platform. The <audio> element is still the single
-   source of playback truth - it stays in the DOM (without controls) and
-   everything below only reads from it or seeks it, so cue clicks and the
-   timeupdate-driven transcript highlighting keep working unchanged.
-   Returns the <audio> element, appended along with its controls to `host`. */
-function buildTransport(note: Note, host: HTMLElement): DeckAudio {
-  var audio = document.createElement("audio") as DeckAudio;
+   <audio controls>/<video controls> chrome, which can't be themed and looks
+   like a different application on every platform. The media element is still
+   the single source of playback truth - it stays in the DOM (without native
+   controls) and everything below only reads from it or seeks it, so cue
+   clicks and the timeupdate-driven transcript highlighting keep working
+   unchanged regardless of whether it's audio or video.
+   Returns the media element, appended along with its controls to `host`. */
+function buildTransport(note: Note, host: HTMLElement): DeckMedia {
+  var video = isVideo(note.name);
+  var audio = document.createElement(video ? "video" : "audio") as DeckMedia;
   audio.preload = "metadata";
   audio.src = note.src + "?t=" + encodeURIComponent(state.TOKEN);
+  // playsinline keeps a mobile browser from hijacking playback into its own
+  // fullscreen native player, which would bypass this transport entirely.
+  if (video) (audio as unknown as HTMLVideoElement).playsInline = true;
+
+  if (video) {
+    var frame = document.createElement("div");
+    frame.className = "video-frame";
+    frame.appendChild(audio);
+    host.appendChild(frame);
+  }
 
   var wrap = document.createElement("div");
   wrap.className = "transport";
@@ -187,7 +204,10 @@ function buildTransport(note: Note, host: HTMLElement): DeckAudio {
   keys.appendChild(rateBtn);
   wrap.appendChild(keys);
 
-  wrap.appendChild(audio);
+  // Video already lives in its own frame above the transport (appended
+  // there before `wrap` existed); audio has no visible presence of its own,
+  // so it just rides along inside the transport bar.
+  if (!video) wrap.appendChild(audio);
   host.appendChild(wrap);
 
   // A duration the browser hasn't parsed yet reads as NaN, and a stream-ish
@@ -320,7 +340,7 @@ function refreshSelected(rel: string): void {
       var lenChip = document.getElementById("lenChipValue");
       if (lenChip) lenChip.textContent = fmtDur(res.note.durationSec);
       var transcriptHost = document.getElementById("transcript") as TranscriptHost | null;
-      var audio = dom.body.querySelector("audio") as DeckAudio | null;
+      var audio = dom.body.querySelector("audio, video") as DeckMedia | null;
       if (transcriptHost && audio) {
         renderTranscript(transcriptHost, res.note, audio);
         if (audio._retick) audio._retick(res.note.cues);
@@ -342,7 +362,7 @@ export function showPlaceholder(message: string): void {
   dom.body.classList.add("hidden");
 }
 
-function renderTranscript(host: TranscriptHost, note: Note, audio: DeckAudio): void {
+function renderTranscript(host: TranscriptHost, note: Note, audio: DeckMedia): void {
   host.textContent = "";
   // What the filter box is searching for gets marked here too, so following a
   // transcript hit from the list lands you on the words that matched. The

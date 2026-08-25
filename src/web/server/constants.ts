@@ -13,6 +13,12 @@ export const MIME: Record<string, string> = {
   ".aiff": "audio/aiff",
   ".amr": "audio/amr",
   ".3gp": "audio/3gpp",
+  ".mp4": "video/mp4",
+  ".m4v": "video/x-m4v",
+  ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".webm": "video/webm",
+  ".avi": "video/x-msvideo",
 };
 
 export const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];

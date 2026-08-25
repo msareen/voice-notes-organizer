@@ -271,7 +271,7 @@ export function openSettings(): void {
       sourcesLabel.textContent = "Additional Source Folders";
       var sourcesHelp = helpToggle("Folders synced every time you import, in addition to detected volumes — " +
         "e.g. wherever a phone's Quick Share/Quick Send drops files. Pattern is a \"*\"/\"?\" wildcard against " +
-        "the filename (\"*\" = any audio file). \"Folder in target\" optionally routes this source's files into " +
+        "the filename (\"*\" = any audio or video file). \"Folder in target\" optionally routes this source's files into " +
         "a specific folder inside your target folder instead of a folder named after the source path — leave it " +
         "blank for the default.");
       sourcesLabel.appendChild(sourcesHelp.button);
@@ -294,7 +294,7 @@ export function openSettings(): void {
       sourcesBox.className = "source-list";
       sourcesSection.appendChild(sourcesBox);
 
-      var allExts = CONFIG.audioExtensions || [];
+      var allExts = CONFIG.mediaExtensions || [];
 
       function addSourceRow(entry: Source) {
         var block = document.createElement("div");
@@ -350,7 +350,7 @@ export function openSettings(): void {
 
         var chipsWrap = document.createElement("div");
         chipsWrap.className = "ext-chips";
-        chipsWrap.title = "Which audio file types to pick up from this folder";
+        chipsWrap.title = "Which audio/video file types to pick up from this folder";
         var extState: Record<string, boolean> = {};
         extsFromPattern(entry.pattern, allExts).forEach(function (e) { extState[e] = true; });
         allExts.forEach(function (ext) {
@@ -416,7 +416,7 @@ export function openSettings(): void {
         .map(function (r) {
           return {
             path: r.pathInput.value.trim(),
-            pattern: patternFromExts(r.selectedExts(), state.CONFIG.audioExtensions || []),
+            pattern: patternFromExts(r.selectedExts(), state.CONFIG.mediaExtensions || []),
             recursive: r.recCb.checked,
             deleteAfterImport: r.delCb.checked,
             mapTo: r.mapToInput.value.trim() || null
@@ -645,7 +645,7 @@ function fsFolderRow(label: string, onClick: () => void): HTMLElement {
   return row;
 }
 
-// "*" (or empty/legacy) means "any audio file" - shown as every extension
+// "*" (or empty/legacy) means "any audio or video file" - shown as every extension
 // selected, since that's the equivalent state in the multi-select. A
 // pattern this UI didn't produce (a hand-edited config.json with a custom
 // wildcard like "VN*.m4a") has no clean multi-select equivalent, so it

@@ -244,7 +244,7 @@ export interface StateConfig {
   rememberDeletions: boolean;
   theme: ThemeId;
   sources: Source[];
-  audioExtensions: string[];
+  mediaExtensions: string[];
   /** Only `use` is the browser's to change; the backend is fixed at install time. */
   gpu: {
     checked: boolean;

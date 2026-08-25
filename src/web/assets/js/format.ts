@@ -24,3 +24,13 @@ export function extOf(name: string): string {
   var d = name.lastIndexOf(".");
   return d >= 0 ? name.slice(d + 1).toUpperCase() : "AUDIO";
 }
+
+// Kept as a small fixed list rather than derived from state.CONFIG.mediaExtensions
+// (server/constants.ts:MIME has the authoritative extension set) - all this
+// needs to decide is which HTML media element to build, not what's importable.
+var VIDEO_EXTS = ["mp4", "m4v", "mov", "mkv", "webm", "avi"];
+
+export function isVideo(name: string): boolean {
+  var d = name.lastIndexOf(".");
+  return d >= 0 && VIDEO_EXTS.indexOf(name.slice(d + 1).toLowerCase()) !== -1;
+}

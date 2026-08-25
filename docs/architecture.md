@@ -227,7 +227,7 @@ folder and rejects anything that escapes it.
   re-encode, and with no dependency beyond the ffmpeg vno already requires.
   The rebuild replaces the recording **in place** so nothing downstream has to
   know a repair happened, with the damaged file kept as `<name>.original.m4a` —
-  filtered out of `findAudioFiles` so it can't surface as a duplicate note, and
+  filtered out of `findMediaFiles` so it can't surface as a duplicate note, and
   removable through `vno cleanup --originals` / the Cleanup dialog's checkbox.
   Verification runs before anything is renamed, and the swap moves the original
   aside first, so a failed repair can never leave the user without their file.

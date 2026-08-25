@@ -326,12 +326,14 @@ and nothing is skipped. An existing ledger file is left alone but ignored.
 
 ---
 
-## Supported audio extensions
+## Supported audio and video extensions
 
-Recognised everywhere — import, transcribe, cleanup and the UI:
+Recognised everywhere — import, transcribe, cleanup and the UI. Video files play
+in the same deck as audio (whisper.cpp only reads their audio track):
 
 ```
 .mp3  .wav  .m4a  .aac  .flac  .ogg  .oga  .wma  .aiff  .opus  .amr  .3gp
+.mp4  .m4v  .mov  .mkv  .webm  .avi
 ```
 
 Anything else on the volume is ignored, so photos, firmware and the recorder's

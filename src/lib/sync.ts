@@ -10,7 +10,7 @@ import type {
   SyncSource,
 } from "../types.ts";
 
-export const AUDIO_EXTENSIONS: ReadonlySet<string> = new Set([
+export const MEDIA_EXTENSIONS: ReadonlySet<string> = new Set([
   ".mp3",
   ".wav",
   ".m4a",
@@ -23,6 +23,15 @@ export const AUDIO_EXTENSIONS: ReadonlySet<string> = new Set([
   ".opus",
   ".amr",
   ".3gp",
+  // Video - recorders/phones that hand vno a video file (e.g. a screen
+  // recording, or a camera app's clip) get the same import/transcribe/play
+  // treatment as audio; whisper.cpp only reads the audio track either way.
+  ".mp4",
+  ".m4v",
+  ".mov",
+  ".mkv",
+  ".webm",
+  ".avi",
 ]);
 
 /**
@@ -47,20 +56,21 @@ export function matchGlob(pattern: string, filename: string): boolean {
 /** A wrapped progress callback: never throws, always safe to call. */
 export type Reporter = (event: ProgressReport) => void;
 
-interface FindAudioOptions {
+interface FindMediaOptions {
   onProgress?: ProgressCallback | null;
   pattern?: string;
   recursive?: boolean;
 }
 
 /**
- * Every audio file under `root`, depth-first. The walk itself is slow enough to
- * be worth reporting on a large or network-backed folder, so `onProgress` gets
- * a `{ phase: "scan", dir, found }` per directory entered - `dir` relative to
- * `root`. See `reporter` for why the callback can't break the walk.
+ * Every audio or video file under `root`, depth-first. The walk itself is slow
+ * enough to be worth reporting on a large or network-backed folder, so
+ * `onProgress` gets a `{ phase: "scan", dir, found }` per directory entered -
+ * `dir` relative to `root`. See `reporter` for why the callback can't break
+ * the walk.
  *
  * `pattern` (a "*"/"?" wildcard) filters by filename instead of the default
- * audio-extension check when given and isn't "*" - used by manually configured
+ * extension check when given and isn't "*" - used by manually configured
  * source folders that want to restrict what's picked up (see lib/config.ts).
  *
  * `recursive` (default true) descends into subfolders; passing false scans
@@ -69,15 +79,15 @@ interface FindAudioOptions {
  * configured source folder defaults to false at the config layer - see
  * lib/config.ts:normalizeSources.
  */
-export async function findAudioFiles(
+export async function findMediaFiles(
   root: string,
-  { onProgress, pattern, recursive = true }: FindAudioOptions = {}
+  { onProgress, pattern, recursive = true }: FindMediaOptions = {}
 ): Promise<string[]> {
   const results: string[] = [];
   const matches =
     pattern && pattern !== "*"
       ? (name: string) => matchGlob(pattern, name)
-      : (name: string) => AUDIO_EXTENSIONS.has(path.extname(name).toLowerCase());
+      : (name: string) => MEDIA_EXTENSIONS.has(path.extname(name).toLowerCase());
   await walk(root, results, root, reporter(onProgress), matches, recursive);
   return results;
 }
@@ -152,7 +162,7 @@ interface SyncOptions {
  *
  * `volume.recursive`, when explicitly false, scans only `volume.mountPath`
  * itself instead of every subfolder - again only ever set on source folders;
- * left undefined for detected volumes so `findAudioFiles` keeps its default
+ * left undefined for detected volumes so `findMediaFiles` keeps its default
  * (always recursive, since a device's own layout isn't something the user
  * chose).
  *
@@ -200,7 +210,7 @@ export async function syncVolume(
     report({ phase: "log", message: `Flattened ${flattened} previously nested file(s) in ${destRoot}.` });
   }
 
-  const files = (await findAudioFiles(volume.mountPath, {
+  const files = (await findMediaFiles(volume.mountPath, {
     onProgress,
     pattern: volume.pattern,
     recursive: volume.recursive,

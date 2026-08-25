@@ -334,7 +334,7 @@ before changing the API surface.
   re-encode; needs nothing beyond the ffmpeg vno already requires. The rebuild
   **replaces the recording in place** (so `rel`, the transcript name and every
   downstream consumer are unaffected), keeping the damaged file as
-  `<name>.original.m4a` — filtered out of `findAudioFiles`, removable via
+  `<name>.original.m4a` — filtered out of `findMediaFiles`, removable via
   `vno cleanup --originals` and the Cleanup dialog's checkbox, and never written to
   the deletion ledger. Verification runs *before* the swap, and the swap renames
   the original aside first, so a failed repair can't cost the user their file.
@@ -418,7 +418,7 @@ before changing the API surface.
   `context.ts:stateResponse` — the dialog can't show what state doesn't
   send. `~/.vno` also holds `deleted.json` and `session-token`; config is not the only
   file there.
-- **Long per-file work reports, it doesn't print.** `buildNotes`, `findAudioFiles` and
+- **Long per-file work reports, it doesn't print.** `buildNotes`, `findMediaFiles` and
   `syncVolume` take an optional `onProgress` and emit `{ phase: "scan", dir, found }`,
   `{ phase: "work", done, total, dir, name }` and `{ phase: "log", message, level }`.
   The terminal renders those as a progress bar (`cli/progress.ts`), the browser turns

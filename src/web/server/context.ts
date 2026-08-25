@@ -8,7 +8,7 @@ import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper.
 import { resolveModel } from "../../lib/whispercpp.ts";
 import { checkDependencies } from "../../lib/setup.ts";
 import { recordDeletions } from "../../lib/ledger.ts";
-import { AUDIO_EXTENSIONS } from "../../lib/sync.ts";
+import { MEDIA_EXTENSIONS } from "../../lib/sync.ts";
 import { THEMES, themeOf } from "../../lib/themes.ts";
 import { MODELS, LANGUAGES } from "./constants.ts";
 import type {
@@ -173,7 +173,7 @@ export async function createContext({
         rememberDeletions: currentConfig.rememberDeletions !== false,
         theme: themeOf(currentConfig),
         sources: currentConfig.sources || [],
-        audioExtensions: Array.from(AUDIO_EXTENSIONS).sort(),
+        mediaExtensions: Array.from(MEDIA_EXTENSIONS).sort(),
         // Only the answer is the browser's to change; the backend itself is
         // fixed by whichever whisper.cpp build `vno setup` installed, since
         // the page can't run an installer.

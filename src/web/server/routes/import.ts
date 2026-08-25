@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "fs-extra";
 import chalk from "chalk";
 import { detectVolumes } from "../../../lib/volumes.ts";
-import { syncVolume, AUDIO_EXTENSIONS, resolveFlatDest } from "../../../lib/sync.ts";
+import { syncVolume, MEDIA_EXTENSIONS, resolveFlatDest } from "../../../lib/sync.ts";
 import { refreshNote } from "../../../lib/notes.ts";
 import { loadDeletionMatcher } from "../../../lib/ledger.ts";
 import { createWhisperRunner } from "./transcribe.ts";
@@ -285,7 +285,7 @@ export function createImportRoutes(ctx: ServerContext) {
 
     const name = path.basename(String(params.get("name") || "")).trim();
     const ext = path.extname(name).toLowerCase();
-    if (!name || !AUDIO_EXTENSIONS.has(ext)) {
+    if (!name || !MEDIA_EXTENSIONS.has(ext)) {
       return ctx.sendJson(400, { error: `Unsupported file type: ${name || "(no name)"}` });
     }
 

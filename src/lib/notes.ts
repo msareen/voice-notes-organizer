@@ -1,7 +1,7 @@
 import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
-import { findAudioFiles, reporter } from "./sync.ts";
+import { findMediaFiles, reporter } from "./sync.ts";
 import { parseCues } from "./vtt.ts";
 import { getDurationSeconds, recordedDate } from "./media.ts";
 import { healIfDamaged } from "./special-case-handling.ts";
@@ -201,7 +201,7 @@ async function buildNote(
  * rather than any printing of our own because `lib/` is shared with the
  * browser path, which has no terminal to draw on. Events are `{ phase: "scan",
  * dir, found }` while the tree is being walked (no count known yet), then
- * `{ phase: "work", done, total, dir, name }` per file. `findAudioFiles` walks
+ * `{ phase: "work", done, total, dir, name }` per file. `findMediaFiles` walks
  * depth-first, so `dir` advances one folder at a time rather than jumping around.
  *
  * Duration is the slow part (an ffprobe spawn per file), so it's cached on
@@ -218,7 +218,7 @@ export async function buildNotes(
 ): Promise<Note[]> {
   const report = reporter(onProgress);
 
-  const audioFiles = await findAudioFiles(target, { onProgress });
+  const audioFiles = await findMediaFiles(target, { onProgress });
   const total = audioFiles.length;
   const cache = await loadNotesCache(target);
   const nextCache: NotesCache = {};

@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.ts";
-import { findAudioFiles } from "../lib/sync.ts";
+import { findMediaFiles } from "../lib/sync.ts";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
 import { openPath, revealInFolder } from "../lib/open.ts";
 import { createProgressBar } from "./progress.ts";
@@ -35,7 +35,7 @@ export async function runExplore({ file = null }: { file?: string | null } = {})
   const bar = createProgressBar(chalk.dim("Finding recordings"));
   let allAudio: string[];
   try {
-    allAudio = await findAudioFiles(config.target, { onProgress: bar.report });
+    allAudio = await findMediaFiles(config.target, { onProgress: bar.report });
   } finally {
     bar.stop();
   }

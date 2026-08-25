@@ -71,7 +71,7 @@ interface RepairOptions {
 // the only copy of the recorder's own metadata and the surviving part of the
 // real index, so it's worth keeping until the user says otherwise - which they
 // do through `vno cleanup --originals` / the cleanup dialog's checkbox. Those
-// backups are hidden from `findAudioFiles`, so they never appear as a second
+// backups are hidden from `findMediaFiles`, so they never appear as a second
 // note beside the recording they came from.
 export const ORIGINAL_SUFFIX = ".original.m4a";
 

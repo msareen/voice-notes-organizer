@@ -3,7 +3,7 @@ import path from "node:path";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig } from "../lib/config.ts";
-import { findAudioFiles } from "../lib/sync.ts";
+import { findMediaFiles } from "../lib/sync.ts";
 import { resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
 import { getDurationSeconds } from "../lib/media.ts";
 import { recordDeletions, clearLedger, ledgerSummary } from "../lib/ledger.ts";
@@ -210,7 +210,7 @@ async function deleteOriginalBackups(backups: string[], target: string): Promise
 async function findScanned(target: string): Promise<string[]> {
   const bar = createProgressBar(chalk.dim("Finding recordings"));
   try {
-    return await findAudioFiles(target, { onProgress: bar.report });
+    return await findMediaFiles(target, { onProgress: bar.report });
   } finally {
     bar.stop();
   }

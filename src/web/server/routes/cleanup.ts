@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { findAudioFiles } from "../../../lib/sync.ts";
+import { findMediaFiles } from "../../../lib/sync.ts";
 import { getDurationSeconds } from "../../../lib/media.ts";
 import { listOriginalBackups, isOriginalBackup } from "../../../lib/special-case-handling.ts";
 import type { ServerContext } from "../context.ts";
@@ -24,7 +24,7 @@ interface OriginalRow {
 export function createCleanupRoutes(ctx: ServerContext) {
   async function scan(params: URLSearchParams): Promise<Response> {
     const threshold = Math.max(0, parseFloat(params.get("threshold") ?? "") || 3);
-    const files = await findAudioFiles(ctx.target);
+    const files = await findMediaFiles(ctx.target);
     const short: ShortRecording[] = [];
     for (const file of files) {
       const duration = await getDurationSeconds(file);

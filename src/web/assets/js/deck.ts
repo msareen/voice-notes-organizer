@@ -69,6 +69,18 @@ interface TranscriptHost extends HTMLElement {
 /** Which of the deck's two content tabs is showing. Reset on every select(). */
 var activeDeckTab: "transcript" | "summary" = "transcript";
 
+/**
+ * Whether the deck should offer summarization UI at all - the Settings
+ * checkbox, independent of whether llama.cpp is actually installed
+ * (state.SUMMARIZATION.available). Off hides the Summary tab and the
+ * Summarize/Re-summarize action; it never touches a note's already-saved
+ * summary text, which stays on disk and reappears the moment this is
+ * switched back on.
+ */
+function summaryEnabled(): boolean {
+  return state.CONFIG.summaryEnabled !== false;
+}
+
 export function select(rel: string): void {
   var note = noteFor(rel);
   if (!note) return showPlaceholder("Select a take to play");
@@ -111,9 +123,11 @@ export function select(rel: string): void {
   actions.appendChild(button(note.hasTranscript ? "Re-transcribe" : "Transcribe", "",
     function () { openTranscribe(note!.rel); },
     "Run whisper on this recording"));
-  actions.appendChild(button(note.hasSummary ? "Re-summarize" : "Summarize", "",
-    function () { requestSummarize(note!); },
-    "Summarize this recording's transcript with llama.cpp (optional)"));
+  if (summaryEnabled()) {
+    actions.appendChild(button(note.hasSummary ? "Re-summarize" : "Summarize", "",
+      function () { requestSummarize(note!); },
+      "Summarize this recording's transcript with llama.cpp (optional)"));
+  }
   actions.appendChild(button("Edit transcript", "", function () { startEdit(note!); },
     "Edit the transcript text (timings are kept)"));
   actions.appendChild(button("Delete", "danger", function () { confirmDelete(note!); },
@@ -475,7 +489,7 @@ function buildDeckTabs(note: Note): HTMLDivElement {
     if (activeDeckTab === tab) return;
     activeDeckTab = tab;
     transcriptTab.classList.toggle("active", tab === "transcript");
-    summaryTab.classList.toggle("active", tab === "summary");
+    if (summaryTab) summaryTab.classList.toggle("active", tab === "summary");
     var host = document.getElementById("transcript") as TranscriptHost | null;
     var audio = dom.body.querySelector("audio, video") as DeckMedia | null;
     var current = noteFor(rel);
@@ -483,9 +497,13 @@ function buildDeckTabs(note: Note): HTMLDivElement {
   }
 
   var transcriptTab = button("Transcript", "tab active", function () { switchTo("transcript"); });
-  var summaryTab = button("Summary", "tab", function () { switchTo("summary"); });
   strip.appendChild(transcriptTab);
-  strip.appendChild(summaryTab);
+
+  var summaryTab: HTMLButtonElement | null = null;
+  if (summaryEnabled()) {
+    summaryTab = button("Summary", "tab", function () { switchTo("summary"); });
+    strip.appendChild(summaryTab);
+  }
   return strip;
 }
 

@@ -15,7 +15,8 @@ var ICONS: Record<string, IconSpec> = {
   play: { fill: true, d: ["M8 5.2v13.6L19 12z"] },
   pause: { fill: true, d: ["M8 5h3.2v14H8z", "M12.8 5H16v14h-3.2z"] },
   "chevron-up": { fill: false, d: ["M6 15l6-6 6 6"] },
-  "chevron-down": { fill: false, d: ["M6 9l6 6 6-6"] }
+  "chevron-down": { fill: false, d: ["M6 9l6 6 6-6"] },
+  folder: { fill: false, d: ["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"] }
 };
 
 export function icon(name: string, size?: number): SVGSVGElement {

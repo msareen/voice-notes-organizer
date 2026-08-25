@@ -2,7 +2,7 @@
 // the source-folders editor (including its own server-side folder browser).
 import { state } from "../state.ts";
 import { api, toast } from "../api.ts";
-import { button, modal, selectField, textareaField, helpToggle } from "../widgets.ts";
+import { button, iconButton, modal, selectField, textareaField, helpToggle } from "../widgets.ts";
 import { modelOptions, languageOptions } from "../models.ts";
 import { applyTheme, currentTheme } from "../theme.ts";
 import type { Source, StateConfig, ThemeId } from "../../../../types.ts";
@@ -31,6 +31,7 @@ interface SettingsPatch {
   useGpu?: boolean;
   summaryModel?: string | null;
   summaryPrompt?: string | null;
+  summaryEnabled: boolean;
 }
 
 /** One level of the unconfined filesystem browser (GET /api/browse-fs). */
@@ -65,6 +66,7 @@ export function openSettings(): void {
     crossFromSel: HTMLSelectElement,
     crossToSel: HTMLSelectElement,
     crossAddBtn: HTMLButtonElement;
+  var summaryEnabledSel: HTMLSelectElement;
   var summaryModelSel: HTMLSelectElement | null;
   var summaryPromptTa: HTMLTextAreaElement | null;
   var crossMap: Record<string, string> = {};
@@ -102,6 +104,8 @@ export function openSettings(): void {
       transcriptionCol.className = "settings-col";
       var th = document.createElement("h4");
       th.textContent = "Transcription";
+      th.appendChild(iconButton("folder", "Open the folder holding the whisper.cpp .bin model files",
+        function () { openModelsDir("whisper"); }, "icon-btn-end"));
       transcriptionCol.appendChild(th);
       grid.appendChild(transcriptionCol);
 
@@ -139,9 +143,6 @@ export function openSettings(): void {
           : "GPU acceleration: run \"vno setup\" in a terminal to install whisper.cpp and check for one.";
         transcriptionCol.appendChild(gh);
       }
-
-      transcriptionCol.appendChild(button("Show models folder", "", function () { openModelsDir("whisper"); },
-        "Open the folder holding the whisper.cpp .bin model files"));
 
       var importCol = document.createElement("div");
       importCol.className = "settings-col";
@@ -190,10 +191,17 @@ export function openSettings(): void {
       sumLabel.textContent = "Summarization";
       summarySection.appendChild(sumLabel);
 
+      summaryEnabledSel = selectField(summarySection, "Show the Summary tab in the deck", [
+        { label: "On", value: "true" },
+        { label: "Off — hide the Summary tab and action (existing summaries stay on disk)", value: "false" }
+      ], String(CONFIG.summaryEnabled !== false));
+
       var summarization = state.SUMMARIZATION;
       summaryModelSel = null;
       summaryPromptTa = null;
       if (summarization && summarization.available) {
+        sumLabel.appendChild(iconButton("folder", "Open the folder holding the llama.cpp .gguf model files",
+          function () { openModelsDir("llama"); }, "icon-btn-end"));
         summaryModelSel = selectField(summarySection, "Default model", [
           { label: "None", value: "" }
         ].concat(summarization.models.map(function (m) { return { label: m, value: m }; })),
@@ -205,9 +213,6 @@ export function openSettings(): void {
           summarization.defaultPrompt,
           "Replaces the instruction sent to the model before each transcript. Leave blank to use the " +
           "default shown as placeholder above. Whitespace-only input is treated the same as blank.");
-
-        summarySection.appendChild(button("Show models folder", "", function () { openModelsDir("llama"); },
-          "Open the folder holding the llama.cpp .gguf model files"));
       } else {
         var sh = document.createElement("p");
         sh.className = "hint";
@@ -447,7 +452,8 @@ export function openSettings(): void {
       crossLanguageModel: crossModelSel.value || null,
       crossLanguageMap: crossMap,
         openWhenDone: openSel.value === "true",
-        rememberDeletions: rememberSel.value === "true"
+        rememberDeletions: rememberSel.value === "true",
+        summaryEnabled: summaryEnabledSel.value === "true"
       };
       if (gpuSel) patch.useGpu = gpuSel.value === "true";
       if (summaryModelSel) patch.summaryModel = summaryModelSel.value || null;

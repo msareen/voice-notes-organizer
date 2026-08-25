@@ -81,6 +81,14 @@ export interface Config {
   accel: AccelState;
   /** The llama.cpp model to summarize with, by alias/filename - null until configured. Summarization is entirely optional; see lib/llama/llamacpp.ts. */
   summaryModel: string | null;
+  /**
+   * Whether the deck shows its Summary tab/action at all - independent of
+   * whether llama.cpp is actually installed. `false` hides the UI only;
+   * already-generated `.summary.txt` sidecars are never touched by this.
+   * Missing/undefined (an older config) means on, same idiom as
+   * `openWhenDone`/`rememberDeletions` below.
+   */
+  summaryEnabled?: boolean;
   /** llama.cpp's accelerator backend, fixed at install time, mirroring `accel` above. */
   llamaAccel: AccelState;
   /** Replaces lib/llama/llama.ts's default instruction wholesale when set - null (or whitespace-only) means "use the built-in one". */
@@ -260,6 +268,7 @@ export interface StateConfig {
   crossLanguage: CrossLanguage;
   summaryModel: string | null;
   summaryPrompt: string | null;
+  summaryEnabled: boolean;
   openWhenDone: boolean;
   rememberDeletions: boolean;
   theme: ThemeId;

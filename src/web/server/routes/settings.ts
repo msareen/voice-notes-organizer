@@ -18,6 +18,7 @@ interface SettingsBody {
   crossLanguageMap?: unknown;
   summaryModel?: string | null;
   summaryPrompt?: string | null;
+  summaryEnabled?: unknown;
   theme?: string;
   openWhenDone?: unknown;
   rememberDeletions?: unknown;
@@ -61,6 +62,10 @@ export function createSettingsRoutes(ctx: ServerContext) {
       const trimmed = typeof body.summaryPrompt === "string" ? body.summaryPrompt.trim() : "";
       config.summaryPrompt = trimmed || null;
     }
+    // Hides the deck's Summary tab/action only - never touches summaryModel,
+    // summaryPrompt, or any already-generated .summary.txt sidecar, so
+    // turning it back on picks up right where it left off.
+    if ("summaryEnabled" in body) config.summaryEnabled = Boolean(body.summaryEnabled);
     if ("theme" in body && (THEME_IDS as readonly string[]).includes(body.theme!)) {
       config.theme = body.theme as ThemeId;
     }

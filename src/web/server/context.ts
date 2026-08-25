@@ -186,6 +186,7 @@ export async function createContext({
         transcribeLanguage: currentConfig.transcribeLanguage || "auto",
         summaryModel: currentConfig.summaryModel ?? null,
         summaryPrompt: currentConfig.summaryPrompt ?? null,
+        summaryEnabled: currentConfig.summaryEnabled !== false,
         // Guides auto-detect rather than overriding it - see
         // lib/config.ts:crossLanguage. Sent through the same defaulting
         // helper the transcribe path uses, so the dialog and the job can't

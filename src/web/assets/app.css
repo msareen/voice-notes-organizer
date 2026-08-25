@@ -211,12 +211,18 @@ body {
   letter-spacing: .2em; text-transform: uppercase; color: var(--ink);
   white-space: nowrap;
 }
+/* A small folder icon, not just bare text, so this reads as "which folder
+   is open" rather than a second app title sitting right next to the
+   wordmark - a folder literally named e.g. "VoiceNotes" would otherwise look
+   like the heading repeated itself. */
 .folder {
+  display: flex; align-items: center; gap: 6px;
   font-family: var(--mono); font-size: .7rem; color: var(--dim);
   background: var(--bg); border: 1px solid var(--line); border-radius: 99px; padding: 4px 11px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   flex: 0 1 auto; min-width: 70px; max-width: 24vw;
 }
+.folder .ico { flex: none; width: 12px; height: 12px; opacity: .8; }
+.folder-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* The commands read as one instrument cluster, set apart from the identity
    block on the left and the system keys on the right. */
 .ops {
@@ -659,6 +665,9 @@ mark.hit {
   font: var(--label); font-size: .66rem; letter-spacing: .18em;
   text-transform: uppercase; color: var(--accent);
 }
+/* Pushed to the heading's far edge by the h4's own flex row, so it reads as
+   a heading action rather than another field control. */
+.icon-btn-end { margin-left: auto; padding: 5px; }
 .settings-col + .settings-col { border-left: 1px solid var(--line-soft); padding-left: 30px; }
 .settings-full { grid-column: 1 / -1; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 /* The section that opens the panel needs the heading rule it already has,
@@ -811,7 +820,12 @@ button.chip.on { background: var(--accent-soft); border-color: var(--accent-line
    on one line, so the width cap comes off and each shrinks to fit. */
 .crosslang-row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
 .crosslang-row .field { flex: 1 1 150px; min-width: 0; margin: 0; }
-.crosslang-row .btn { flex: 0 0 auto; }
+/* Bottom-aligning the row lines up box edges, not centers - a shorter Add
+   button then sits with its own text a couple of px below the selects' text.
+   Fixing both to the same height (selects render ~38px given their padding
+   and font) makes flex-end's bottom-alignment a center-alignment too. */
+.crosslang-row .field select { height: 38px; }
+.crosslang-row .btn { flex: 0 0 auto; height: 38px; }
 .crosslang-row select:disabled { opacity: .45; cursor: default; }
 /* The rewrites stay readable while the model is off - they're still saved,
    just unused - so this dims rather than hides them. */
@@ -829,10 +843,14 @@ button.chip.on { background: var(--accent-soft); border-color: var(--accent-line
 }
 .source-block {
   position: relative; border: 1px solid var(--line); border-radius: var(--r);
-  background: var(--surface-2); padding: 40px 13px 12px; display: flex;
+  background: var(--surface-2); padding: 42px 13px 12px; display: flex;
   flex-direction: column; gap: 9px;
 }
-.source-remove { position: absolute; top: 9px; right: 12px; }
+/* Centered in the padding reserved for it above the path row, with the same
+   inset as the block's own horizontal padding (13px) rather than a
+   mismatched 12px - was sitting closer to the top border than to the first
+   field below it. */
+.source-remove { position: absolute; top: 6px; right: 13px; }
 .source-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .source-row .source-path-input { flex: 1 1 auto; min-width: 200px; }
 .source-row-options {

@@ -1,6 +1,7 @@
 // Generic DOM widgets (buttons, the modal shell, form fields, checkbox
 // picklists) reused by every panel - nothing here knows about notes or jobs.
 import { fail } from "./api.ts";
+import { icon } from "./icons.ts";
 import type { Option } from "./models.ts";
 
 export function button(
@@ -14,6 +15,24 @@ export function button(
   b.type = "button";
   b.textContent = label;
   if (title) b.title = title;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+/** A bare icon button, label carried only in `title`/aria-label - for a spot
+ * (e.g. a section heading) where a labelled button would crowd the row. */
+export function iconButton(
+  name: string,
+  title: string,
+  onClick: (e: MouseEvent) => void,
+  cls?: string
+): HTMLButtonElement {
+  var b = document.createElement("button");
+  b.className = "btn icon" + (cls ? " " + cls : "");
+  b.type = "button";
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.appendChild(icon(name));
   b.addEventListener("click", onClick);
   return b;
 }

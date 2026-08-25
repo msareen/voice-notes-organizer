@@ -11,7 +11,6 @@ import { recordDeletions } from "../../lib/ledger.ts";
 import { AUDIO_EXTENSIONS } from "../../lib/sync.ts";
 import { THEMES, themeOf } from "../../lib/themes.ts";
 import { MODELS, LANGUAGES } from "./constants.ts";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   Config,
   Job,
@@ -39,11 +38,11 @@ export interface ServerContext {
   readonly config: Config;
   saveConfig(): Promise<void>;
   readonly job: Job | null;
-  clients: Set<ServerResponse>;
+  clients: Set<ReadableStreamDefaultController<Uint8Array>>;
   log(msg: string): void;
   broadcast(event: string, data?: unknown): void;
-  sendJson(res: ServerResponse, status: number, data: unknown): void;
-  readBody(req: IncomingMessage): Promise<any>;
+  sendJson(status: number, data: unknown): Response;
+  readBody(req: Request): Promise<any>;
   noteFor(rel: string): Note | null;
   /** Absolute path for a target-relative `rel`, or null if it escapes the target. */
   resolveInside(rel: string | null | undefined): string | null;
@@ -55,8 +54,8 @@ export interface ServerContext {
   jobLog(line: string): void;
   jobProgress(done: number, title?: string): void;
   endJob(error?: unknown): Promise<void>;
-  /** Sends 409 and returns true when a job is already running. */
-  guardJob(res: ServerResponse): boolean;
+  /** Returns a 409 Response when a job is already running, null otherwise. */
+  guardJob(): Response | null;
   removeRecording(rel: string): Promise<RemovalResult>;
   remember(entries: { rel: string; size: number | null }[], via: string): Promise<number>;
 
@@ -90,13 +89,14 @@ export async function createContext({
   const currentConfig = config;
   let job: Job | null = null; // at most one long-running job at a time
 
-  const clients = new Set<ServerResponse>(); // open SSE responses
+  const clients = new Set<ReadableStreamDefaultController<Uint8Array>>(); // open SSE streams
+  const encoder = new TextEncoder();
 
   function broadcast(event: string, data?: unknown): void {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
+    const payload = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`);
     for (const client of clients) {
       try {
-        client.write(payload);
+        client.enqueue(payload);
       } catch {
         clients.delete(client);
       }
@@ -122,33 +122,19 @@ export async function createContext({
     return full;
   }
 
-  function sendJson(res: ServerResponse, status: number, data: unknown): void {
-    const payload = JSON.stringify(data);
-    res.writeHead(status, {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Content-Length": Buffer.byteLength(payload),
-    });
-    res.end(payload);
+  function sendJson(status: number, data: unknown): Response {
+    return Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
   }
 
-  function readBody(req: IncomingMessage): Promise<any> {
-    return new Promise((resolve, reject) => {
-      let raw = "";
-      req.on("data", (chunk) => {
-        raw += chunk;
-        if (raw.length > 5e6) reject(new Error("Request body too large"));
-      });
-      req.on("end", () => {
-        if (!raw) return resolve({});
-        try {
-          resolve(JSON.parse(raw));
-        } catch {
-          reject(new Error("Malformed JSON body"));
-        }
-      });
-      req.on("error", reject);
-    });
+  async function readBody(req: Request): Promise<any> {
+    const raw = await req.text();
+    if (raw.length > 5e6) throw new Error("Request body too large");
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error("Malformed JSON body");
+    }
   }
 
   // Both probes are PATH lookups, so they're cheap enough to redo per request -
@@ -239,12 +225,9 @@ export async function createContext({
     await refreshNotes();
   }
 
-  function guardJob(res: ServerResponse): boolean {
-    if (job && job.running) {
-      sendJson(res, 409, { error: `Busy: ${job.title}` });
-      return true;
-    }
-    return false;
+  function guardJob(): Response | null {
+    if (job && job.running) return sendJson(409, { error: `Busy: ${job.title}` });
+    return null;
   }
 
   /* ------------------------- shared file mutation ------------------------ */

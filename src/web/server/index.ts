@@ -1,9 +1,7 @@
-// Bootstraps the http.Server: builds the shared context, wires each route
-// module into the request dispatch table below, and owns the process/socket
-// lifecycle (shutdown deferral, the disconnect watchdog).
-import http from "node:http";
+// Bootstraps the Bun.serve HTTP server: builds the shared context, wires each
+// route module into the routes table below, and owns the process/lifecycle
+// (shutdown deferral, the disconnect watchdog).
 import path from "node:path";
-import { URL } from "node:url";
 import chalk from "chalk";
 import { renderPage, renderManifest } from "../page.ts";
 import { themeOf } from "../../lib/themes.ts";
@@ -16,11 +14,8 @@ import { createStateRoutes } from "./routes/state.ts";
 import { createSettingsRoutes } from "./routes/settings.ts";
 import { createNotesRoutes } from "./routes/notes.ts";
 import { createTranscribeRoutes } from "./routes/transcribe.ts";
-import { createImportRoutes } from "./routes/import.ts";
+import { createImportRoutes, MAX_UPLOAD_BYTES } from "./routes/import.ts";
 import { createCleanupRoutes } from "./routes/cleanup.ts";
-import type { AddressInfo } from "node:net";
-import type { Socket } from "node:net";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Config, ProgressCallback } from "../../types.ts";
 
 export interface StartServerOptions {
@@ -68,142 +63,144 @@ export async function startServer({
   const importRoutes = createImportRoutes(ctx);
   const cleanupRoutes = createCleanupRoutes(ctx);
 
-  const sockets = new Set<Socket>(); // every live socket, so shutdown can't hang
   let lastSeen = Date.now();
   let sawBrowser = false;
   let byeTimer: ReturnType<typeof setTimeout> | null = null;
   let stopping = false;
 
-  const server = http.createServer((req, res) => {
-    handle(req, res).catch((err) => ctx.sendJson(res, 500, { error: errorMessage(err) }));
-  });
-
-  server.on("connection", (socket) => {
-    sockets.add(socket);
-    socket.on("close", () => sockets.delete(socket));
-  });
-
   /* --------------------------- request handling -------------------------- */
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host || "127.0.0.1"}`);
-    const route = url.pathname;
+  /**
+   * Wraps every token-gated route: the origin check, the token gate (query,
+   * header, or JSON body - sendBeacon can't set headers, so the body counts
+   * too), and the "a browser is actively using this" tracking the shutdown
+   * watchdog reads. `logic` gets the already-parsed body for non-GET/HEAD
+   * requests, matching what the route modules expect.
+   */
+  function withAuth(
+    logic: (req: Request, body: any, server: Bun.Server<undefined>) => Response | Promise<Response>
+  ): (req: Request, server: Bun.Server<undefined>) => Promise<Response> {
+    return async (req: Request, server: Bun.Server<undefined>): Promise<Response> => {
+      const url = new URL(req.url);
 
-    // Only ever talk to a loopback client, and never to a page from another
-    // origin - these endpoints delete files and launch programs.
-    const origin = req.headers.origin;
-    if (origin && origin !== `http://${req.headers.host}`) {
-      return ctx.sendJson(res, 403, { error: "Cross-origin request refused" });
-    }
-
-    if (route === "/") {
-      if (url.searchParams.get("t") !== token) {
-        res.writeHead(403, { "Content-Type": "text/plain" });
-        res.end("Invalid or missing session token. Open the URL vno printed in your terminal.");
-        return;
+      // Only ever talk to a loopback client, and never to a page from another
+      // origin - these endpoints delete files and launch programs.
+      const origin = req.headers.get("origin");
+      if (origin && origin !== `http://${req.headers.get("host")}`) {
+        return ctx.sendJson(403, { error: "Cross-origin request refused" });
       }
-      const html = renderPage({
-        rootLabel: path.basename(target) || "voice notes",
-        token,
-        theme: themeOf(ctx.config),
-      });
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-      res.end(html);
-      return;
-    }
 
-    if (route === "/favicon.ico") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
+      const body = req.method === "GET" || req.method === "HEAD" ? {} : await ctx.readBody(req);
+      const supplied = req.headers.get("x-vno-token") || url.searchParams.get("t") || body.token;
+      if (supplied !== token) return ctx.sendJson(403, { error: "Invalid session token" });
 
-    // The page's stylesheet and client modules. Deliberately ahead of the token
-    // gate: they hold no secrets (the token is inlined into the HTML), and
-    // gating them would mean putting the token in an asset URL, which is worse.
-    if (route.startsWith("/assets/")) return serveAsset(res, ctx.sendJson, route.slice(8));
+      lastSeen = Date.now();
+      sawBrowser = true;
 
-    // The PWA manifest and service worker. Served at the root path (not under
-    // /assets/) so the worker's default scope covers the whole origin - a
-    // script registered from /assets/sw.js could only control /assets/*.
-    // The manifest is generated per request (like the page) because its
-    // start_url has to carry the current token - an installed PWA's fixed
-    // shortcut has no other way to get one, since it can't be prompted for
-    // it the way a fresh `vno v` run's printed URL can.
-    if (route === "/manifest.webmanifest") {
-      res.writeHead(200, { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-store" });
-      res.end(renderManifest({ token }));
-      return;
-    }
-    if (route === "/sw.js") return serveAsset(res, ctx.sendJson, "sw.ts");
-
-    // Dropped-file uploads stream raw bytes, not JSON, and can be well past
-    // readBody's 5MB cap - handled before the generic body read below, with
-    // its own token check off the query string (fetch can't set a header on
-    // a body-carrying request without a CORS preflight round trip here).
-    if (route === "/api/upload" && req.method === "POST") {
-      return importRoutes.upload(req, res, url.searchParams, token);
-    }
-
-    // Everything below is token-gated. sendBeacon can't set headers, so a
-    // token in the JSON body counts too.
-    const body = req.method === "GET" || req.method === "HEAD" ? {} : await ctx.readBody(req);
-    const supplied = req.headers["x-vno-token"] || url.searchParams.get("t") || body.token;
-    if (supplied !== token) return ctx.sendJson(res, 403, { error: "Invalid session token" });
-
-    lastSeen = Date.now();
-    sawBrowser = true;
-
-    if (route.startsWith("/media/")) return serveMedia(ctx, req, res, route);
-    if (route === "/api/events") return serveEvents(ctx, req, res);
-
-    switch (route + " " + req.method) {
-      case "/api/state GET":
-        return stateRoutes.state(res);
-      case "/api/ping POST":
-        return stateRoutes.ping(res);
-      case "/api/bye POST":
-        return stateRoutes.bye(res, body);
-
-      case "/api/settings POST":
-        return settingsRoutes.settings(res, body);
-      case "/api/sources POST":
-        return settingsRoutes.sources(res, body);
-      case "/api/sources/explore POST":
-        return settingsRoutes.exploreSourceDest(res, body);
-
-      case "/api/reveal POST":
-        return notesRoutes.reveal(res, body);
-      case "/api/transcript PUT":
-        return notesRoutes.saveTranscript(res, body);
-      case "/api/notes/delete POST":
-        return notesRoutes.deleteNote(res, body);
-      case "/api/notes/refresh POST":
-        return notesRoutes.refresh(res, body);
-
-      case "/api/transcribe POST":
-        return transcribeRoutes.transcribe(res, body);
-
-      case "/api/volumes GET":
-        return importRoutes.volumes(res);
-      case "/api/browse GET":
-        return importRoutes.browse(res, url.searchParams);
-      case "/api/browse-target GET":
-        return importRoutes.browseTarget(res, url.searchParams);
-      case "/api/browse-fs GET":
-        return importRoutes.browseFs(res, url.searchParams);
-      case "/api/import POST":
-        return importRoutes.startImport(res, body);
-
-      case "/api/cleanup/scan GET":
-        return cleanupRoutes.scan(res, url.searchParams);
-      case "/api/cleanup POST":
-        return cleanupRoutes.run(res, body);
-
-      default:
-        return ctx.sendJson(res, 404, { error: `No route for ${req.method} ${route}` });
-    }
+      return logic(req, body, server);
+    };
   }
+
+  const server = Bun.serve({
+    port,
+    hostname: host,
+    // /api/upload needs to exceed Bun's 128MB default; a little headroom over
+    // MAX_UPLOAD_BYTES so the route's own "File too large" message is the one
+    // that fires, not a generic rejection from Bun underneath it.
+    maxRequestBodySize: MAX_UPLOAD_BYTES + 10 * 1024 * 1024,
+    // Unlike node:http (no default request timeout), Bun.serve drops an idle
+    // connection after 10s by default. /api/cleanup/scan awaits an uncached
+    // ffprobe per recording before responding at all - no bytes flow on the
+    // wire in the meantime - so a real library can outlast the default and
+    // get its connection dropped mid-scan. 255 is Bun's own maximum; the SSE
+    // route disables its timeout entirely instead (see serveEvents) since
+    // even 255s isn't "however long the tab stays open".
+    idleTimeout: 255,
+    error(err) {
+      return ctx.sendJson(500, { error: errorMessage(err) });
+    },
+    routes: {
+      "/": (req) => {
+        const url = new URL(req.url);
+        if (url.searchParams.get("t") !== token) {
+          return new Response("Invalid or missing session token. Open the URL vno printed in your terminal.", {
+            status: 403,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        const html = renderPage({
+          rootLabel: path.basename(target) || "voice notes",
+          token,
+          theme: themeOf(ctx.config),
+        });
+        return new Response(html, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      },
+
+      "/favicon.ico": () => new Response(null, { status: 204 }),
+
+      // The page's stylesheet and client modules. Deliberately ahead of the
+      // token gate: they hold no secrets (the token is inlined into the HTML),
+      // and gating them would mean putting the token in an asset URL, which is
+      // worse.
+      "/assets/*": (req) => serveAsset(new URL(req.url).pathname.slice("/assets/".length)),
+
+      // The PWA manifest and service worker. Served at the root path (not
+      // under /assets/) so the worker's default scope covers the whole origin
+      // - a script registered from /assets/sw.js could only control
+      // /assets/*. The manifest is generated per request (like the page)
+      // because its start_url has to carry the current token - an installed
+      // PWA's fixed shortcut has no other way to get one, since it can't be
+      // prompted for it the way a fresh `vno v` run's printed URL can.
+      "/manifest.webmanifest": () =>
+        new Response(renderManifest({ token }), {
+          headers: { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-store" },
+        }),
+      "/sw.js": () => serveAsset("sw.ts"),
+
+      // Dropped-file uploads stream raw bytes, not JSON, and can be well past
+      // readBody's 5MB cap - it's its own route with its own token check off
+      // the query string (fetch can't set a header on a body-carrying request
+      // without a CORS preflight round trip here), so it doesn't go through
+      // withAuth's JSON body parse.
+      "/api/upload": {
+        POST: (req) => importRoutes.upload(req, new URL(req.url).searchParams, token),
+      },
+
+      "/media/*": { GET: withAuth((req) => serveMedia(ctx, req, new URL(req.url).pathname)) },
+      "/api/events": { GET: withAuth((req, body, server) => serveEvents(ctx, req, server)) },
+
+      "/api/state": { GET: withAuth(() => stateRoutes.state()) },
+      "/api/ping": { POST: withAuth(() => stateRoutes.ping()) },
+      "/api/bye": { POST: withAuth((req, body) => stateRoutes.bye(body)) },
+
+      "/api/settings": { POST: withAuth((req, body) => settingsRoutes.settings(body)) },
+      "/api/sources": { POST: withAuth((req, body) => settingsRoutes.sources(body)) },
+      "/api/sources/explore": { POST: withAuth((req, body) => settingsRoutes.exploreSourceDest(body)) },
+
+      "/api/reveal": { POST: withAuth((req, body) => notesRoutes.reveal(body)) },
+      "/api/transcript": { PUT: withAuth((req, body) => notesRoutes.saveTranscript(body)) },
+      "/api/notes/delete": { POST: withAuth((req, body) => notesRoutes.deleteNote(body)) },
+      "/api/notes/refresh": { POST: withAuth((req, body) => notesRoutes.refresh(body)) },
+
+      "/api/transcribe": { POST: withAuth((req, body) => transcribeRoutes.transcribe(body)) },
+
+      "/api/volumes": { GET: withAuth(() => importRoutes.volumes()) },
+      "/api/browse": { GET: withAuth((req) => importRoutes.browse(new URL(req.url).searchParams)) },
+      "/api/browse-target": { GET: withAuth((req) => importRoutes.browseTarget(new URL(req.url).searchParams)) },
+      "/api/browse-fs": { GET: withAuth((req) => importRoutes.browseFs(new URL(req.url).searchParams)) },
+      "/api/import": { POST: withAuth((req, body) => importRoutes.startImport(body)) },
+
+      "/api/cleanup/scan": { GET: withAuth((req) => cleanupRoutes.scan(new URL(req.url).searchParams)) },
+      "/api/cleanup": { POST: withAuth((req, body) => cleanupRoutes.run(body)) },
+    },
+    fetch(req) {
+      const url = new URL(req.url);
+      return ctx.sendJson(404, { error: `No route for ${req.method} ${url.pathname}` });
+    },
+  });
 
   /* ------------------------------- lifecycle ----------------------------- */
 
@@ -241,14 +238,13 @@ export async function startServer({
     if (byeTimer) clearTimeout(byeTimer);
     for (const client of ctx.clients) {
       try {
-        client.end();
+        client.close();
       } catch {
         // client already gone
       }
     }
     ctx.clients.clear();
-    server.close(() => resolveClosed(reason || "stopped"));
-    for (const socket of sockets) socket.destroy();
+    server.stop(true).then(() => resolveClosed(reason || "stopped"));
     return closed;
   }
 
@@ -256,26 +252,17 @@ export async function startServer({
   ctx.scheduleShutdown = scheduleShutdown;
   ctx.cancelShutdown = cancelShutdown;
 
-  let watchdog: ReturnType<typeof setInterval>;
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => resolve());
-  });
-
   // Backstop for a wedged connection that never closes (proxy, sleeping
   // laptop). Deliberately long: background tabs throttle their heartbeat.
-  // Created only once the listen above actually succeeds - creating it
-  // earlier would leak the interval (and hang the process) on a failed bind,
-  // e.g. EADDRINUSE, since `stop()` (the only place that clears it) is never
-  // reached on that path.
-  watchdog = setInterval(() => {
+  // Bun.serve binds synchronously - reaching this point means the bind
+  // already succeeded, so unlike the old listen-then-callback dance there's
+  // no failed-bind path that could leak this interval.
+  const watchdog: ReturnType<typeof setInterval> = setInterval(() => {
     if (!sawBrowser || (ctx.job && ctx.job.running) || ctx.clients.size > 0) return;
     if (Date.now() - lastSeen > 120000) stop("browser stopped responding");
   }, 10000);
 
-  const address = server.address() as AddressInfo;
-  const url = `http://${host}:${address.port}/?t=${token}`;
+  const url = `http://${host}:${server.port}/?t=${token}`;
 
-  return { url, port: address.port, token, stop, closed };
+  return { url, port: server.port!, token, stop, closed };
 }

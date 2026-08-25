@@ -4,7 +4,6 @@ import { readTranscript, findTranscript } from "../../../lib/notes.ts";
 import { refreshNote } from "../../../lib/notes.ts";
 import { parseCues, serializeCues } from "../../../lib/vtt.ts";
 import { openPath, revealInFolder } from "../../../lib/open.ts";
-import type { ServerResponse } from "node:http";
 import type { ServerContext } from "../context.ts";
 
 /** What the deck's Explore action posts: a note, or a folder. */
@@ -25,25 +24,25 @@ interface TranscriptBody {
 
 /** POST /api/reveal, PUT /api/transcript, POST /api/notes/refresh, POST /api/notes/delete. */
 export function createNotesRoutes(ctx: ServerContext) {
-  function reveal(res: ServerResponse, body: RevealBody): void {
+  function reveal(body: RevealBody): Response {
     const rel = body.rel;
     if (rel) {
       const full = ctx.resolveInside(rel);
-      if (!full) return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
+      if (!full) return ctx.sendJson(400, { error: "Path outside the target folder" });
       revealInFolder(full);
-      return ctx.sendJson(res, 200, { opened: rel });
+      return ctx.sendJson(200, { opened: rel });
     }
     const dir = ctx.resolveInside(body.dir || "");
-    if (!dir) return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
+    if (!dir) return ctx.sendJson(400, { error: "Path outside the target folder" });
     openPath(dir);
-    return ctx.sendJson(res, 200, { opened: body.dir || "." });
+    return ctx.sendJson(200, { opened: body.dir || "." });
   }
 
-  async function saveTranscript(res: ServerResponse, body: TranscriptBody): Promise<void> {
+  async function saveTranscript(body: TranscriptBody): Promise<Response> {
     const note = ctx.noteFor(body.rel);
-    if (!note) return ctx.sendJson(res, 404, { error: "Unknown note" });
+    if (!note) return ctx.sendJson(404, { error: "Unknown note" });
     const audio = ctx.resolveInside(body.rel);
-    if (!audio) return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
+    if (!audio) return ctx.sendJson(400, { error: "Path outside the target folder" });
     const base = audio.slice(0, -path.extname(audio).length);
 
     if (Array.isArray(body.cues)) {
@@ -52,11 +51,11 @@ export function createNotesRoutes(ctx: ServerContext) {
       const incoming = body.cues as unknown[];
       const existing = await findTranscript(audio);
       if (!existing || existing.ext === ".txt") {
-        return ctx.sendJson(res, 409, { error: "No timed transcript to update" });
+        return ctx.sendJson(409, { error: "No timed transcript to update" });
       }
       const cues = parseCues(await fs.readFile(existing.path, "utf8"));
       if (cues.length !== incoming.length) {
-        return ctx.sendJson(res, 409, { error: "Transcript changed on disk - reload and try again" });
+        return ctx.sendJson(409, { error: "Transcript changed on disk - reload and try again" });
       }
       const merged = cues.map((cue, i) => ({ ...cue, text: String(incoming[i] ?? "").replace(/\s+/g, " ").trim() }));
       const out = existing.ext === ".vtt" ? existing.path : base + ".vtt";
@@ -71,7 +70,7 @@ export function createNotesRoutes(ctx: ServerContext) {
 
     Object.assign(note, await readTranscript(audio));
     ctx.log(`Transcript saved from the browser: ${body.rel}`);
-    return ctx.sendJson(res, 200, { note });
+    return ctx.sendJson(200, { note });
   }
 
   /**
@@ -82,24 +81,24 @@ export function createNotesRoutes(ctx: ServerContext) {
    * and patches the shared notes array in place via the same object
    * reference noteFor hands out elsewhere.
    */
-  async function refresh(res: ServerResponse, body: { rel: string }): Promise<void> {
+  async function refresh(body: { rel: string }): Promise<Response> {
     const note = ctx.noteFor(body.rel);
-    if (!note) return ctx.sendJson(res, 404, { error: "Unknown note" });
+    if (!note) return ctx.sendJson(404, { error: "Unknown note" });
     const audio = ctx.resolveInside(body.rel);
-    if (!audio) return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
+    if (!audio) return ctx.sendJson(400, { error: "Path outside the target folder" });
     Object.assign(note, await refreshNote(ctx.target, audio));
-    return ctx.sendJson(res, 200, { note });
+    return ctx.sendJson(200, { note });
   }
 
-  async function deleteNote(res: ServerResponse, body: { rel: string }): Promise<void> {
+  async function deleteNote(body: { rel: string }): Promise<Response> {
     const note = ctx.noteFor(body.rel);
-    if (!note) return ctx.sendJson(res, 404, { error: "Unknown note" });
+    if (!note) return ctx.sendJson(404, { error: "Unknown note" });
     const { removed, entry } = await ctx.removeRecording(body.rel);
     await ctx.remember(entry ? [entry] : [], "delete");
     ctx.notes = ctx.notes.filter((n) => n.rel !== body.rel);
     ctx.broadcast("notes", { count: ctx.notes.length });
     ctx.log(`Deleted from the browser: ${body.rel}`);
-    return ctx.sendJson(res, 200, { removed });
+    return ctx.sendJson(200, { removed });
   }
 
   return { reveal, saveTranscript, refresh, deleteNote };

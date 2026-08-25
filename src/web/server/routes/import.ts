@@ -8,12 +8,11 @@ import { syncVolume, AUDIO_EXTENSIONS, resolveFlatDest } from "../../../lib/sync
 import { refreshNote } from "../../../lib/notes.ts";
 import { loadDeletionMatcher } from "../../../lib/ledger.ts";
 import { createWhisperRunner } from "./transcribe.ts";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ServerContext } from "../context.ts";
 import type { KnownMount, ProgressReport, SyncSource } from "../../../types.ts";
 
 const DROPPED_DIR_NAME = "Dropped";
-const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // generous for a single recording
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // generous for a single recording
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -78,18 +77,18 @@ export function createImportRoutes(ctx: ServerContext) {
     return (await listVolumes()).find((v) => v.id === id) || null;
   }
 
-  async function volumes(res: ServerResponse): Promise<void> {
-    ctx.sendJson(res, 200, { volumes: await listVolumes() });
+  async function volumes(): Promise<Response> {
+    return ctx.sendJson(200, { volumes: await listVolumes() });
   }
 
-  async function browse(res: ServerResponse, params: URLSearchParams): Promise<void> {
+  async function browse(params: URLSearchParams): Promise<Response> {
     const volume = await volumeById(params.get("volume"));
-    if (!volume) return ctx.sendJson(res, 404, { error: "Unknown volume" });
+    if (!volume) return ctx.sendJson(404, { error: "Unknown volume" });
     const sub = (params.get("sub") || "").split("/").filter((s) => s && s !== "." && s !== "..");
     const root = path.resolve(volume.mountPath);
     const current = path.resolve(root, sub.join(path.sep));
     if (current !== root && !current.startsWith(root + path.sep)) {
-      return ctx.sendJson(res, 400, { error: "Path outside the volume" });
+      return ctx.sendJson(400, { error: "Path outside the volume" });
     }
 
     let folders: string[] = [];
@@ -101,17 +100,17 @@ export function createImportRoutes(ctx: ServerContext) {
     } catch {
       // unreadable directory - report it as empty rather than failing outright
     }
-    return ctx.sendJson(res, 200, { root, current, sub: sub.join("/"), folders });
+    return ctx.sendJson(200, { root, current, sub: sub.join("/"), folders });
   }
 
   // Unlike browse() above, this isn't confined to a detected volume - source
   // folders can be anywhere on disk, and a browser can't hand back a real
   // filesystem path from its own directory picker, so the tree walk happens
   // here instead. No path given means "list drives/roots".
-  async function browseFs(res: ServerResponse, params: URLSearchParams): Promise<void> {
+  async function browseFs(params: URLSearchParams): Promise<Response> {
     const raw = params.get("path");
     if (!raw) {
-      return ctx.sendJson(res, 200, { current: null, parent: null, folders: await fsRoots(), sep: path.sep });
+      return ctx.sendJson(200, { current: null, parent: null, folders: await fsRoots(), sep: path.sep });
     }
     const current = path.resolve(raw);
     let folders: string[];
@@ -121,10 +120,10 @@ export function createImportRoutes(ctx: ServerContext) {
         .map((e) => e.name)
         .sort((a, b) => a.localeCompare(b));
     } catch {
-      return ctx.sendJson(res, 400, { error: "Can't read that folder" });
+      return ctx.sendJson(400, { error: "Can't read that folder" });
     }
     const up = path.dirname(current);
-    return ctx.sendJson(res, 200, { current, parent: up !== current ? up : null, folders, sep: path.sep });
+    return ctx.sendJson(200, { current, parent: up !== current ? up : null, folders, sep: path.sep });
   }
 
   // Confined browser for picking a source's mapping folder - unlike browse()
@@ -134,12 +133,12 @@ export function createImportRoutes(ctx: ServerContext) {
   // folder may not exist yet (it's a destination, not something being
   // scanned), so an unreadable/missing `current` just reports no subfolders
   // instead of erroring - the root (`target`) always exists.
-  async function browseTarget(res: ServerResponse, params: URLSearchParams): Promise<void> {
+  async function browseTarget(params: URLSearchParams): Promise<Response> {
     const root = path.resolve(ctx.target);
     const sub = (params.get("sub") || "").split("/").filter((s) => s && s !== "." && s !== "..");
     const current = path.resolve(root, sub.join(path.sep));
     if (current !== root && !current.startsWith(root + path.sep)) {
-      return ctx.sendJson(res, 400, { error: "Path outside the target folder" });
+      return ctx.sendJson(400, { error: "Path outside the target folder" });
     }
 
     let folders: string[] = [];
@@ -151,7 +150,7 @@ export function createImportRoutes(ctx: ServerContext) {
     } catch {
       // doesn't exist yet or unreadable - report it as empty rather than failing
     }
-    return ctx.sendJson(res, 200, { root, current, sub: sub.join("/"), folders });
+    return ctx.sendJson(200, { root, current, sub: sub.join("/"), folders });
   }
 
   async function fsRoots(): Promise<string[]> {
@@ -164,23 +163,20 @@ export function createImportRoutes(ctx: ServerContext) {
     return roots;
   }
 
-  async function startImport(
-    res: ServerResponse,
-    body: { volumes?: unknown; translate?: unknown }
-  ): Promise<void> {
-    if (ctx.guardJob(res)) return;
+  async function startImport(body: { volumes?: unknown; translate?: unknown }): Promise<Response> {
+    const busy = ctx.guardJob();
+    if (busy) return busy;
     const requests: ImportRequest[] = Array.isArray(body.volumes) ? body.volumes : [];
-    if (requests.length === 0) return ctx.sendJson(res, 400, { error: "No volumes selected" });
+    if (requests.length === 0) return ctx.sendJson(400, { error: "No volumes selected" });
 
     const all = await listVolumes();
     const picked = requests
       .map((r) => ({ request: r, volume: all.find((v) => v.id === r.id) }))
       .filter((p): p is { request: ImportRequest; volume: ListedVolume } => Boolean(p.volume));
-    if (picked.length === 0) return ctx.sendJson(res, 400, { error: "Selected volumes are no longer connected" });
+    if (picked.length === 0) return ctx.sendJson(400, { error: "Selected volumes are no longer connected" });
 
     const translate = Boolean(body.translate);
     const job = ctx.startJob("import", `Importing from ${picked.length} volume(s)`, picked.length);
-    ctx.sendJson(res, 202, { started: true });
 
     (async () => {
       let done = 0;
@@ -271,6 +267,8 @@ export function createImportRoutes(ctx: ServerContext) {
       ctx.jobProgress(job.total, `Imported ${imported.length} new note(s)`);
       await ctx.endJob(null);
     })().catch((err) => ctx.endJob(err));
+
+    return ctx.sendJson(202, { started: true });
   }
 
   /**
@@ -281,23 +279,14 @@ export function createImportRoutes(ctx: ServerContext) {
    * file dropped twice doesn't duplicate. Lands in target/Dropped/,
    * alongside the per-device folders regular import creates.
    */
-  async function upload(
-    req: IncomingMessage,
-    res: ServerResponse,
-    params: URLSearchParams,
-    token: string
-  ): Promise<void> {
-    const supplied = req.headers["x-vno-token"] || params.get("t");
-    if (supplied !== token) {
-      req.resume();
-      return ctx.sendJson(res, 403, { error: "Invalid session token" });
-    }
+  async function upload(req: Request, params: URLSearchParams, token: string): Promise<Response> {
+    const supplied = req.headers.get("x-vno-token") || params.get("t");
+    if (supplied !== token) return ctx.sendJson(403, { error: "Invalid session token" });
 
     const name = path.basename(String(params.get("name") || "")).trim();
     const ext = path.extname(name).toLowerCase();
     if (!name || !AUDIO_EXTENSIONS.has(ext)) {
-      req.resume();
-      return ctx.sendJson(res, 400, { error: `Unsupported file type: ${name || "(no name)"}` });
+      return ctx.sendJson(400, { error: `Unsupported file type: ${name || "(no name)"}` });
     }
 
     const destRoot = path.join(ctx.target, DROPPED_DIR_NAME);
@@ -306,25 +295,26 @@ export function createImportRoutes(ctx: ServerContext) {
 
     let bytes = 0;
     let failed: Error | null = null;
-    await new Promise<void>((resolve) => {
-      const out = fs.createWriteStream(tmp);
-      req.on("data", (chunk: Buffer) => {
-        bytes += chunk.length;
-        if (bytes > MAX_UPLOAD_BYTES) {
-          failed = failed || new Error("File too large");
-          req.destroy();
+    const sink = Bun.file(tmp).writer();
+    if (req.body) {
+      try {
+        for await (const chunk of req.body as ReadableStream<Uint8Array>) {
+          bytes += chunk.byteLength;
+          if (bytes > MAX_UPLOAD_BYTES) {
+            failed = new Error("File too large");
+            break;
+          }
+          await sink.write(chunk);
         }
-      });
-      req.on("aborted", () => { failed = failed || new Error("Upload interrupted"); });
-      req.on("error", (err) => { failed = failed || err; });
-      out.on("error", (err: Error) => { failed = failed || err; });
-      out.on("close", () => resolve());
-      req.pipe(out);
-    });
+      } catch (err) {
+        failed = failed || new Error(errorMessage(err));
+      }
+    }
+    await sink.end();
 
     if (failed || bytes === 0) {
       await fs.remove(tmp).catch(() => {});
-      return ctx.sendJson(res, 400, { error: failed ? (failed as Error).message : "Empty upload" });
+      return ctx.sendJson(400, { error: failed ? failed.message : "Empty upload" });
     }
 
     try {
@@ -332,7 +322,7 @@ export function createImportRoutes(ctx: ServerContext) {
       const { dest, skip, wasDeletedBefore } = await resolveFlatDest(destRoot, name, bytes, isDeleted);
       if (skip) {
         await fs.remove(tmp);
-        return ctx.sendJson(res, 200, { skipped: true, reason: wasDeletedBefore ? "previously deleted" : "already imported" });
+        return ctx.sendJson(200, { skipped: true, reason: wasDeletedBefore ? "previously deleted" : "already imported" });
       }
       await fs.move(tmp, dest, { overwrite: false });
 
@@ -343,10 +333,10 @@ export function createImportRoutes(ctx: ServerContext) {
       ctx.notes.sort((a, b) => (b.dateMs ?? -Infinity) - (a.dateMs ?? -Infinity));
       ctx.broadcast("notes", { count: ctx.notes.length });
       console.log(chalk.dim(`Imported via drag-and-drop: ${rel}`));
-      return ctx.sendJson(res, 200, { rel, name: path.basename(dest) });
+      return ctx.sendJson(200, { rel, name: path.basename(dest) });
     } catch (err) {
       await fs.remove(tmp).catch(() => {});
-      return ctx.sendJson(res, 500, { error: errorMessage(err) });
+      return ctx.sendJson(500, { error: errorMessage(err) });
     }
   }
 

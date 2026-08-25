@@ -4,7 +4,6 @@ import { openPath } from "../../../lib/open.ts";
 import { THEME_IDS } from "../../../lib/themes.ts";
 import { isLanguageChoice, normalizeLanguageMap } from "../../../lib/languages.ts";
 import { MODELS } from "../constants.ts";
-import type { ServerResponse } from "node:http";
 import type { ServerContext } from "../context.ts";
 import type { RawSource, Source, ThemeId } from "../../../types.ts";
 
@@ -23,7 +22,7 @@ interface SettingsBody {
 
 /** POST /api/settings, POST /api/sources, POST /api/sources/explore. */
 export function createSettingsRoutes(ctx: ServerContext) {
-  async function settings(res: ServerResponse, body: SettingsBody): Promise<void> {
+  async function settings(body: SettingsBody): Promise<Response> {
     const config = ctx.config;
     if ("autoTranslate" in body) config.autoTranslate = body.autoTranslate ?? null;
     if ("defaultModel" in body && MODELS.includes(body.defaultModel!)) {
@@ -58,16 +57,16 @@ export function createSettingsRoutes(ctx: ServerContext) {
     }
     await ctx.saveConfig();
     ctx.log("Settings updated from the browser.");
-    ctx.sendJson(res, 200, { config: (await ctx.stateResponse()).config });
+    return ctx.sendJson(200, { config: (await ctx.stateResponse()).config });
   }
 
   // `sources` is array-shaped, so it's replaced wholesale here rather than
   // through the flat `if (key in body)` scalar guards above.
-  async function sources(res: ServerResponse, body: { sources?: unknown }): Promise<void> {
+  async function sources(body: { sources?: unknown }): Promise<Response> {
     const list: RawSource[] = Array.isArray(body.sources) ? body.sources : [];
     for (const s of list) {
       if (!s || typeof s !== "object" || typeof s.path !== "string" || !s.path.trim()) {
-        return ctx.sendJson(res, 400, { error: "Every source needs a folder path" });
+        return ctx.sendJson(400, { error: "Every source needs a folder path" });
       }
     }
     ctx.config.sources = (list as Exclude<RawSource, string>[]).map(
@@ -81,7 +80,7 @@ export function createSettingsRoutes(ctx: ServerContext) {
     );
     await ctx.saveConfig();
     ctx.log("Source folders updated from the browser.");
-    ctx.sendJson(res, 200, { config: (await ctx.stateResponse()).config });
+    return ctx.sendJson(200, { config: (await ctx.stateResponse()).config });
   }
 
   // Opens the folder a source's files currently live in (or will, on the
@@ -90,16 +89,13 @@ export function createSettingsRoutes(ctx: ServerContext) {
   // source's own `path`) but the *computed destination* is always inside
   // `target` (sourceDestFolder mirrors syncVolume's own destRoot rule), so
   // it's safe to open directly.
-  async function exploreSourceDest(
-    res: ServerResponse,
-    body: { path?: unknown; mapTo?: unknown }
-  ): Promise<void> {
+  async function exploreSourceDest(body: { path?: unknown; mapTo?: unknown }): Promise<Response> {
     const srcPath = typeof body.path === "string" ? body.path.trim() : "";
-    if (!srcPath) return ctx.sendJson(res, 400, { error: "Missing source path" });
+    if (!srcPath) return ctx.sendJson(400, { error: "Missing source path" });
     const mapTo = typeof body.mapTo === "string" && body.mapTo.trim() ? body.mapTo.trim() : null;
     const dest = sourceDestFolder({ path: srcPath, mapTo }, ctx.target);
     openPath(dest);
-    ctx.sendJson(res, 200, { opened: dest });
+    return ctx.sendJson(200, { opened: dest });
   }
 
   return { settings, sources, exploreSourceDest };

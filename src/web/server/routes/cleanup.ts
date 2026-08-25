@@ -3,7 +3,6 @@ import fs from "fs-extra";
 import { findAudioFiles } from "../../../lib/sync.ts";
 import { getDurationSeconds } from "../../../lib/media.ts";
 import { listOriginalBackups, isOriginalBackup } from "../../../lib/special-case-handling.ts";
-import type { ServerResponse } from "node:http";
 import type { ServerContext } from "../context.ts";
 
 /** A recording short enough to offer for deletion. */
@@ -23,7 +22,7 @@ interface OriginalRow {
 
 /** GET /api/cleanup/scan, POST /api/cleanup. */
 export function createCleanupRoutes(ctx: ServerContext) {
-  async function scan(res: ServerResponse, params: URLSearchParams): Promise<void> {
+  async function scan(params: URLSearchParams): Promise<Response> {
     const threshold = Math.max(0, parseFloat(params.get("threshold") ?? "") || 3);
     const files = await findAudioFiles(ctx.target);
     const short: ShortRecording[] = [];
@@ -52,10 +51,10 @@ export function createCleanupRoutes(ctx: ServerContext) {
       }
     }
 
-    return ctx.sendJson(res, 200, { threshold, short, originals, scanned: files.length });
+    return ctx.sendJson(200, { threshold, short, originals, scanned: files.length });
   }
 
-  async function run(res: ServerResponse, body: { rels?: unknown; originals?: unknown }): Promise<void> {
+  async function run(body: { rels?: unknown; originals?: unknown }): Promise<Response> {
     const rels: string[] = (Array.isArray(body.rels) ? body.rels : []).filter((rel: string) => ctx.noteFor(rel));
     // Backups aren't notes, so they can't be validated the same way. The guard
     // is the naming rule instead, re-checked here rather than trusted from the
@@ -64,7 +63,7 @@ export function createCleanupRoutes(ctx: ServerContext) {
       isOriginalBackup(path.basename(rel))
     );
     if (rels.length === 0 && originalRels.length === 0) {
-      return ctx.sendJson(res, 400, { error: "Nothing selected" });
+      return ctx.sendJson(400, { error: "Nothing selected" });
     }
 
     let removed = 0;
@@ -105,7 +104,7 @@ export function createCleanupRoutes(ctx: ServerContext) {
         (removedOriginals ? `, ${removedOriginals} pre-repair original(s)` : "") +
         "."
     );
-    return ctx.sendJson(res, 200, {
+    return ctx.sendJson(200, {
       removed,
       removedOriginals,
       deleted: rels.length + originalRels.length,

@@ -10,7 +10,6 @@ import {
   resolveLanguagePlan,
 } from "../../../lib/whisper.ts";
 import { MODELS } from "../constants.ts";
-import type { ServerResponse } from "node:http";
 import type { ServerContext } from "../context.ts";
 
 function errorMessage(err: unknown): string {
@@ -73,26 +72,26 @@ interface TranscribeBody {
 export function createTranscribeRoutes(ctx: ServerContext) {
   const whisperRunner = createWhisperRunner(ctx);
 
-  async function transcribe(res: ServerResponse, body: TranscribeBody): Promise<void> {
-    if (ctx.guardJob(res)) return;
+  async function transcribe(body: TranscribeBody): Promise<Response> {
+    const busy = ctx.guardJob();
+    if (busy) return busy;
     // The browser can't run an installer, so the page points at the CLI, which
     // can: `vno setup` offers the install for whichever half is missing.
     const deps = await ctx.dependencyStatus();
     if (!deps.whisper || !deps.ffmpeg) {
       const missing = [!deps.ffmpeg && "ffmpeg", !deps.whisper && "whisper"].filter(Boolean);
-      return ctx.sendJson(res, 412, {
+      return ctx.sendJson(412, {
         error: `${missing.join(" and ")} ${missing.length > 1 ? "aren't" : "isn't"} on your PATH. Run \`vno setup\` in a terminal to install ${missing.length > 1 ? "them" : "it"}.`,
       });
     }
 
     const rels: string[] = (Array.isArray(body.rels) ? body.rels : []).filter((rel: string) => ctx.noteFor(rel));
-    if (rels.length === 0) return ctx.sendJson(res, 400, { error: "No valid files selected" });
+    if (rels.length === 0) return ctx.sendJson(400, { error: "No valid files selected" });
 
     const model = MODELS.includes(body.model!) ? body.model! : ctx.config.defaultModel || "turbo";
     const translate = Boolean(body.translate);
 
     ctx.startJob("transcribe", `${translate ? "Translating" : "Transcribing"} ${rels.length} file(s)`, rels.length);
-    ctx.sendJson(res, 202, { started: true });
 
     (async () => {
       const verb = translate ? "Translating" : "Transcribing";
@@ -120,6 +119,8 @@ export function createTranscribeRoutes(ctx: ServerContext) {
       console.log(chalk.cyan(summary));
       await ctx.endJob(null);
     })().catch((err) => ctx.endJob(err));
+
+    return ctx.sendJson(202, { started: true });
   }
 
   return { transcribe };

@@ -49,6 +49,22 @@ export function bothInstallRoots(): string[] {
   return bothEngineInstallRoots(ENGINE);
 }
 
+/**
+ * The models/ folder to show the user - whichever install root already has
+ * one on disk (local first), or the local root's folder (created if
+ * missing) when neither does yet, so "Show models folder" always opens
+ * somewhere real rather than erroring on a fresh install.
+ */
+export async function resolveModelsDir(): Promise<string> {
+  for (const root of bothInstallRoots()) {
+    const { modelsDir } = installPaths(root);
+    if (await fs.pathExists(modelsDir)) return modelsDir;
+  }
+  const { modelsDir } = installPaths(resolveInstallRoot("local"));
+  await fs.ensureDir(modelsDir);
+  return modelsDir;
+}
+
 /** Whether a model file sits inside one of vno's own local/global models/ folders. */
 export function isManagedModel(filePath: string): boolean {
   return isEngineManagedModel(ENGINE, filePath);

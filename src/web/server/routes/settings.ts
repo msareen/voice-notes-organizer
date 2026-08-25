@@ -1,4 +1,6 @@
 import { accelState, crossLanguageState } from "../../../lib/whisper/whisper.ts";
+import { resolveModelsDir as resolveWhisperModelsDir } from "../../../lib/whisper/whispercpp.ts";
+import { resolveModelsDir as resolveLlamaModelsDir } from "../../../lib/llama/llamacpp.ts";
 import { sourceDestFolder } from "../../../lib/import/sync.ts";
 import { openPath } from "../../../lib/open.ts";
 import { THEME_IDS } from "../../../lib/shared/themes.ts";
@@ -113,5 +115,14 @@ export function createSettingsRoutes(ctx: ServerContext) {
     return ctx.sendJson(200, { opened: dest });
   }
 
-  return { settings, sources, exploreSourceDest };
+  // Opens the folder holding the whisper.cpp / llama.cpp model files on
+  // disk, so the user can add or remove .bin/.gguf files by hand without
+  // hunting for vno's install location themselves.
+  async function openModelsDir(body: { engine?: unknown }): Promise<Response> {
+    const dir = body.engine === "llama" ? await resolveLlamaModelsDir() : await resolveWhisperModelsDir();
+    openPath(dir);
+    return ctx.sendJson(200, { opened: dir });
+  }
+
+  return { settings, sources, exploreSourceDest, openModelsDir };
 }

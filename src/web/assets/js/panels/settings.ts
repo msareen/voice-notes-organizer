@@ -140,6 +140,9 @@ export function openSettings(): void {
         transcriptionCol.appendChild(gh);
       }
 
+      transcriptionCol.appendChild(button("Show models folder", "", function () { openModelsDir("whisper"); },
+        "Open the folder holding the whisper.cpp .bin model files"));
+
       var importCol = document.createElement("div");
       importCol.className = "settings-col";
       var ih = document.createElement("h4");
@@ -202,6 +205,9 @@ export function openSettings(): void {
           summarization.defaultPrompt,
           "Replaces the instruction sent to the model before each transcript. Leave blank to use the " +
           "default shown as placeholder above. Whitespace-only input is treated the same as blank.");
+
+        summarySection.appendChild(button("Show models folder", "", function () { openModelsDir("llama"); },
+          "Open the folder holding the llama.cpp .gguf model files"));
       } else {
         var sh = document.createElement("p");
         sh.className = "hint";
@@ -219,8 +225,8 @@ export function openSettings(): void {
       var crossLabel = document.createElement("h4");
       crossLabel.textContent = "Cross-language detection";
       var crossHelp = helpToggle("whisper.cpp guesses the language from the first 30 seconds of each recording, " +
-        "and it confuses languages that sound alike — Hindi and Urdu are the same language to it, so the same " +
-        "voice can come out in Devanagari one day and Arabic script the next. It has no setting for \"prefer " +
+        "and it confuses languages that sound alike — for example: Hindi and Urdu are the same language to it, " +
+        "so the same voice can come out in Devanagari one day and Arabic script the next. It has no setting for \"prefer " +
         "this one\", only a hard pin that would also mislabel your English notes. So: pick a model here and vno " +
         "runs a quick detection pass before each transcription and rewrites the answer using your list below. " +
         "Leave the model off and nothing extra runs. On costs one extra model load per file — \"small\" is " +
@@ -555,6 +561,12 @@ function confirmRemoveSource(sourcePath: string, mapTo: string | null, onRemove:
 
 function exploreSourceDest(sourcePath: string, mapTo: string | null): Promise<void> {
   return api("/api/sources/explore", { method: "POST", body: { path: sourcePath, mapTo: mapTo } })
+    .then(function () { toast("Opened folder"); })
+    .catch(function (err) { toast(String(err instanceof Error ? err.message : err), "err"); });
+}
+
+function openModelsDir(engine: "whisper" | "llama"): void {
+  api("/api/settings/models-dir", { method: "POST", body: { engine: engine } })
     .then(function () { toast("Opened folder"); })
     .catch(function (err) { toast(String(err instanceof Error ? err.message : err), "err"); });
 }

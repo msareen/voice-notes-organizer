@@ -181,6 +181,7 @@ export async function startServer({
       "/api/settings": { POST: withAuth((req, body) => settingsRoutes.settings(body)) },
       "/api/sources": { POST: withAuth((req, body) => settingsRoutes.sources(body)) },
       "/api/sources/explore": { POST: withAuth((req, body) => settingsRoutes.exploreSourceDest(body)) },
+      "/api/settings/models-dir": { POST: withAuth((req, body) => settingsRoutes.openModelsDir(body)) },
 
       "/api/reveal": { POST: withAuth((req, body) => notesRoutes.reveal(body)) },
       "/api/transcript": { PUT: withAuth((req, body) => notesRoutes.saveTranscript(body)) },

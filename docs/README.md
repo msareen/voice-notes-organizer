@@ -13,6 +13,7 @@ day to day. These pages cover everything else.
 | [Transcription](transcription.md) | Whisper models, translation, the `.vtt` format, re-transcribing |
 | [Troubleshooting](troubleshooting.md) | Whisper/ffmpeg not found, no volumes detected, port and browser issues |
 | [Architecture](architecture.md) | Source layout, the local HTTP API, and how to work on the code |
+| [Third-party resources](3rd-party-resources.md) | How ffmpeg/whisper.cpp are detected, `vno-install.json`, model resolution, env overrides |
 
 ## Where to start
 
@@ -25,3 +26,4 @@ day to day. These pages cover everything else.
 - **Transcripts wrong, slow, or in the wrong language?** [Transcription](transcription.md).
 - **Something's broken?** [Troubleshooting](troubleshooting.md).
 - **Contributing?** [Architecture](architecture.md).
+- **Working on ffmpeg/whisper.cpp detection or install logic?** [Third-party resources](3rd-party-resources.md).

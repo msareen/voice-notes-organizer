@@ -62,7 +62,7 @@ so anything there is safe to reuse from either side.
 | `lib/volumes.ts` | Per-OS removable-volume detection |
 | `lib/sync.ts` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
 | `lib/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
-| `lib/whispercpp.ts` | Installing whisper.cpp itself: `install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
+| `lib/whispercpp.ts` | Installing whisper.cpp itself: `vno-install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
 | `lib/setup.ts` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.ts` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.ts` | Parse and serialize WebVTT cues |

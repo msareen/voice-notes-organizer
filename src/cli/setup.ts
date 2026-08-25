@@ -507,7 +507,7 @@ export async function runSetup({
 
   // `mode` here is only what a flag forced, if anything - when the user was
   // asked interactively (local / global / "I already have it"), the actual
-  // destination is whichever root the binary (or its install.json entry)
+  // destination is whichever root the binary (or its vno-install.json entry)
   // ended up in, which might not match. Ask the binary itself rather than
   // trust the flag.
   const binary = await resolveBinary({});
@@ -608,7 +608,7 @@ async function ensureProtocolHandler(status: ProtocolStatus): Promise<void> {
 
 /**
  * Reads the accelerator backend whisper.cpp was installed with, straight out
- * of install.json, and caches it in config for `resolveAccel` to read at
+ * of vno-install.json, and caches it in config for `resolveAccel` to read at
  * transcription time. Unlike the old torch probe this costs nothing - the
  * backend can't change without a fresh `vno setup` - so it always runs here,
  * not behind a separate slow-path gate.

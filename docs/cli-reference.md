@@ -424,7 +424,7 @@ passed, vno asks: install it locally, install it globally, or **point at one
 you already have** — a path to the binary itself, or to a folder containing
 it (searched for `whisper-cpp`, `whisper-cli` or `whisper-cli.exe`). Pointing
 at an existing install never copies anything; the path is recorded in
-`install.json` and used from wherever it is. You're also asked whether that
+`vno-install.json` and used from wherever it is. You're also asked whether that
 build has GPU acceleration, since vno has no way to know without you telling
 it — "yes, or not sure" tries it and falls back to the CPU automatically if
 it fails.

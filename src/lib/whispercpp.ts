@@ -20,7 +20,7 @@ import {
 
 /**
  * Installing and resolving the whisper.cpp binary, its models and the
- * install.json manifest that records what `vno setup` found or built.
+ * vno-install.json manifest that records what `vno setup` found or built.
  *
  * Mirrors lib/setup.ts's own rule: this module only *knows* things -
  * detection, acquisition, manifest bookkeeping. Asking the user anything
@@ -28,13 +28,22 @@ import {
  * cli/setup.ts.
  */
 
+// Purely informational - never read back by vno itself. Explains the file to
+// someone who stumbles on it inside whisper-cpp/ and might otherwise assume
+// it's a whisper.cpp artifact rather than vno's own bookkeeping.
+const MANIFEST_DESCRIPTION =
+  "This file is written and read by vno (the voice-note-organizer CLI), not by whisper.cpp itself. " +
+  "It records what `vno setup` found or installed in this folder (the binary, its accelerator, and any " +
+  "models downloaded here) so future runs don't have to redetect it. Safe to delete - vno recreates it " +
+  "the next time `vno setup` runs. Not read for anything vno can't re-derive on its own.";
+
 const isWindows = os.platform() === "win32";
 const isMac = os.platform() === "darwin";
 
 /** Which install root a call targets: beside this vno install, or under $HOME. */
 export type InstallMode = "local" | "global";
 
-/** The binary an install produced or was pointed at, as recorded in install.json. */
+/** The binary an install produced or was pointed at, as recorded in vno-install.json. */
 export interface BinaryRecord {
   path: string;
   name: string;
@@ -49,8 +58,10 @@ export interface AccelRecord {
   name: string | null;
 }
 
-/** install.json. Every field is whatever the run that wrote it recorded. */
+/** vno-install.json. Every field but `description` is whatever the run that wrote it recorded. */
 export interface InstallManifest {
+  /** Human-readable, for anyone who opens the file - never read back by vno. */
+  description?: string;
   version?: string;
   platform?: string;
   arch?: string;
@@ -94,11 +105,11 @@ export function installPaths(root: string): InstallLayout {
     root,
     binDir: path.join(root, "bin"),
     modelsDir: path.join(root, "models"),
-    manifestPath: path.join(root, "install.json"),
+    manifestPath: path.join(root, "vno-install.json"),
   };
 }
 
-/** Reads install.json for a root, or null if it's not there or unreadable. */
+/** Reads vno-install.json for a root, or null if it's not there or unreadable. */
 export async function readManifest(root: string): Promise<InstallManifest | null> {
   const { manifestPath } = installPaths(root);
   try {
@@ -108,12 +119,12 @@ export async function readManifest(root: string): Promise<InstallManifest | null
   }
 }
 
-/** Writes install.json, creating the root/bin/models layout if needed. */
+/** Writes vno-install.json, creating the root/bin/models layout if needed. */
 export async function writeManifest(root: string, data: InstallManifest): Promise<void> {
   const paths = installPaths(root);
   await fs.ensureDir(paths.binDir);
   await fs.ensureDir(paths.modelsDir);
-  await fs.writeJson(paths.manifestPath, data, { spaces: 2 });
+  await fs.writeJson(paths.manifestPath, { ...data, description: MANIFEST_DESCRIPTION }, { spaces: 2 });
 }
 
 /** Both install roots, local first - used by resolution that must check both. */
@@ -135,7 +146,7 @@ export interface ResolvedBinary {
 }
 
 /**
- * Finds the whisper.cpp binary: whichever install root's `install.json` is
+ * Finds the whisper.cpp binary: whichever install root's `vno-install.json` is
  * newest, then the other root, then PATH under any known spelling. Binary
  * name isn't hardcoded to one install method - Homebrew calls it
  * `whisper-cpp`, the Windows zip and a Linux source build both call it
@@ -206,7 +217,7 @@ const ALL_BINARY_NAMES = ["whisper-cpp", "whisper-cli", "whisper-cli.exe"];
  * Points vno at a whisper.cpp binary the user already has, instead of
  * installing one. `inputPath` can be the binary itself or a folder
  * containing it (searched for any known binary name). Never copies the file
- * - the resolved absolute path is recorded in install.json, the same
+ * - the resolved absolute path is recorded in vno-install.json, the same
  * reference-don't-copy approach `resolveModel` uses for a model found outside
  * the active install root.
  */
@@ -865,7 +876,7 @@ interface InstallWhisperOptions {
 }
 
 /**
- * Installs whisper.cpp for this platform into `root`, writing install.json.
+ * Installs whisper.cpp for this platform into `root`, writing vno-install.json.
  * `mode` is recorded so `resolveModel` below can tell which root a manifest
  * came from without re-deriving it.
  */
@@ -1013,7 +1024,7 @@ export async function validateModelFile(filePath: string, stem: string): Promise
  * Finds an already-present model, checking (in order): an explicit path or
  * `WHISPER_MODEL_PATH` override, the local install's models/, the global
  * install's models/, any absolute path a previous run recorded in either
- * install.json, then Homebrew's shared dir on macOS. Both install roots are
+ * vno-install.json, then Homebrew's shared dir on macOS. Both install roots are
  * always checked regardless of which is active, so a global install from
  * last month and a local one today don't each re-fetch the same gigabytes.
  *

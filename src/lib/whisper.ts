@@ -397,7 +397,7 @@ function lastLines(text: string, count = 20): string {
  * the backend (CUDA or Metal, whichever `vno setup` installed - or Vulkan
  * for a Vulkan-capable binary the user pointed at directly, since vno itself
  * ships no Vulkan asset) is fixed by which binary is in use, recorded in
- * install.json, not re-probed on a hot path. `use` is still a real user
+ * vno-install.json, not re-probed on a hot path. `use` is still a real user
  * choice though: `-ng` forces the CPU even on an accelerator-capable build,
  * so "detected, but the user said no" survives.
  */

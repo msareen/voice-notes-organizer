@@ -211,7 +211,7 @@ that way — if a CLI module grows logic the UI also needs, move it down into `l
 - `src/lib/*` — domain logic and OS access: config, volume detection, the flat copy,
   ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
   `setup.ts` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.ts`
-  (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
+  (installing whisper.cpp itself — `vno-install.json`, per-platform binary acquisition,
   model resolution/download/validation; models come from Hugging Face with an
   hf-mirror.com fallback and a `VNO_MODEL_BASE` override — note the HF repo is
   still under `ggerganov` even though the GitHub org moved to `ggml-org`, so the
@@ -287,7 +287,7 @@ before changing the API surface.
   probe to answer "is CUDA usable?" because a CPU-only torch wheel was a
   common trap), whisper.cpp's backend (CUDA/Metal/CPU — no Vulkan asset
   exists, so non-NVIDIA GPUs get no acceleration) is baked into which binary
-  `vno setup` installed — recorded in `install.json`, read back
+  `vno setup` installed — recorded in `vno-install.json`, read back
   by `cli/setup.ts:checkAccel()` into `config.accel`, which costs nothing and
   so runs on every `vno setup`, not gated behind a slow-path flag.
   `lib/whisper.ts:resolveAccel()` is the single place the "use it unless the

@@ -236,7 +236,7 @@ browser has nowhere to ask at job time.
 
 Unlike the old torch probe, this never needs re-checking on a hot path: the
 backend is fixed by which whisper.cpp binary got installed, and reading
-`install.json` back is free. Nothing depends on this block being present:
+`vno-install.json` back is free. Nothing depends on this block being present:
 delete it, or the whole file, and every command still runs (falling back to
 the CPU until the next `vno setup`).
 

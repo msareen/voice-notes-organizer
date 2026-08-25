@@ -35,7 +35,7 @@ whisper.cpp is vendored into `whisper-cpp/bin/` (local or global, see
 put on your system `PATH`, so a new terminal shouldn't be necessary — but if
 `vno setup --check` still shows it missing right after a successful install,
 something wrote the binary somewhere unexpected. The install log `vno setup`
-printed says exactly where it put it; check `install.json` in that
+printed says exactly where it put it; check `vno-install.json` in that
 `whisper-cpp/` folder for the recorded path.
 
 **On Windows**, every `.dll` the release zip shipped has to stay beside

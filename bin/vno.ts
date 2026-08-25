@@ -362,6 +362,7 @@ program
   .option("--local", "install whisper.cpp beside this vno install, without asking")
   .option("--global", "install whisper.cpp under the user's home directory, without asking")
   .option("--model <name>", "fetch just this model instead of the defaults")
+  .option("--whisper", "pick which whisper.cpp models to install from a checklist (tiny, base, small, medium, large-v3, turbo)")
   .option("--list-models", "print the model inventory and exit; installs nothing")
   .option("--remove-model [name]", "delete installed models to reclaim disk space; bare, opens a picker")
   .option("--llama", "install llama.cpp for transcript summarization (optional; never installed otherwise)")
@@ -373,6 +374,7 @@ program
       ["vno setup --check", "report only - installs and downloads nothing"],
       ["vno setup --global", "put whisper.cpp under your home dir, not beside vno"],
       ["vno setup --model small", "fetch one model instead of the default set"],
+      ["vno setup --whisper", "pick any number of whisper models to install from a checklist"],
       ["vno setup --list-models", "show which models are already on disk"],
       ["vno setup --remove-model", "pick installed models to delete and reclaim the space"],
       ["vno setup --llama", "install llama.cpp and pick a summarization model"],
@@ -392,6 +394,7 @@ program
       check: Boolean(opts.check),
       mode: opts.global ? "global" : opts.local ? "local" : null,
       model: opts.model || null,
+      whisper: Boolean(opts.whisper),
       listModelsOnly: Boolean(opts.listModels),
       llama: Boolean(opts.llama),
       summaryModel: opts.summaryModel || null,

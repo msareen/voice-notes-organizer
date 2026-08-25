@@ -26,6 +26,7 @@ import {
   removeModel,
   DEFAULT_MODELS,
 } from "../lib/whisper/whispercpp.ts";
+import { whisperModelCatalog } from "../lib/webSources/whisperModels.ts";
 import {
   installMacBinary as installLlamaMacBinary,
   installWindowsBinary as installLlamaWindowsBinary,
@@ -452,35 +453,32 @@ async function runLlamaModelStep(): Promise<void> {
   }
 
   if (!process.stdin.isTTY) {
-    if (existing.length === 0) console.log(chalk.dim("\nNo terminal to ask which summarization model to use - skipping."));
+    if (existing.length === 0) console.log(chalk.dim("\nNo terminal to ask which summarization models to add - skipping."));
     console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
     return;
   }
 
   const catalog = llamaModelCatalog();
   const installedFilenames = new Set(existing.map((m) => m.filename.toLowerCase()));
+
   const pickAnswer = await prompt([
     {
-      type: "list",
-      name: "alias",
+      type: "checkbox",
+      name: "aliases",
       message:
-        existing.length > 0
-          ? "Download another summarization model, or keep what you have:"
-          : "Pick a summarization model to download - all small enough to run on CPU, faster with GPU acceleration:",
-      choices: [
-        ...groupedModelChoices(catalog, installedFilenames),
-        new Separator(),
-        {
-          name: existing.length > 0 ? "Skip — keep what I have" : "Skip — I'll drop my own .gguf file(s) in myself",
-          value: "skip",
-        },
-      ],
-      default: existing.length > 0 ? "skip" : catalog[0]?.alias,
+        "Which summarization models would you like? (Space toggles, Enter confirms) - all small enough " +
+        "to run on CPU, faster with GPU acceleration:",
+      choices: groupedModelChoices(catalog, installedFilenames),
     },
   ]);
-  const alias = pickAnswer === CANCELLED ? "skip" : (pickAnswer.alias as string);
+  if (pickAnswer === CANCELLED) return;
 
-  if (alias === "skip") {
+  const wanted = (pickAnswer.aliases as string[]).filter((alias) => {
+    const entry = catalog.find((m) => m.alias === alias);
+    return entry && !installedFilenames.has(entry.filename.toLowerCase());
+  });
+
+  if (wanted.length === 0) {
     if (existing.length === 0) {
       const root = resolveLlamaInstallRoot("local");
       const { modelsDir } = llamaInstallPaths(root);
@@ -493,7 +491,7 @@ async function runLlamaModelStep(): Promise<void> {
         )
       );
     } else {
-      console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
+      console.log(chalk.dim("\nNothing new selected. Set the default in Settings or `vno setup --summary-model <filename>`."));
     }
     return;
   }
@@ -502,7 +500,7 @@ async function runLlamaModelStep(): Promise<void> {
     {
       type: "list",
       name: "mode",
-      message: "Where should it be installed?",
+      message: "Where should the new model(s) be installed?",
       choices: [
         { name: `Locally, beside this vno install (${resolveLlamaInstallRoot("local")})`, value: "local" },
         { name: `Globally (${resolveLlamaInstallRoot("global")})`, value: "global" },
@@ -515,21 +513,22 @@ async function runLlamaModelStep(): Promise<void> {
   const { modelsDir } = llamaInstallPaths(root);
   await fs.ensureDir(modelsDir);
 
-  const entry = catalog.find((m) => m.alias === alias)!;
-  console.log(chalk.dim(`\nDownloading "${entry.label}" (${entry.group}) into ${modelsDir}...`));
-  try {
-    const dest = await downloadLlamaModel(alias, {
-      mode,
-      onLog: (line) => console.log(chalk.dim(`  ${line}`)),
-      onProgress: progressPrinter(),
-      onChecksumMismatch: confirmChecksumMismatch,
-    });
-    console.log(chalk.green(`  ${entry.label} ready: ${dest}`));
-    console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
-  } catch (err) {
-    console.log(chalk.red(`\nCouldn't download "${entry.label}": ${errorMessage(err)}`));
-    console.log(chalk.dim(`Drop a .gguf file into ${modelsDir} yourself instead, then run this again.`));
+  for (const alias of wanted) {
+    const entry = catalog.find((m) => m.alias === alias)!;
+    console.log(chalk.dim(`\nDownloading "${entry.label}" (${entry.group}) into ${modelsDir}...`));
+    try {
+      const dest = await downloadLlamaModel(alias, {
+        mode,
+        onLog: (line) => console.log(chalk.dim(`  ${line}`)),
+        onProgress: progressPrinter(),
+        onChecksumMismatch: confirmChecksumMismatch,
+      });
+      console.log(chalk.green(`  ${entry.label} ready: ${dest}`));
+    } catch (err) {
+      console.log(chalk.red(`  Couldn't download "${entry.label}": ${errorMessage(err)}`));
+    }
   }
+  console.log(chalk.dim("\nSet the default in Settings or `vno setup --summary-model <filename>`."));
 }
 
 /**
@@ -585,8 +584,8 @@ function platformInstallDescription(): string {
 function groupedModelChoices(
   catalog: LlamaModelSource[],
   installedFilenames: Set<string>
-): (InstanceType<typeof Separator> | { name: string; value: string })[] {
-  const choices: (InstanceType<typeof Separator> | { name: string; value: string })[] = [];
+): (InstanceType<typeof Separator> | { name: string; value: string; checked: boolean })[] {
+  const choices: (InstanceType<typeof Separator> | { name: string; value: string; checked: boolean })[] = [];
   let lastGroup: string | null = null;
   for (const m of catalog) {
     if (m.group !== lastGroup) {
@@ -598,11 +597,11 @@ function groupedModelChoices(
       choices.push(new Separator(chalk.bold(`── ${m.group} ──`)));
       lastGroup = m.group;
     }
+    const installed = installedFilenames.has(m.filename.toLowerCase());
     choices.push({
-      name:
-        `${m.label} — ~${(m.approxBytes / 1e6).toFixed(0)} MB` +
-        (installedFilenames.has(m.filename.toLowerCase()) ? chalk.dim("  (installed)") : ""),
+      name: `${m.label} — ~${(m.approxBytes / 1e6).toFixed(0)} MB` + (installed ? chalk.dim("  (installed)") : ""),
       value: m.alias,
+      checked: installed,
     });
   }
   return choices;
@@ -804,6 +803,13 @@ export interface SetupOptions {
    * Like `listModelsOnly`, it returns before any install/download work.
    */
   removeModel?: string | true | null;
+  /**
+   * `vno setup --whisper` - offers a picker of every whisper.cpp model
+   * (tiny/base/small/medium/large-v3/large-v3-turbo), not just the two
+   * defaults `ensureModels` fetches. Mirrors `--llama`'s wizard; never
+   * implied by plain `vno setup`.
+   */
+  whisper?: boolean;
   /** `vno setup --llama` - offer/install llama.cpp, then the model wizard. Never implied by plain `vno setup`. */
   llama?: boolean;
   /** `vno setup --summary-model <name>` - fetch one summarization model non-interactively, skipping the wizard. */
@@ -829,6 +835,7 @@ export async function runSetup({
   mode = null,
   model = null,
   listModelsOnly = false,
+  whisper = false,
   llama = false,
   summaryModel = null,
   removeModel: removeModelTarget = null,
@@ -850,8 +857,10 @@ export async function runSetup({
   // PATH here can be stale if something was installed after this shell opened.
   await refreshPath();
   // Same engine-grouped order as `vno status`: whisper.cpp (report) and its
-  // accelerator, then llama.cpp, then the unrelated vno:// handler last.
+  // models and accelerator, then llama.cpp and its models, then the
+  // unrelated vno:// handler last.
   await report();
+  await reportWhisperModels();
 
   const config = await loadConfig();
   reportAccel(config);
@@ -891,6 +900,7 @@ export async function runSetup({
 
     await checkAccel(config, activeMode);
     await ensureModels(activeMode, model);
+    if (whisper) await runWhisperModelStep(activeMode);
     await reportStalePythonCache();
     if (protocol) await ensureProtocolHandler(protocol);
   }
@@ -1192,23 +1202,13 @@ async function checkAccel(config: Config, mode: InstallMode): Promise<void> {
 
 /**
  * Ensures the default model set (or just `only`, if given) is present,
- * downloading whatever `resolveModel` can't already find. Prints a before
- * inventory first, since a machine with everything already should see that
- * immediately rather than after a silent no-op.
+ * downloading whatever `resolveModel` can't already find. No "before"
+ * inventory here - `reportWhisperModels()` already printed one right under
+ * the whisper.cpp binary line, earlier in `runSetup()`'s pre-flight report,
+ * so this only ever speaks up when it's actually fetching something.
  */
 async function ensureModels(mode: InstallMode, only: string | null): Promise<void> {
   const wanted = only ? [only] : DEFAULT_MODELS;
-  const before = await listModels();
-
-  console.log();
-  console.log(chalk.bold("Models:"));
-  if (before.length === 0) {
-    console.log(chalk.dim("  none found yet"));
-  } else {
-    for (const entry of before) {
-      console.log(chalk.dim(`  ${entry.stem.padEnd(20)} ${((entry.size ?? 0) / 1e6).toFixed(0)} MB  ${entry.path}`));
-    }
-  }
 
   for (const name of wanted) {
     const existing = await resolveModel(name);
@@ -1225,6 +1225,63 @@ async function ensureModels(mode: InstallMode, only: string | null): Promise<voi
       console.log(chalk.green(`  ${name} ready.`));
     } catch (err) {
       console.log(chalk.red(`  Couldn't download "${name}": ${errorMessage(err)}`));
+    }
+  }
+}
+
+/**
+ * `vno setup --whisper` - offers every whisper.cpp model as a checkbox
+ * picker, not just the `small`/`turbo` defaults `ensureModels` already
+ * fetched above. Mirrors llama.cpp's `runLlamaModelStep`: multi-select
+ * rather than a single pick, since (unlike a summarization default) it's
+ * completely normal to want several - `tiny` for a quick pass, `large-v3`
+ * for the real one. Already-installed models are pre-checked and re-picking
+ * one is a harmless no-op (`downloadModel` resolves it and returns without
+ * re-fetching).
+ */
+async function runWhisperModelStep(mode: InstallMode): Promise<void> {
+  if (!process.stdin.isTTY) {
+    console.log(chalk.dim("\nNo terminal to ask which whisper models to add - skipping."));
+    return;
+  }
+
+  const catalog = whisperModelCatalog();
+  const installed = new Set((await listModels()).filter((m) => m.valid).map((m) => m.stem));
+
+  const pickAnswer = await prompt([
+    {
+      type: "checkbox",
+      name: "stems",
+      message: "Which whisper models would you like installed? (Space toggles, Enter confirms)",
+      choices: catalog.map((m) => ({
+        name:
+          `${m.stem}${m.aliases?.length ? ` (${m.aliases.join(", ")})` : ""} — ~${(m.approxBytes / 1e6).toFixed(0)} MB` +
+          (installed.has(m.stem) ? chalk.dim("  (installed)") : ""),
+        value: m.stem,
+        checked: installed.has(m.stem),
+      })),
+    },
+  ]);
+  if (pickAnswer === CANCELLED) return;
+
+  const wanted = (pickAnswer.stems as string[]).filter((stem) => !installed.has(stem));
+  if (wanted.length === 0) {
+    console.log(chalk.dim("\nNothing new selected."));
+    return;
+  }
+
+  for (const stem of wanted) {
+    console.log(chalk.dim(`\nDownloading "${stem}"...`));
+    try {
+      await downloadModel(stem, {
+        mode,
+        onLog: (line) => console.log(chalk.dim(`  ${line}`)),
+        onProgress: progressPrinter(),
+        onChecksumMismatch: confirmChecksumMismatch,
+      });
+      console.log(chalk.green(`  ${stem} ready.`));
+    } catch (err) {
+      console.log(chalk.red(`  Couldn't download "${stem}": ${errorMessage(err)}`));
     }
   }
 }

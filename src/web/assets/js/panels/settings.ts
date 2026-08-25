@@ -206,8 +206,9 @@ export function openSettings(): void {
           { label: "None", value: "" }
         ].concat(summarization.models.map(function (m) { return { label: m, value: m }; })),
           CONFIG.summaryModel || "",
-          "Used by the deck's Summarize button (optional) and \`vno summarize\`. Drop more .gguf files " +
-          "into the llama.cpp models folder, or run \`vno setup --summary-model <name>\`, to add more choices here.");
+          "Used by the deck's Summarize button (optional) and \`vno summarize\`. To add more choices here, " +
+          "drop a .gguf file into the llama.cpp models folder yourself, or run \`vno setup --llama\` to pick " +
+          "from vno's supported and tested models.");
 
         summaryPromptTa = textareaField(summarySection, "Override prompt", CONFIG.summaryPrompt || "",
           summarization.defaultPrompt,

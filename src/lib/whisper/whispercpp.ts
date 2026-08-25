@@ -800,6 +800,7 @@ export async function downloadModel(
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       onLog(`Downloading ${modelFileName(stem)}${attempt > 1 ? " (retry)" : ""} from ${source.label}...`);
+      onLog(`  URL: ${url}`);
       try {
         await downloadFile(url, destPath, { onProgress });
       } catch (err) {

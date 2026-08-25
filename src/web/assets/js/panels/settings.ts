@@ -178,7 +178,7 @@ export function openSettings(): void {
       // Transcription column - the prompt override needs room a half-width
       // column doesn't have. Optional feature, hidden behind its own
       // availability check the same way the GPU field above is when the
-      // engine isn't there at all. See lib/llamacpp.ts.
+      // engine isn't there at all. See lib/llama/llamacpp.ts.
       var summarySection = document.createElement("div");
       summarySection.className = "settings-full";
       host.appendChild(summarySection);

@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { which, runStep } from "./setup.ts";
-import { HOMEBREW_URL } from "./webSources.ts";
+import { which, runStep } from "../setup.ts";
+import { HOMEBREW_URL } from "../webSources.ts";
 import {
   isWindows,
   isMac,
@@ -10,9 +10,9 @@ import {
   bothInstallRoots as bothEngineInstallRoots,
   isManagedModel as isEngineManagedModel,
   removeEngineModel,
-} from "./engineInstall.ts";
-import type { InstallMode, EngineRoot, ModelRemoval } from "./engineInstall.ts";
-import type { Config } from "../types.ts";
+} from "../engineInstall.ts";
+import type { InstallMode, EngineRoot, ModelRemoval } from "../engineInstall.ts";
+import type { Config } from "../../types.ts";
 
 /**
  * Installing and resolving the llama.cpp binary, and finding the (optional)

@@ -106,9 +106,9 @@ export async function checkDependency(name: DependencyName): Promise<DependencyS
   if (name === "whisper") {
     // whisper.cpp isn't found on PATH the way ffmpeg is - it's usually
     // vendored under whisper-cpp/bin/ by `vno setup`. Imported lazily to
-    // avoid a static import cycle (lib/whispercpp.ts itself uses which() and
+    // avoid a static import cycle (lib/whisper/whispercpp.ts itself uses which() and
     // runStep() from this module).
-    const { resolveBinary } = await import("./whispercpp.ts");
+    const { resolveBinary } = await import("./whisper/whispercpp.ts");
     const binary = await resolveBinary({});
     return {
       name,
@@ -122,12 +122,12 @@ export async function checkDependency(name: DependencyName): Promise<DependencyS
 
   if (name === "llama") {
     // llama.cpp is found on PATH (or config.llamaCliPath) rather than
-    // vendored - see lib/llamacpp.ts. Nothing calls this with "llama" today
+    // vendored - see lib/llama/llamacpp.ts. Nothing calls this with "llama" today
     // (it's not in REQUIRED, and cli/setup.ts's own llama flow calls
     // llamacpp.ts directly with the real config), but it's kept correct for
     // DependencyName's sake. Imported lazily for the same import-cycle
     // reason as whisper.cpp above.
-    const { resolveBinary } = await import("./llamacpp.ts");
+    const { resolveBinary } = await import("./llama/llamacpp.ts");
     const binaryPath = await resolveBinary(null);
     return {
       name,
@@ -286,7 +286,7 @@ const SELF_ELEVATING = new Set(["winget", "choco", "scoop", "brew"]);
  *
  * whisper.cpp isn't built here: its install is per-platform binary/source
  * acquisition (brew formula, GitHub release zip, cmake build), not a package
- * manager one-liner - see `lib/whispercpp.ts:installWhisperCpp`.
+ * manager one-liner - see `lib/whisper/whispercpp.ts:installWhisperCpp`.
  */
 export async function buildInstallPlan(name: DependencyName): Promise<InstallPlan | null> {
   if (name !== "ffmpeg") throw new Error(`Unknown dependency "${name}"`);
@@ -441,7 +441,7 @@ export async function runPlan(
  * this an install always ends in "restart your terminal" - which is a poor end
  * to `vno t` that just installed what it needed. (whisper.cpp itself doesn't
  * go through PATH - it's vendored into whisper-cpp/bin/ and resolved directly
- * by `lib/whispercpp.ts:resolveBinary`, so this only ever matters for ffmpeg.)
+ * by `lib/whisper/whispercpp.ts:resolveBinary`, so this only ever matters for ffmpeg.)
  *
  * Windows keeps the real PATH in the registry, so we ask it for the current
  * value. Elsewhere it's enough to add the handful of directories package

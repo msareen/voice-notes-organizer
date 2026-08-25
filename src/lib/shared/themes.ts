@@ -9,7 +9,7 @@
  * Lives in lib/ rather than web/ because `vno setting` offers the same list
  * in the terminal, and lib/ is what the CLI and the browser paths share.
  */
-import type { Theme, ThemeId } from "../types.ts";
+import type { Theme, ThemeId } from "../../types.ts";
 
 export const THEMES: readonly Theme[] = [
   { id: "auto", label: "Auto", blurb: "Follow the system's light/dark setting" },

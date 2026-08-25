@@ -79,11 +79,11 @@ export interface Config {
   port: number;
   theme: ThemeId;
   accel: AccelState;
-  /** The llama.cpp model to summarize with, by alias/filename - null until configured. Summarization is entirely optional; see lib/llamacpp.ts. */
+  /** The llama.cpp model to summarize with, by alias/filename - null until configured. Summarization is entirely optional; see lib/llama/llamacpp.ts. */
   summaryModel: string | null;
   /** llama.cpp's accelerator backend, fixed at install time, mirroring `accel` above. */
   llamaAccel: AccelState;
-  /** Replaces lib/llama.ts's default instruction wholesale when set - null (or whitespace-only) means "use the built-in one". */
+  /** Replaces lib/llama/llama.ts's default instruction wholesale when set - null (or whitespace-only) means "use the built-in one". */
   summaryPrompt: string | null;
   /**
    * Manual override for where the llama.cpp binary lives - set when PATH
@@ -143,7 +143,7 @@ export interface Note {
   text: string;
   hasTranscript: boolean;
   transcriptExt: TranscriptExt | null;
-  /** From the <name>.summary.txt sidecar, if one exists. Optional feature — see lib/llama.ts. */
+  /** From the <name>.summary.txt sidecar, if one exists. Optional feature — see lib/llama/llama.ts. */
   summary: string | null;
   hasSummary: boolean;
   size: number | null;
@@ -203,7 +203,7 @@ export interface ProgressOptions {
 // Volumes
 // ---------------------------------------------------------------------------
 
-/** A detected removable volume. See lib/volumes.ts. */
+/** A detected removable volume. See lib/import/volumes.ts. */
 export interface Volume {
   /** Human-readable label. */
   name: string;
@@ -217,7 +217,7 @@ export interface Volume {
 /**
  * What `syncVolume` actually takes: a detected volume, or a manually
  * configured source dressed as one. Every field past `Volume`'s is only ever
- * set on a configured source — see lib/sync.ts:syncVolume for what each does.
+ * set on a configured source — see lib/import/sync.ts:syncVolume for what each does.
  */
 export interface SyncSource extends Volume {
   /** Overrides `name` when choosing the destination folder. */

@@ -71,4 +71,4 @@ export function modelSources(): ModelSource[] {
 }
 
 // llama.cpp (optional summarization engine) is installed via `brew`/`winget`
-// now - see lib/llamacpp.ts - so it has no release/model URLs of its own here.
+// now - see lib/llama/llamacpp.ts - so it has no release/model URLs of its own here.

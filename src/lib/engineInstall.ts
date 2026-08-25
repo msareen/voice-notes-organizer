@@ -9,8 +9,8 @@ import type { AccelBackend } from "../types.ts";
 /**
  * Engine-agnostic pieces of "install and resolve a vendored binary +
  * models under a vno-managed folder, tracked by a vno-install.json
- * manifest" - shared by whisper.cpp (lib/whispercpp.ts) and llama.cpp
- * (lib/llamacpp.ts). Nothing here knows which engine it's serving; each
+ * manifest" - shared by whisper.cpp (lib/whisper/whispercpp.ts) and llama.cpp
+ * (lib/llama/llamacpp.ts). Nothing here knows which engine it's serving; each
  * engine module binds an `EngineRoot` describing its own folder name and
  * manifest description text, and calls through to these.
  *

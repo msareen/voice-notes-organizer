@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import type { NotesCache } from "../types.ts";
+import type { NotesCache } from "../../types.ts";
 
 const CACHE_DIR = path.join(os.homedir(), ".vno", "notes-cache");
 

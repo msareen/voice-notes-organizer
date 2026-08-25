@@ -4,7 +4,7 @@
 import path from "node:path";
 import chalk from "chalk";
 import { renderPage, renderManifest } from "../page.ts";
-import { themeOf } from "../../lib/themes.ts";
+import { themeOf } from "../../lib/shared/themes.ts";
 import { getSessionToken } from "../../lib/sessionToken.ts";
 import { createContext } from "./context.ts";
 import { serveAsset } from "./assets.ts";

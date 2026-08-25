@@ -1,10 +1,10 @@
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.ts";
-import { findMediaFiles } from "../lib/sync.ts";
-import { readTranscript, writeSummary, resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
-import { summarizeText, isLlamaInstalled, resolveLlamaAccel } from "../lib/llama.ts";
-import { listModels as listLlamaModels } from "../lib/llamacpp.ts";
+import { findMediaFiles } from "../lib/import/sync.ts";
+import { readTranscript, writeSummary, resolveNamedFile, reportUnresolved } from "../lib/notes/notes.ts";
+import { summarizeText, isLlamaInstalled, resolveLlamaAccel } from "../lib/llama/llama.ts";
+import { listModels as listLlamaModels } from "../lib/llama/llamacpp.ts";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

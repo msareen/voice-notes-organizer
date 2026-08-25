@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "fs-extra";
 import chalk from "chalk";
-import { summarizeText, resolveLlamaAccel, llamaAccelState, llamaAccelUnasked, isDeviceError, lastLine } from "../../../lib/llama.ts";
-import { readSummary, writeSummary, findSummary } from "../../../lib/notes.ts";
+import { summarizeText, resolveLlamaAccel, llamaAccelState, llamaAccelUnasked, isDeviceError, lastLine } from "../../../lib/llama/llama.ts";
+import { readSummary, writeSummary, findSummary } from "../../../lib/notes/notes.ts";
 import type { ServerContext } from "../context.ts";
 
 function errorMessage(err: unknown): string {

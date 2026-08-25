@@ -1,8 +1,8 @@
-import { accelState, crossLanguageState } from "../../../lib/whisper.ts";
-import { sourceDestFolder } from "../../../lib/sync.ts";
+import { accelState, crossLanguageState } from "../../../lib/whisper/whisper.ts";
+import { sourceDestFolder } from "../../../lib/import/sync.ts";
 import { openPath } from "../../../lib/open.ts";
-import { THEME_IDS } from "../../../lib/themes.ts";
-import { isLanguageChoice, normalizeLanguageMap } from "../../../lib/languages.ts";
+import { THEME_IDS } from "../../../lib/shared/themes.ts";
+import { isLanguageChoice, normalizeLanguageMap } from "../../../lib/shared/languages.ts";
 import { MODELS } from "../constants.ts";
 import type { ServerContext } from "../context.ts";
 import type { RawSource, Source, ThemeId } from "../../../types.ts";

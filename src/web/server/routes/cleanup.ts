@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { findMediaFiles } from "../../../lib/sync.ts";
-import { getDurationSeconds } from "../../../lib/media.ts";
-import { listOriginalBackups, isOriginalBackup } from "../../../lib/special-case-handling.ts";
+import { findMediaFiles } from "../../../lib/import/sync.ts";
+import { getDurationSeconds } from "../../../lib/import/media.ts";
+import { listOriginalBackups, isOriginalBackup } from "../../../lib/import/special-case-handling.ts";
 import type { ServerContext } from "../context.ts";
 
 /** A recording short enough to offer for deletion. */

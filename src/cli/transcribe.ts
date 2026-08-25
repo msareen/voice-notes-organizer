@@ -2,8 +2,8 @@ import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.ts";
-import { findMediaFiles } from "../lib/sync.ts";
-import { resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
+import { findMediaFiles } from "../lib/import/sync.ts";
+import { resolveNamedFile, reportUnresolved } from "../lib/notes/notes.ts";
 import {
   transcribeFile,
   resolveAccel,
@@ -11,10 +11,10 @@ import {
   isDeviceError,
   lastLine,
   resolveLanguagePlan,
-} from "../lib/whisper.ts";
-import { resolveModel } from "../lib/whispercpp.ts";
+} from "../lib/whisper/whisper.ts";
+import { resolveModel } from "../lib/whisper/whispercpp.ts";
 import { ensureDependencies } from "./setup.ts";
-import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/media.ts";
+import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/import/media.ts";
 import { prompt, CANCELLED } from "./prompt.ts";
 import { runVisualize } from "./visualize.ts";
 import { createProgressBar, locationOf } from "./progress.ts";
@@ -63,7 +63,7 @@ export async function transcribeMany(
   // pipe receives. This is the usual split - data on stdout, diagnostics on
   // stderr - which vno didn't previously honour anywhere.
   const log = toStderr ? (line: string) => void process.stderr.write(`${line}\n`) : console.log;
-  // whisper.cpp's own stdout/stderr are written directly by lib/whisper.ts
+  // whisper.cpp's own stdout/stderr are written directly by lib/whisper/whisper.ts
   // unless it's given an onOutput sink, so redirecting our own logging isn't
   // enough - the binary's several KB of timings would still land on stdout.
   const onOutput = toStderr ? (line: string) => void process.stderr.write(chalk.dim(`${line}\n`)) : null;

@@ -4,7 +4,7 @@ import path from "node:path";
 import chalk from "chalk";
 import fs from "fs-extra";
 import { resolveBinary, resolveModel } from "./llamacpp.ts";
-import type { AccelBackend, AccelState, Config } from "../types.ts";
+import type { AccelBackend, AccelState, Config } from "../../types.ts";
 
 /** Receives llama.cpp's output line by line. */
 export type OutputCallback = (line: string) => void;

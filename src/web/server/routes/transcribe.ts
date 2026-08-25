@@ -8,8 +8,8 @@ import {
   isDeviceError,
   lastLine,
   resolveLanguagePlan,
-} from "../../../lib/whisper.ts";
-import { isLanguageChoice } from "../../../lib/languages.ts";
+} from "../../../lib/whisper/whisper.ts";
+import { isLanguageChoice } from "../../../lib/shared/languages.ts";
 import { MODELS } from "../constants.ts";
 import type { ServerContext } from "../context.ts";
 

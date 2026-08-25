@@ -1,10 +1,10 @@
 import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
-import { findMediaFiles, reporter } from "./sync.ts";
+import { findMediaFiles, reporter } from "../import/sync.ts";
 import { parseCues } from "./vtt.ts";
-import { getDurationSeconds, recordedDate } from "./media.ts";
-import { healIfDamaged } from "./special-case-handling.ts";
+import { getDurationSeconds, recordedDate } from "../import/media.ts";
+import { healIfDamaged } from "../import/special-case-handling.ts";
 import { loadNotesCache, saveNotesCache } from "./notesCache.ts";
 import type {
   Note,
@@ -12,7 +12,7 @@ import type {
   ProgressOptions,
   TranscriptExt,
   TranscriptRead,
-} from "../types.ts";
+} from "../../types.ts";
 
 // Preference order for a note's transcript: timed formats first (they unlock
 // the follow-along highlight), plain text last (shown, but not highlighted).
@@ -180,7 +180,7 @@ async function buildNote(
   const dir = dirRaw === "." ? "" : dirRaw.split(path.sep).join("/");
 
   // Damaged Samsung recordings are repaired in place before anything reads
-  // them (lib/special-case-handling.ts). This sits here rather than behind a
+  // them (lib/import/special-case-handling.ts). This sits here rather than behind a
   // failed probe or a cache miss because it has to run for every note either
   // way - see `healIfDamaged`. When it fires, the file on disk is a different
   // one, so the passed-in stat and any cached duration describe the old file.
@@ -236,7 +236,7 @@ async function buildNote(
  * depth-first, so `dir` advances one folder at a time rather than jumping around.
  *
  * Duration is the slow part (an ffprobe spawn per file), so it's cached on
- * disk keyed by size+mtime (`lib/notesCache.ts`) - a file that hasn't changed
+ * disk keyed by size+mtime (`lib/notes/notesCache.ts`) - a file that hasn't changed
  * since the last build is never re-probed. Everything else is cheap enough to
  * always compute fresh, so it can't go stale between builds. Selecting a note
  * in the UI triggers `refreshNote` for a one-file recheck that bypasses the

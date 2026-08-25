@@ -3,15 +3,15 @@ import path from "node:path";
 import fs from "fs-extra";
 import chalk from "chalk";
 import { saveConfig, configFilePath } from "../../lib/config.ts";
-import { buildNotes, TRANSCRIPT_EXTS, SUMMARY_EXT } from "../../lib/notes.ts";
-import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper.ts";
-import { resolveModel } from "../../lib/whispercpp.ts";
-import { isLlamaInstalled, DEFAULT_SUMMARY_PROMPT } from "../../lib/llama.ts";
-import { listModels as listLlamaModels } from "../../lib/llamacpp.ts";
+import { buildNotes, TRANSCRIPT_EXTS, SUMMARY_EXT } from "../../lib/notes/notes.ts";
+import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper/whisper.ts";
+import { resolveModel } from "../../lib/whisper/whispercpp.ts";
+import { isLlamaInstalled, DEFAULT_SUMMARY_PROMPT } from "../../lib/llama/llama.ts";
+import { listModels as listLlamaModels } from "../../lib/llama/llamacpp.ts";
 import { checkDependencies } from "../../lib/setup.ts";
-import { recordDeletions } from "../../lib/ledger.ts";
-import { MEDIA_EXTENSIONS } from "../../lib/sync.ts";
-import { THEMES, themeOf } from "../../lib/themes.ts";
+import { recordDeletions } from "../../lib/notes/ledger.ts";
+import { MEDIA_EXTENSIONS } from "../../lib/import/sync.ts";
+import { THEMES, themeOf } from "../../lib/shared/themes.ts";
 import { MODELS, LANGUAGES } from "./constants.ts";
 import type {
   Config,
@@ -20,7 +20,7 @@ import type {
   ProgressCallback,
   StateResponse,
 } from "../../types.ts";
-import type { DeletionItem } from "../../lib/ledger.ts";
+import type { DeletionItem } from "../../lib/notes/ledger.ts";
 
 /** What `removeRecording` reports back for the ledger. */
 export interface RemovalResult {

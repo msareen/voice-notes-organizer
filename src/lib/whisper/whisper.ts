@@ -3,11 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import chalk from "chalk";
 import fs from "fs-extra";
-import { which } from "./setup.ts";
+import { which } from "../setup.ts";
 import { resolveBinary, resolveModel } from "./whispercpp.ts";
-import { normalizeLanguageMap } from "./languages.ts";
-import { repairSamsungM4A } from "./special-case-handling.ts";
-import type { AccelBackend, AccelState, Config, CrossLanguage } from "../types.ts";
+import { normalizeLanguageMap } from "../shared/languages.ts";
+import { repairSamsungM4A } from "../import/special-case-handling.ts";
+import type { AccelBackend, AccelState, Config, CrossLanguage } from "../../types.ts";
 
 /** Receives whisper.cpp's output line by line. */
 export type OutputCallback = (line: string) => void;
@@ -49,7 +49,7 @@ export interface TranscribeOptions {
  * transcribing verbatim (`-tr`). `device` is "cuda" (or another non-cpu
  * accelerator) to let the binary use whatever backend it was built with, or
  * "cpu" to force `-ng` even on an accelerator-capable build - the backend
- * itself is fixed at install time (see lib/whispercpp.ts), not chosen here.
+ * itself is fixed at install time (see lib/whisper/whispercpp.ts), not chosen here.
  *
  * `crossLanguage` ({ model, map }) guides auto-detect rather than overriding
  * it: with a model set, a fast `-dl` pass decides the language first and its

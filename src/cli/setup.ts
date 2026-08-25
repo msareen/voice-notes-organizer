@@ -25,7 +25,7 @@ import {
   isManagedModel,
   removeModel,
   DEFAULT_MODELS,
-} from "../lib/whispercpp.ts";
+} from "../lib/whisper/whispercpp.ts";
 import {
   installMacBinary as installLlamaMacBinary,
   installWindowsBinary as installLlamaWindowsBinary,
@@ -40,17 +40,17 @@ import {
   listModels as listLlamaModels,
   isManagedModel as isManagedLlamaModel,
   removeModel as removeLlamaModel,
-} from "../lib/llamacpp.ts";
-import { accelState } from "../lib/whisper.ts";
-import { llamaAccelState } from "../lib/llama.ts";
+} from "../lib/llama/llamacpp.ts";
+import { accelState } from "../lib/whisper/whisper.ts";
+import { llamaAccelState } from "../lib/llama/llama.ts";
 import { loadConfig, saveConfig } from "../lib/config.ts";
 import { protocolStatus, registerProtocol } from "../lib/protocol.ts";
 import { prompt, CANCELLED } from "./prompt.ts";
 import type { DependencyName, InstallPlan, PlanResult } from "../lib/setup.ts";
-import type { AccelRecord, InstallMode } from "../lib/whispercpp.ts";
+import type { AccelRecord, InstallMode } from "../lib/whisper/whispercpp.ts";
 import type { ProtocolStatus } from "../lib/protocol.ts";
 import type { AccelBackend, Config } from "../types.ts";
-import type { DownloadProgress } from "../lib/whispercpp.ts";
+import type { DownloadProgress } from "../lib/whisper/whispercpp.ts";
 
 /** The two things vno can't transcribe without, in install order. */
 const REQUIRED: DependencyName[] = ["ffmpeg", "whisper"];
@@ -73,7 +73,7 @@ export interface EnsureOptions {
  *
  * `reason` is what the check is for ("transcribe"), used in the explanation.
  * `mode` picks where a fresh whisper.cpp install lands - see
- * `lib/whispercpp.ts:resolveInstallRoot`. Left `null` (the default), the user
+ * `lib/whisper/whispercpp.ts:resolveInstallRoot`. Left `null` (the default), the user
  * is asked - local, global, or "I already have it" - rather than silently
  * assuming local; only `vno setup --local`/`--global` forces one without asking.
  */
@@ -194,7 +194,7 @@ type WhisperChoice = InstallMode | "existing" | "skip";
 
 /**
  * whisper.cpp's install isn't a package-manager one-liner - it's a per-
- * platform binary/source acquisition (see `lib/whispercpp.ts`), and unlike
+ * platform binary/source acquisition (see `lib/whisper/whispercpp.ts`), and unlike
  * ffmpeg there's a real choice of *where* it goes, so it gets its own flow
  * rather than going through `buildInstallPlan`/`runPlan`.
  *

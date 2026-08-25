@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Volume } from "../types.ts";
+import type { Volume } from "../../types.ts";
 
 const execFileAsync = promisify(execFile);
 

@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { readTranscript, findTranscript } from "../../../lib/notes.ts";
-import { refreshNote } from "../../../lib/notes.ts";
-import { parseCues, serializeCues } from "../../../lib/vtt.ts";
+import { readTranscript, findTranscript } from "../../../lib/notes/notes.ts";
+import { refreshNote } from "../../../lib/notes/notes.ts";
+import { parseCues, serializeCues } from "../../../lib/notes/vtt.ts";
 import { openPath, revealInFolder } from "../../../lib/open.ts";
 import type { ServerContext } from "../context.ts";
 
@@ -75,7 +75,7 @@ export function createNotesRoutes(ctx: ServerContext) {
 
   /**
    * The startup scan trusts a cached duration keyed by size+mtime (fast on a
-   * big library - see lib/notes.ts:buildNotes), which can go stale if a file
+   * big library - see lib/notes/notes.ts:buildNotes), which can go stale if a file
    * was replaced without vno noticing. Selecting a note in the browser calls
    * this to recheck just that one file - a single ffprobe, not a full rescan -
    * and patches the shared notes array in place via the same object

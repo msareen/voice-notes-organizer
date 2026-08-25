@@ -336,7 +336,7 @@ function buildTransport(note: Note, host: HTMLElement): DeckMedia {
 
 /**
  * The list is built from a cached duration (fast startup on a big library -
- * see lib/notesCache.ts), so it can be stale. Selecting a note is the one
+ * see lib/notes/notesCache.ts), so it can be stale. Selecting a note is the one
  * moment worth paying for a fresh ffprobe: rechecks just this file and
  * patches the displayed duration + transcript in place, without touching
  * the <audio> element so playback in progress isn't interrupted.

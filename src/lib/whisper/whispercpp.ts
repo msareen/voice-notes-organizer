@@ -1,9 +1,9 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { which, detectPackageManager, runStep } from "./setup.ts";
-import type { AccelBackend } from "../types.ts";
-import type { InstallStep } from "./setup.ts";
+import { which, detectPackageManager, runStep } from "../setup.ts";
+import type { AccelBackend } from "../../types.ts";
+import type { InstallStep } from "../setup.ts";
 import {
   WHISPERCPP_VERSION,
   WHISPERCPP_REPO,
@@ -13,7 +13,7 @@ import {
   whispercppReleaseAssetUrl,
   whispercppCloneUrl,
   modelSources,
-} from "./webSources.ts";
+} from "../webSources.ts";
 import {
   isWindows,
   isMac,
@@ -33,7 +33,7 @@ import {
   registerExternalBinary as registerExternalEngineBinary,
   isManagedModel as isEngineManagedModel,
   removeEngineModel,
-} from "./engineInstall.ts";
+} from "../engineInstall.ts";
 import type {
   InstallMode,
   BinaryRecord,
@@ -45,7 +45,7 @@ import type {
   DownloadProgress,
   DownloadProgressCallback,
   ModelRemoval,
-} from "./engineInstall.ts";
+} from "../engineInstall.ts";
 
 /**
  * Installing and resolving the whisper.cpp binary, its models and the
@@ -58,7 +58,7 @@ import type {
  *
  * The generic parts of this (root/manifest handling, download, archive
  * extraction, GPU detection) live in lib/engineInstall.ts, shared with
- * lib/llamacpp.ts - everything below is whisper.cpp-specific: per-platform
+ * lib/llama/llamacpp.ts - everything below is whisper.cpp-specific: per-platform
  * asset picking, the model alias/size tables, and the ggml-*.bin naming
  * convention.
  */

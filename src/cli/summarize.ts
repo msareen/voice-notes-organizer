@@ -1,8 +1,8 @@
-import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.ts";
-import { readTranscript, writeSummary } from "../lib/notes.ts";
+import { findMediaFiles } from "../lib/sync.ts";
+import { readTranscript, writeSummary, resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
 import { summarizeText, isLlamaInstalled, resolveLlamaAccel } from "../lib/llama.ts";
 import { listModels as listLlamaModels } from "../lib/llamacpp.ts";
 
@@ -30,11 +30,13 @@ export interface RunSummarizeOptions {
 export async function runSummarize({ file, model }: RunSummarizeOptions): Promise<boolean> {
   const config = await loadConfig();
 
-  const resolved = path.resolve(process.cwd(), file);
-  if (!(await fs.pathExists(resolved))) {
-    console.log(chalk.red(`File not found: ${resolved}`));
+  const allAudio = await findMediaFiles(config.target);
+  const match = await resolveNamedFile(file, allAudio, config.target);
+  if (!match.file) {
+    reportUnresolved(file, match, config.target);
     return false;
   }
+  const resolved = match.file;
 
   if (!(await isLlamaInstalled(config))) {
     console.log(chalk.yellow("llama.cpp isn't installed. Run `vno setup --llama` to add it."));

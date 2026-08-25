@@ -466,7 +466,7 @@ export async function runSettings(): Promise<void> {
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
           { name: `Viewer theme            ${chalk.dim(`[${themeOf(config)}]`)}`, value: "theme" },
-          { name: `Viewer port             ${chalk.dim(`[${config.port || DEFAULT_PORT}]`)}`, value: "port" },
+          { name: `Viewer port             ${chalk.dim(`[${config.port ?? DEFAULT_PORT}]`)}`, value: "port" },
           { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
           { name: `Source folders  ${chalk.dim(`[${(config.sources || []).length} configured]`)}`, value: "sources" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
@@ -641,7 +641,7 @@ export async function runSettings(): Promise<void> {
           type: "input",
           name: "value",
           message: `Port for the browser viewer (${DEFAULT_PORT} is the default; 0 picks a free one each run)`,
-          default: String(config.port || DEFAULT_PORT),
+          default: String(config.port ?? DEFAULT_PORT),
           // Ports above 1023 only: the low range needs elevation on macOS and
           // Linux, and vno has no business asking for that to show a player.
           validate: (input: string) => {

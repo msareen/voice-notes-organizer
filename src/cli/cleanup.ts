@@ -4,7 +4,7 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig } from "../lib/config.ts";
 import { findMediaFiles } from "../lib/sync.ts";
-import { resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
+import { resolveNamedFile, reportUnresolved, SUMMARY_EXT } from "../lib/notes.ts";
 import { getDurationSeconds } from "../lib/media.ts";
 import { recordDeletions, clearLedger, ledgerSummary } from "../lib/ledger.ts";
 import { listOriginalBackups, isOriginalBackup } from "../lib/special-case-handling.ts";
@@ -19,7 +19,7 @@ const TRANSCRIPT_EXTS = [".txt", ".vtt", ".srt"];
 
 function transcriptPathsFor(audioPath: string): string[] {
   const base = audioPath.slice(0, -path.extname(audioPath).length);
-  return TRANSCRIPT_EXTS.map((ext) => base + ext);
+  return [...TRANSCRIPT_EXTS.map((ext) => base + ext), base + SUMMARY_EXT];
 }
 
 function errorMessage(err: unknown): string {

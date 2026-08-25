@@ -28,6 +28,7 @@ rather than crashing the tool.
   "theme": "tape",
   "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
   "summaryModel": null,
+  "summaryEnabled": true,
   "llamaAccel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
   "summaryPrompt": null,
   "llamaCliPath": null
@@ -54,6 +55,7 @@ time.
 | `theme` | ✅ | ✅ | ✅ |
 | `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
 | `summaryModel` | ✅ (once installed) | ✅ (once installed) | ✅ |
+| `summaryEnabled` | — | ✅ | ✅ |
 | `llamaAccel` | on/off only | on/off only | ✅ (set by `vno setup --llama`) |
 | `summaryPrompt` | — | ✅ | ✅ |
 | `llamaCliPath` | — | — | ✅ (set by `vno setup --llama` when asked) |
@@ -263,6 +265,15 @@ optional and unset just means "not configured yet".
 
 Set from `vno setting` → *Summarization model* (shown only once at least one
 model is present) or the UI's Settings dialog.
+
+## `summaryEnabled`
+
+Whether the deck shows a **Summary** tab and **Summarize** button at all.
+`true` by default (or unset — same thing); set to `false` to hide them.
+Purely a UI switch: existing `.summary.txt` files are untouched either way,
+and flipping it back to `true` brings them straight back into view. Set from
+the UI's Settings dialog (*Show the Summary tab in the deck*). See
+[Summarization](summarization.md#hiding-the-summary-tab).
 
 ## `llamaAccel`
 

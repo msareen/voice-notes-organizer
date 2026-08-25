@@ -185,7 +185,7 @@ program
     examples([
       ["vno setup --llama", "one-time: install llama.cpp and pick a model"],
       ["vno summarize 250810_1328", "summarize one imported recording, matched by name"],
-      ["vno summarize interview.mp3 -m phi4-mini", "use a specific model for this run"],
+      ["vno summarize interview.mp3 -m my-model-Q4_K_M.gguf", "use a specific installed model for this run"],
     ]) +
       chalk.dim(
         "\nOne recording at a time - no picker, no batch mode. The recording needs a\n" +
@@ -366,7 +366,7 @@ program
   .option("--list-models", "print the model inventory and exit; installs nothing")
   .option("--remove-model [name]", "delete installed models to reclaim disk space; bare, opens a picker")
   .option("--llama", "install llama.cpp for transcript summarization (optional; never installed otherwise)")
-  .option("--summary-model <name>", "fetch this summarization model (implies --llama if it isn't installed yet)")
+  .option("--summary-model <name>", "fetch this summarization model non-interactively; pair with --llama if llama.cpp isn't installed yet")
   .addHelpText(
     "after",
     examples([
@@ -378,7 +378,7 @@ program
       ["vno setup --list-models", "show which models are already on disk"],
       ["vno setup --remove-model", "pick installed models to delete and reclaim the space"],
       ["vno setup --llama", "install llama.cpp and pick a summarization model"],
-      ["vno setup --llama --summary-model phi4-mini", "install llama.cpp with a specific model, no prompts"],
+      ["vno setup --llama --summary-model phi-4-mini", "install llama.cpp with a specific model, no prompts"],
     ]) +
       chalk.dim(
         "\nNothing installs without you confirming it. This same check runs by itself\n" +

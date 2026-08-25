@@ -375,14 +375,26 @@ vno status
 ```
 
 ```
-vno setup - win32 x64
+vno status - win32 x64
 
-  ✓ ffmpeg       C:\...\ffmpeg.EXE
-  ✓ ffprobe      C:\...\ffprobe.EXE
-  ✓ whisper.cpp  C:\...\whisper-cli.exe
-  ✓ accel        NVIDIA GeForce RTX 3060 Laptop GPU in use
-  ✓ vno://       registered
+  ✓ ffmpeg          C:\...\ffmpeg.EXE
+  ✓ ffprobe         C:\...\ffprobe.EXE
+  ✓ whisper.cpp     C:\...\whisper-cli.exe
+  ✓ whisper models
+      small                        C:\...\ggml-small.bin
+      large-v3-turbo               C:\...\ggml-large-v3-turbo.bin
+  ✓ accel           NVIDIA GeForce RTX 3060 Laptop GPU in use
+  ✓ llama.cpp       C:\...\llama-cli.exe
+  ✓ llama models
+      gemma-4-E2B-it-Q4_K_M.gguf   C:\...\gemma-4-E2B-it-Q4_K_M.gguf
+  ✓ vno://          registered
 ```
+
+Grouped by engine, in the order a machine actually needs them: the shared
+media tools, then everything whisper.cpp (binary, its models, the
+accelerator), then everything llama.cpp (binary, its models — entirely
+optional, see [Summarization](summarization.md)), then the unrelated
+`vno://` browser-launch handler last.
 
 It ends with a one-line verdict — **Ready** or **Not ready** with the specific
 blockers listed — and **exits 0 when ready, 1 when not**, so another tool can
@@ -435,8 +447,9 @@ vno setup --global        # install whisper.cpp under your home directory instea
 vno setup --model small   # fetch just this model instead of the defaults
 vno setup --list-models   # print the model inventory and exit; installs nothing
 vno setup --remove-model  # pick installed models to delete and reclaim the space
-vno setup --llama         # optional: install llama.cpp (brew/winget) and show where models go
-vno setup --llama --summary-model my-model-Q4_K_M.gguf    # ...and set a specific model, no prompts
+vno setup --whisper       # pick any number of whisper models from a checklist (tiny…large-v3-turbo)
+vno setup --llama         # optional: install llama.cpp (brew/winget), then pick model(s) from a curated checklist
+vno setup --llama --summary-model qwen3.5-2b    # ...and fetch a specific catalog model, no prompts
 ```
 
 | Flag | Effect |
@@ -445,10 +458,11 @@ vno setup --llama --summary-model my-model-Q4_K_M.gguf    # ...and set a specifi
 | `--local` | Install whisper.cpp beside this vno install, without asking |
 | `--global` | Install whisper.cpp under `~/.whisper-cpp` (`%LOCALAPPDATA%\whisper-cpp` on Windows), without asking |
 | `--model <name>` | Fetch just this model instead of the default set (`small` + `turbo`) |
+| `--whisper` | Pick any number of whisper.cpp models to install from a checklist (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`), showing which are already installed |
 | `--list-models` | Print the model inventory (whisper **and** summarization) and exit |
 | `--remove-model [name]` | Delete installed models to reclaim disk space. **Bare**, opens a picker over everything installed; with a name, targets that one. Always confirmed, defaulting to *no* |
-| `--llama` | Install llama.cpp for transcript summarization (optional) via `brew`/`winget`, then show where to drop your `.gguf` model files. Re-run any time |
-| `--summary-model <name>` | Set this as the summarization model non-interactively — just confirms the file is already in your models folder, never downloads it |
+| `--llama` | Install llama.cpp for transcript summarization (optional) via `brew`/`winget`, then offer a curated, tiered checklist of small "edge" models to download. Re-run any time |
+| `--summary-model <name>` | Fetch this one summarization model non-interactively, skipping the checklist. A catalog alias (e.g. `qwen3.5-2b`) is downloaded and checksum-verified; a name already in your models folder is just confirmed, never re-downloaded. If llama.cpp isn't installed yet, pass `--llama` alongside it (`--summary-model` alone won't install the binary — it tells you to add `--llama` instead) |
 
 `--remove-model` only ever deletes model files sitting inside vno's own
 local/global `models/` folders (whisper's or llama's). One found through

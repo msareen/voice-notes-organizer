@@ -22,10 +22,15 @@ src/
     import.ts  transcribe.ts  summarize.ts  cleanup.ts  visualize.ts  settings.ts
     setup.ts   prompt.ts  searchableCheckbox.ts  progress.ts
   lib/               domain logic and OS access, shared by the CLI and the UI
-    config.ts  notes.ts  sync.ts  media.ts  vtt.ts  themes.ts
-    volumes.ts  whisper.ts  whispercpp.ts  llama.ts  llamacpp.ts
-    engineInstall.ts  setup.ts  open.ts  ledger.ts
-    special-case-handling.ts
+    config.ts  engineInstall.ts  setup.ts  open.ts  protocol.ts
+    sessionToken.ts
+    whisper/           whisper.ts  whispercpp.ts
+    llama/             llama.ts  llamacpp.ts
+    webSources/        interfaces.ts  whisperModels.ts  llamaModels.ts
+    notes/             notes.ts  notesCache.ts  vtt.ts  ledger.ts
+    import/            sync.ts  volumes.ts  media.ts
+                       special-case-handling.ts
+    shared/            themes.ts  languages.ts
   web/               the browser UI behind `vno visualize`
     server/          HTTP server: session token, JSON API, SSE job stream
       index.ts       bootstraps http.Server, builds ctx, dispatches routes
@@ -60,22 +65,29 @@ so anything there is safe to reuse from either side.
 | Module | Responsibility |
 | --- | --- |
 | `lib/config.ts` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
-| `lib/volumes.ts` | Per-OS removable-volume detection |
-| `lib/sync.ts` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
-| `lib/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
-| `lib/whispercpp.ts` | Installing whisper.cpp itself: `vno-install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
-| `lib/llama.ts` | Resolving the installed llama.cpp binary/model and running a summarization (no ffmpeg step — text in, text out). Optional; see [summarization.md](summarization.md) |
-| `lib/llamacpp.ts` | Finding the llama.cpp binary (PATH, or a manual `config.llamaCliPath` override) and drop-in `.gguf` model discovery under a local/global `models/` folder — no install-manifest, no download, no curated catalog. The binary itself is installed by `brew`/`winget`, not vno |
-| `lib/engineInstall.ts` | The install-root/models-folder primitives `whispercpp.ts` and `llamacpp.ts` share (only `llamacpp.ts` uses the models-folder half now — its binary isn't vendored) |
+| `lib/import/volumes.ts` | Per-OS removable-volume detection |
+| `lib/import/sync.ts` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
+| `lib/whisper/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
+| `lib/whisper/whispercpp.ts` | Installing whisper.cpp itself: `vno-install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/checksum-verified validation |
+| `lib/llama/llama.ts` | Resolving the installed llama.cpp binary/model and running a summarization (no ffmpeg step — text in, text out). Optional; see [summarization.md](summarization.md) |
+| `lib/llama/llamacpp.ts` | Finding the llama.cpp binary (PATH, or a manual `config.llamaCliPath` override); downloading a model from vno's curated catalog (`webSources/llamaModels.ts`), or just discovering any `.gguf` you drop in yourself, under a local/global `models/` folder. The binary itself is installed by `brew`/`winget`, not vno |
+| `lib/webSources/interfaces.ts` | Shared types for the two model catalogs below (`ModelSource`, `WhisperModelSource`, `LlamaModelSource`) |
+| `lib/webSources/whisperModels.ts` | Every whisper.cpp binary/model download location: GitHub release URLs, Hugging Face + mirror bases, and the curated `WHISPER_MODEL_CATALOG` (sizes, checksums) |
+| `lib/webSources/llamaModels.ts` | The curated, tiered `LLAMA_MODEL_CATALOG` of small "edge" instruct models (repo, filename, size, checksum) that `vno setup --llama` offers |
+| `lib/engineInstall.ts` | The install-root/models-folder primitives `whispercpp.ts` and `llamacpp.ts` share — resumable `fetch()` downloads, SHA-256 verification against a catalog checksum (never on a re-scan, only right after a download), and the models-folder layout |
 | `lib/setup.ts` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
-| `lib/media.ts` | ffprobe durations, filename date parsing, formatting |
-| `lib/vtt.ts` | Parse and serialize WebVTT cues |
-| `lib/notes.ts` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
+| `lib/import/media.ts` | ffprobe durations, filename date parsing, formatting |
+| `lib/notes/vtt.ts` | Parse and serialize WebVTT cues |
+| `lib/notes/notes.ts` | Builds the note model both the CLI and the page render from, reporting progress through an optional callback |
+| `lib/notes/notesCache.ts` | On-disk cache of per-file ffprobe durations, keyed by size+mtime, so a note rebuild only pays for what actually changed |
 | `cli/progress.ts` | The terminal progress bar every slow per-file loop draws through |
 | `lib/open.ts` | Opening a folder / revealing a file, per OS — behind `vno explore`, the UI's Explore button and `/api/reveal` alike |
-| `lib/ledger.ts` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
-| `lib/themes.ts` | The UI's theme ids/labels, and `themeOf(config)`. Ids only — each palette lives in `assets/app.css` as a `[data-theme="id"]` block, so colours have one home. Here rather than in `web/` because `vno setting` offers the same list |
-| `lib/special-case-handling.ts` | Recovering Samsung Voice Recorder `.m4a` files whose index was truncated by an interrupted copy — see [Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe-and-a-repairedm4a-appeared) |
+| `lib/protocol.ts` | Registering `vno://` as a Windows URL protocol handler (`vno setup`'s last check) |
+| `lib/sessionToken.ts` | Generating and persisting the server's session token in `~/.vno/session-token`, reused across `vno v` launches |
+| `lib/notes/ledger.ts` | `~/.vno/deleted.json`: what was deleted, so import won't re-copy it |
+| `lib/shared/themes.ts` | The UI's theme ids/labels, and `themeOf(config)`. Ids only — each palette lives in `assets/app.css` as a `[data-theme="id"]` block, so colours have one home. Here rather than in `web/` because `vno setting` offers the same list |
+| `lib/shared/languages.ts` | The whisper.cpp language code list shared by `vno setting`, the UI's Settings dialog, and cross-language detection |
+| `lib/import/special-case-handling.ts` | Recovering Samsung Voice Recorder `.m4a` files whose index was truncated by an interrupted copy — see [Troubleshooting](troubleshooting.md#a-samsung-recording-wont-play-or-transcribe-and-a-repairedm4a-appeared) |
 
 ## There is no build step
 
@@ -188,7 +200,7 @@ folder and rejects anything that escapes it.
 - **Notes are cached, twice.** The in-memory model is rebuilt only when
   something actually changes it, then broadcast over SSE. Within a rebuild,
   the slow part (an ffprobe per file for duration) is itself cached on disk
-  keyed by size+mtime (`lib/notesCache.ts`), so only new or changed files pay
+  keyed by size+mtime (`lib/notes/notesCache.ts`), so only new or changed files pay
   for it. Selecting a note in the browser triggers `POST /api/notes/refresh`,
   a one-file recheck that bypasses the cache, so a file changed outside vno
   doesn't show stale data until the next full rebuild.
@@ -218,10 +230,10 @@ folder and rejects anything that escapes it.
   theme by putting its id on a swatch element instead of duplicating hex
   values in JS; and the saved theme is stamped into `<html>` by `page.ts`,
   because a theme that only arrived with `/api/state` would paint the default
-  palette first and then visibly swap. `lib/themes.ts` holds the ids (shared
+  palette first and then visibly swap. `lib/shared/themes.ts` holds the ids (shared
   with `vno setting`) — never the colours.
 - **The Samsung `.m4a` repair is a catch-block feature, and it re-frames with
-  ffmpeg rather than a native decoder.** `lib/special-case-handling.ts` handles
+  ffmpeg rather than a native decoder.** `lib/import/special-case-handling.ts` handles
   recordings whose `moov` was cut off mid-`stsz` by an interrupted copy. The
   audio is intact; only the frame boundaries are lost, and an AAC
   `raw_data_block` has no length field to scan for. The trick is that vno
@@ -244,7 +256,7 @@ folder and rejects anything that escapes it.
   through, rather than off `getDurationSeconds`.
 - **Dependency probing never runs the thing it's checking for.** `lib/setup.ts`
   scans `PATH` for ffmpeg (honouring `PATHEXT`, and `lstat` so Windows App
-  Execution Aliases resolve); `lib/whispercpp.ts:resolveBinary` checks the
+  Execution Aliases resolve); `lib/whisper/whispercpp.ts:resolveBinary` checks the
   vendored `whisper-cpp/bin/` in both install roots, then PATH. Both are
   directory scans, not executions, which is what makes the check affordable
   at the start of every command and on every `/api/state`, with nothing to
@@ -276,7 +288,7 @@ folder and rejects anything that escapes it.
   `loadDeletionMatcher` to avoid deleting a source file whose imported copy
   was deliberately removed from `target`). See
   [Import & sync → Source folders](import-and-sync.md#source-folders).
-- **The ledger must never be load-bearing.** `lib/ledger.ts` swallows its own
+- **The ledger must never be load-bearing.** `lib/notes/ledger.ts` swallows its own
   read *and* write failures: missing, corrupt and unreadable all resolve to
   "nothing is remembered", and a failed write can't turn a successful delete
   into an error. Suppression is folded into `resolveFlatDest` so it reuses the

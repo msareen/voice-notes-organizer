@@ -63,10 +63,17 @@ exists.
 - **Now playing** header with the file name and its folder path.
 - **Metadata chips**: `REC` (recorded date/time), `LEN` (duration), `SIZE`,
   `FMT` (container).
+- **Video recordings** (`.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm`, `.avi`) get a
+  themed frame above the transport showing the picture; a capped max-height
+  keeps a portrait or odd-aspect clip from pushing the transport and
+  transcript off screen. Audio-only recordings show no frame — everything
+  else about the deck (transport, scrub rail, cue ticks, transcript
+  highlighting) works identically for both, since both play through the same
+  custom transport.
 - **Transport** — play/pause, a draggable scrub rail, elapsed and total time,
   `−10s` / `+10s`, and a speed key cycling 1× → 1.25× → 1.5× → 2× → 0.75×. The
   rail carries a **tick per transcript cue**, so you can see where speech was
-  segmented before you play it. Audio is streamed from disk with range
+  segmented before you play it. Media is streamed from disk with range
   requests, so seeking works and nothing is copied anywhere. With the scrub
   focused, `←` / `→` seek five seconds, `Home` / `End` jump to either end, and
   `Space` plays or pauses.
@@ -128,7 +135,7 @@ auto-import them next time** (on by default).
 If nothing is connected, the dialog says so and points at the `sources` config
 option.
 
-**Drag and drop** — dragging audio file(s) from your OS file manager onto the
+**Drag and drop** — dragging audio or video file(s) from your OS file manager onto the
 page (anywhere, no dialog needed) copies them straight in, landing in a
 `Dropped/` folder next to the per-device ones. Same-name-and-size dedup applies,
 so dropping the same file twice is a no-op; a file matching one you deleted

@@ -183,18 +183,19 @@ vno status >/dev/null || { echo "run: vno setup"; exit 1; }
 
 #### Video files
 
-The direct mode passes the file to ffmpeg, which extracts the audio track from
-any container it can read — so `.mp4`, `.mkv`, `.mov` and `.webm` all
-transcribe, video track ignored:
+Video recordings are recognized everywhere, not just here — import, the
+picker, cleanup and the browser UI all go by the [supported audio and video
+extensions](configuration.md#supported-audio-and-video-extensions). In the
+browser UI, a video plays in a themed frame above the same transport and
+cue-synced transcript used for audio; see [the UI docs](ui.md#right-pane--the-playback-deck).
+
+This direct mode works the same way it does for audio: the file is passed to
+ffmpeg, which extracts the audio track from any container it can read — so
+`.mp4`, `.mkv`, `.mov` and `.webm` all transcribe, video track ignored:
 
 ```bash
 vno t screencast.mp4 -o notes.vtt
 ```
-
-This applies to the direct `[file]` argument only. Import, the picker and the
-browser UI go by the [supported audio extensions](configuration.md#supported-audio-extensions),
-which don't include video containers — videos can be transcribed, but not kept
-in your library.
 
 It still runs the same ffmpeg/whisper.cpp check as every other path, and walks
 you through [`vno setup`](#vno-setup) if something's missing.

@@ -173,10 +173,10 @@ A few things worth knowing up front:
   This form is built to script: it exits non-zero if the transcription fails,
   and with `-o -` the transcript is the only thing on stdout, so
   `vno t clip.mp4 -o - 2>/dev/null | your-tool` pipes cleanly.
-- **Video files transcribe too, in this direct mode.** `.mp4`, `.mkv`, `.mov`
-  and `.webm` all work — ffmpeg pulls the audio track out, video ignored.
-  They're not part of the library import (which is audio-only), just this
-  one-shot form.
+- **Video recordings are first-class.** Import, transcribe, cleanup and the UI
+  all recognize `.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm` and `.avi` alongside
+  audio. The playback deck shows the video itself above the same transport and
+  cue-synced transcript used for audio.
 - **Nothing deletes without asking.** Only `cleanup` and the UI's delete
   buttons remove files, always behind a confirmation. Import and transcribe
   never delete anything.
@@ -195,8 +195,9 @@ folder, import sources, model, language, theme and the rest. You shouldn't
 need to hand-edit anything, but it all lives in one file if you want to:
 `~/.vno/config.json` (`vno config` prints the path).
 
-**Supported audio** — `.mp3 .wav .m4a .aac .flac .ogg .oga .wma .aiff .opus
-.amr .3gp`. Anything else on the volume is ignored.
+**Supported audio and video** — `.mp3 .wav .m4a .aac .flac .ogg .oga .wma
+.aiff .opus .amr .3gp .mp4 .m4v .mov .mkv .webm .avi`. Anything else on the
+volume is ignored.
 
 📖 **[Full configuration reference →](docs/configuration.md)** — every key, in
 detail.

@@ -10,7 +10,10 @@
  *
  * The theme id is stamped onto <html> here for the same reason the token is
  * inlined: a palette that only arrived with /api/state would paint the
- * default one first and then swap, which reads as a bug.
+ * default one first and then swap, which reads as a bug. It's also mirrored
+ * into localStorage (assets/js/theme.ts:rememberTheme) so offline.html - the
+ * service worker's fallback page, with no server to ask - can paint close to
+ * the same theme instead of a hardcoded one.
  * ------------------------------------------------------------------------ */
 import type { ThemeId } from "../types.ts";
 
@@ -106,6 +109,7 @@ export function renderPage({ rootLabel, token, theme = "tape" }: PageOptions): s
 </div>
 
 <script>window.__VNO_TOKEN = ${JSON.stringify(token)};</script>
+<script>try{localStorage.setItem("vno-theme",${JSON.stringify(theme)})}catch(e){}</script>
 <script type="module" src="/assets/app.ts"></script>
 </body>
 </html>

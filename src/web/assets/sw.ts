@@ -18,7 +18,7 @@ const OFFLINE_URL = "/assets/offline.html";
 // OFFLINE_URL into the cache) when this file's own bytes change, so without
 // a version bump an edited offline.html would keep serving the stale cached
 // copy indefinitely.
-const CACHE_NAME = "vno-shell-v2";
+const CACHE_NAME = "vno-shell-v3";
 
 sw.addEventListener("install", (event) => {
   event.waitUntil(

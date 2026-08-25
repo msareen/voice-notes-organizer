@@ -4,20 +4,68 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Voice Notes</title>
+<script>
+  // Resolves the theme before the stylesheet below is applied, so this page
+  // (served by the service worker with no server to ask) matches the user's
+  // saved theme instead of always looking like Tape. Reads the id
+  // assets/js/theme.ts mirrors into localStorage on every real page load;
+  // falls back to Tape if that's missing (first run, storage disabled) or
+  // unrecognised (an older/newer vno wrote a theme id this copy doesn't
+  // know). Keep this table in step with the palettes in app.css.
+  (function () {
+    var THEMES = {
+      tape:     { bg: "#13100e", ink: "#f5efe4", dim: "#a3907a", faint: "#6e6053", surface2: "#221c17", line: "#362c22", accent: "#ff9e3d", accentInk: "#1a1200" },
+      dusk:     { bg: "#0d0f16", ink: "#e9edf9", dim: "#99a4c0", faint: "#66708c", surface2: "#1b2030", line: "#2f3850", accent: "#8b9bff", accentInk: "#0a0d18" },
+      moss:     { bg: "#0b120f", ink: "#e8f2ea", dim: "#8ea89a", faint: "#5e7568", surface2: "#17231d", line: "#27392f", accent: "#9bd964", accentInk: "#0d1608" },
+      daylight: { bg: "#f4f1ea", ink: "#1f1a15", dim: "#6b6153", faint: "#948676", surface2: "#efeadf", line: "#d9d0be", accent: "#b4530a", accentInk: "#fff8ef" },
+      contrast: { bg: "#000000", ink: "#ffffff", dim: "#dcdcdc", faint: "#ababab", surface2: "#161616", line: "#5c5c5c", accent: "#ffd400", accentInk: "#000000" }
+    };
+    var id = null;
+    try { id = localStorage.getItem("vno-theme"); } catch (e) {}
+    if (id === "auto" || !id) {
+      var prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+      id = prefersLight ? "daylight" : "tape";
+    }
+    var t = THEMES[id] || THEMES.tape;
+    var root = document.documentElement.style;
+    root.setProperty("--bg", t.bg);
+    root.setProperty("--ink", t.ink);
+    root.setProperty("--dim", t.dim);
+    root.setProperty("--faint", t.faint);
+    root.setProperty("--surface-2", t.surface2);
+    root.setProperty("--line", t.line);
+    root.setProperty("--accent", t.accent);
+    root.setProperty("--accent-ink", t.accentInk);
+    document.addEventListener("DOMContentLoaded", function () {
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", t.bg);
+    });
+  })();
+</script>
+<meta name="theme-color" content="#13100e" />
 <style>
+  :root {
+    --bg: #13100e; --ink: #f5efe4; --dim: #a3907a; --faint: #6e6053;
+    --surface-2: #221c17; --line: #362c22; --accent: #ff9e3d; --accent-ink: #1a1200;
+  }
   html, body { height: 100%; margin: 0; }
   body {
     display: flex; align-items: center; justify-content: center;
-    background: #13100e; color: #f5efe4;
+    background: var(--bg); color: var(--ink);
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   .splash { display: flex; flex-direction: column; align-items: center; text-align: center; }
   .mark { width: 56px; height: 56px; animation: breathe 1.8s ease-in-out infinite; }
+  /* fill="var(...)" on the elements themselves wouldn't work - SVG
+     presentation attributes don't resolve CSS custom properties, only
+     actual CSS (a stylesheet rule or style="") does. */
+  .mark .plate { fill: var(--surface-2); }
+  .mark .bars { fill: var(--accent); }
   @keyframes breathe {
     0%, 100% { opacity: .55; transform: scale(1); }
     50% { opacity: 1; transform: scale(1.06); }
   }
-  h1 { font-size: 15px; font-weight: 500; margin: 18px 0 0; color: #c9c0b3; letter-spacing: .01em; }
+  h1 { font-size: 15px; font-weight: 500; margin: 18px 0 0; color: var(--dim); letter-spacing: .01em; }
 
   /* The recovery block is deliberately minor: invisible at first so the
      splash reads as "starting up", not "something's wrong", and only fades
@@ -25,24 +73,24 @@
   .recovery { max-width: 320px; margin-top: 28px; opacity: 0; transition: opacity .6s ease; pointer-events: none; }
   .recovery.show { opacity: 1; pointer-events: auto; }
   code {
-    background: #221c17; border: 1px solid #362c22; border-radius: 4px;
-    padding: 2px 6px; color: #ff9e3d;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 2px 6px; color: var(--accent);
   }
   .btnrow { display: flex; gap: 10px; justify-content: center; }
   a.btn {
     font: inherit; font-size: .82rem; padding: 6px 14px; border-radius: 6px;
-    border: 1px solid #362c22; background: transparent; color: #f5efe4;
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
     cursor: pointer; text-decoration: none;
   }
-  a.btn.primary { background: #ff9e3d; color: #1a1200; border-color: #ff9e3d; }
-  .hint { margin-top: 14px; font-size: .74rem; color: #7a6f60; }
+  a.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .hint { margin-top: 14px; font-size: .74rem; color: var(--faint); }
 </style>
 </head>
 <body>
   <div class="splash">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="7" fill="#221c17" />
-      <g fill="#ff9e3d">
+      <rect class="plate" width="32" height="32" rx="7" />
+      <g class="bars">
         <rect x="5"  y="14" width="3" height="4"  rx="1.5" />
         <rect x="10" y="9"  width="3" height="14" rx="1.5" />
         <rect x="15" y="4"  width="3" height="24" rx="1.5" />

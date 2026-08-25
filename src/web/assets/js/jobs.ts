@@ -6,7 +6,7 @@ import { state, noteFor } from "./state.ts";
 import { dom } from "./dom.ts";
 import { api, toast, fail } from "./api.ts";
 import { modal } from "./widgets.ts";
-import { applyTheme } from "./theme.ts";
+import { applyTheme, rememberTheme } from "./theme.ts";
 import { renderList } from "./list.ts";
 import { select, showPlaceholder } from "./deck.ts";
 import type { Job, StateResponse } from "../../../types.ts";
@@ -102,6 +102,7 @@ export function reloadState(): Promise<StateResponse> {
     // first paint), but it's what re-applies the saved one if a preview was
     // left behind, or picks up a theme changed elsewhere.
     applyTheme(state.CONFIG.theme);
+    rememberTheme(state.CONFIG.theme);
     document.getElementById("folderLabel")!.textContent = state.CONFIG.rootLabel;
     renderList();
     if (state.selectedRel && noteFor(state.selectedRel)) select(state.selectedRel);

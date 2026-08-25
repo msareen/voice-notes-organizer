@@ -98,6 +98,7 @@ export function reloadState(): Promise<StateResponse> {
     state.THEMES = s.themes || [];
     state.WHISPER = s.whisper;
     state.FFMPEG = s.ffmpeg;
+    state.SUMMARIZATION = s.summarization || { available: false, models: [] };
     // Normally a no-op (page.ts stamped the same theme onto <html> before
     // first paint), but it's what re-applies the saved one if a preview was
     // left behind, or picks up a theme changed elsewhere.

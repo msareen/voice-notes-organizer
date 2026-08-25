@@ -11,6 +11,7 @@ day to day. These pages cover everything else.
 | [Configuration](configuration.md) | `~/.vno/config.json`, key by key — including the options only editable by hand |
 | [Import & sync](import-and-sync.md) | How volumes are detected, why imports land flat, remembered devices |
 | [Transcription](transcription.md) | Whisper models, translation, the `.vtt` format, re-transcribing |
+| [Summarization](summarization.md) | Optional: installing llama.cpp, picking a model, the deck's Summary tab, `vno summarize` |
 | [Troubleshooting](troubleshooting.md) | Whisper/ffmpeg not found, no volumes detected, port and browser issues |
 | [Architecture](architecture.md) | Source layout, the local HTTP API, and how to work on the code |
 | [Third-party resources](3rd-party-resources.md) | How ffmpeg/whisper.cpp are detected, `vno-install.json`, model resolution, env overrides |

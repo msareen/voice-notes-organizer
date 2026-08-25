@@ -454,8 +454,21 @@ mark.hit {
 .scrub:hover .scrub-thumb, .scrub:focus-visible .scrub-thumb { transform: translateX(-50%) scale(1.18); }
 .scrub:focus-visible { outline-offset: 4px; }
 
+/* ---- Transcript/Summary tab strip - Summary is optional, so its content
+   (renderSummaryTab in deck.ts) explains that itself when unset up. ---- */
+.deck-tabs { display: flex; gap: 4px; border-top: 1px solid var(--line); padding-top: 10px; }
+.deck-tabs .btn.tab {
+  background: transparent; border: 1px solid transparent; color: var(--dim);
+  padding: 6px 12px; border-radius: var(--r-sm) var(--r-sm) 0 0;
+}
+.deck-tabs .btn.tab:hover { color: var(--ink); }
+.deck-tabs .btn.tab.active {
+  color: var(--ink); border-color: var(--line); border-bottom-color: var(--bg);
+  background: var(--bg); margin-bottom: -1px;
+}
+
 .transcript {
-  flex: 1 1 auto; overflow-y: auto; min-height: 0; border-top: 1px solid var(--line);
+  flex: 1 1 auto; overflow-y: auto; min-height: 0;
   padding-top: 14px; font-size: .95rem;
 }
 .cue {

@@ -92,7 +92,7 @@ moment.
 
 | Flag | Effect |
 | --- | --- |
-| `-p, --port <number>` | Default `8477`, fixed across runs (stable for bookmarks and an installed PWA's `start_url`). If it's held by another `vno v` instance, opens a tab to that instance instead of picking a new port; if held by something else, errors and asks for `--port`. `0` picks a free port automatically instead |
+| `-p, --port <number>` | This run only, overriding `config.port` (which defaults to `9477` — deliberately clear of the `8385–8484` range Windows commonly reserves for Hyper-V, where the old `8477` default fell). Fixed across runs rather than picked per launch, so bookmarks and an installed PWA's `start_url` keep working. If it's held by another `vno v` instance, opens a tab to that instance instead of picking a new port; if held by something else, errors and points at `--port` / `vno setting`. `0` picks a free port automatically instead. The flag has **no commander default** — "not passed" has to stay distinguishable from "passed the default", or `config.port` could never win |
 | `--no-open` | Start the server without opening a browser |
 
 ### `vno explore` (`open`)
@@ -136,6 +136,7 @@ browser can launch `vno v` the way a Teams/Zoom link launches its own app.
 | `--local` / `--global` | Install whisper.cpp beside this vno install or under the user's home directory, without asking |
 | `--model <name>` | Fetch just this model instead of the defaults |
 | `--list-models` | Print the model inventory and exit |
+| `--remove-model [name]` | Delete installed models to reclaim space — bare opens a picker, a name targets one. Confirmed, defaults to no, and only touches models under an install root's `models/` |
 
 ### `vno config`
 Prints the path to `~/.vno/config.json`.
@@ -352,10 +353,17 @@ before changing the API surface.
   server re-reads cues off disk and merges. A cue-count mismatch is a `409`.
 - **Imports are idempotent** by name + size (`resolveFlatDest`). Files land flat, one
   folder per device; old nested imports are flattened in place on re-run.
-- **Deletion is confined** to `cleanup`, the UI's cleanup, and per-take delete — all
-  behind a confirmation. Nothing else in the codebase removes a user file. Keep it so.
-  Those same three are the only writers to the deletion ledger, which is exactly why
-  a file deleted by hand in Explorer can't be remembered and will re-import.
+- **Deletion of recordings is confined** to `cleanup`, the UI's cleanup, and per-take
+  delete — all behind a confirmation. Nothing else in the codebase removes a user file.
+  Keep it so. Those same three are the only writers to the deletion ledger, which is
+  exactly why a file deleted by hand in Explorer can't be remembered and will re-import.
+  *Downloaded dependencies* are a separate category with its own rule: `vno setup` may
+  delete them (the leftover Python `.pt` cache, and `--remove-model`, both confirmed and
+  defaulting to no), because they're vno's own artifacts and a delete costs bandwidth
+  rather than data. That permission stops at `engineInstall.ts:isManagedModel` — inside
+  an install root's `models/` and nowhere else, so a Homebrew copy or a
+  `*_MODEL_PATH` override is never removed out from under whatever owns it. Model
+  deletion refuses without a TTY rather than skipping its confirmation.
 - **The deletion ledger must never be load-bearing.** `lib/ledger.ts` keeps
   `~/.vno/deleted.json`, listing what was deleted so import doesn't copy it back off a
   device that still holds it. It swallows its own read *and* write failures: missing,

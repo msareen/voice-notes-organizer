@@ -29,6 +29,7 @@ interface SettingsPatch {
   openWhenDone: boolean;
   rememberDeletions: boolean;
   useGpu?: boolean;
+  summaryModel?: string | null;
 }
 
 /** One level of the unconfined filesystem browser (GET /api/browse-fs). */
@@ -70,6 +71,7 @@ export function openSettings(): void {
     crossFromSel: HTMLSelectElement,
     crossToSel: HTMLSelectElement,
     crossAddBtn: HTMLButtonElement;
+  var summaryModelSel: HTMLSelectElement | null;
   var crossMap: Record<string, string> = {};
   var sourceRows: SourceRow[] = [];
   // Theme is previewed live on the whole page, so the panel has to remember
@@ -141,6 +143,25 @@ export function openSettings(): void {
           ? "GPU acceleration: no accelerator build available on this machine — transcription runs on the CPU."
           : "GPU acceleration: run \"vno setup\" in a terminal to install whisper.cpp and check for one.";
         transcriptionCol.appendChild(gh);
+      }
+
+      // Optional feature - hidden behind its own availability check rather
+      // than erroring, same treatment as the GPU field above when the engine
+      // isn't there at all. See lib/llamacpp.ts.
+      var summarization = state.SUMMARIZATION;
+      summaryModelSel = null;
+      if (summarization && summarization.available) {
+        summaryModelSel = selectField(transcriptionCol, "Summarization model", [
+          { label: "None", value: "" }
+        ].concat(summarization.models.map(function (m) { return { label: m, value: m }; })),
+          CONFIG.summaryModel || "",
+          "Used by the deck's Summarize button (optional) and \`vno summarize\`. Drop more .gguf files " +
+          "into the llama.cpp models folder, or run \`vno setup --summary-model <name>\`, to add more choices here.");
+      } else {
+        var sh = document.createElement("p");
+        sh.className = "hint";
+        sh.textContent = "Summarization: optional, not set up - run \"vno setup --llama\" in a terminal to add it.";
+        transcriptionCol.appendChild(sh);
       }
 
       var importCol = document.createElement("div");
@@ -412,6 +433,7 @@ export function openSettings(): void {
         rememberDeletions: rememberSel.value === "true"
       };
       if (gpuSel) patch.useGpu = gpuSel.value === "true";
+      if (summaryModelSel) patch.summaryModel = summaryModelSel.value || null;
       var sources = sourceRows
         .map(function (r) {
           return {

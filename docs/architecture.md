@@ -19,11 +19,12 @@ src/
   types.ts           the domain types every layer shares (no imports, so the
                       browser project can pull from it too)
   cli/               one module per command, plus the terminal prompt helpers
-    import.ts  transcribe.ts  cleanup.ts  visualize.ts  settings.ts
+    import.ts  transcribe.ts  summarize.ts  cleanup.ts  visualize.ts  settings.ts
     setup.ts   prompt.ts  searchableCheckbox.ts  progress.ts
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.ts  notes.ts  sync.ts  media.ts  vtt.ts  themes.ts
-    volumes.ts  whisper.ts  whispercpp.ts  setup.ts  open.ts  ledger.ts
+    volumes.ts  whisper.ts  whispercpp.ts  llama.ts  llamacpp.ts
+    engineInstall.ts  setup.ts  open.ts  ledger.ts
     special-case-handling.ts
   web/               the browser UI behind `vno visualize`
     server/          HTTP server: session token, JSON API, SSE job stream
@@ -31,7 +32,7 @@ src/
       context.ts     the shared ctx: notes/config/job state + helpers
       assets.ts  media.ts  events.ts
       routes/        one module per route group (state, settings, notes,
-                      transcribe, import, cleanup)
+                      transcribe, summarize, import, cleanup)
     page.ts          the HTML shell, and nothing else
     assets/          app.css and app.ts (the client entry), plus:
       js/            state.ts  dom.ts  api.ts  format.ts  widgets.ts
@@ -63,6 +64,9 @@ so anything there is safe to reuse from either side.
 | `lib/sync.ts` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
 | `lib/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
 | `lib/whispercpp.ts` | Installing whisper.cpp itself: `vno-install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/validation |
+| `lib/llama.ts` | Resolving the installed llama.cpp binary/model and running a summarization (no ffmpeg step — text in, text out). Optional; see [summarization.md](summarization.md) |
+| `lib/llamacpp.ts` | Installing llama.cpp itself, mirroring `lib/whispercpp.ts` — its own `llama-cpp/vno-install.json`, curated model aliases, drop-in `.gguf` discovery. Entirely optional, never touched unless `vno setup --llama` is run |
+| `lib/engineInstall.ts` | The install-root/manifest/download/archive-extraction/GPU-detection primitives shared by `whispercpp.ts` and `llamacpp.ts` — everything genuinely engine-agnostic about "vendor a binary + models under a vno-managed folder" |
 | `lib/setup.ts` | Finding ffmpeg on PATH, per-OS install recipes, running them, re-reading PATH |
 | `lib/media.ts` | ffprobe durations, filename date parsing, formatting |
 | `lib/vtt.ts` | Parse and serialize WebVTT cues |
@@ -152,11 +156,11 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/manifest.webmanifest` | GET | PWA manifest, generated per request so `start_url` carries the current token. **Not** token-gated itself |
 | `/sw.js` | GET | Service worker (installability + offline fallback page). **Not** token-gated |
 | `/media/<rel>` | GET | Streams audio, with range-request support |
-| `/api/state` | GET | Notes, config, model list, theme list, `ffmpeg`/whisper.cpp availability, current job |
+| `/api/state` | GET | Notes, config, model list, theme list, `ffmpeg`/whisper.cpp availability, summarization availability, current job |
 | `/api/events` | GET | SSE stream: `job` and `notes` events |
 | `/api/ping` | POST | Liveness |
 | `/api/bye` | POST | Tab closed (deferred shutdown) or Quit (`{quit:true}`, immediate) |
-| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `crossLanguageModel`, `crossLanguageMap`, `openWhenDone`, `rememberDeletions`, `theme`, `useGpu` |
+| `/api/settings` | POST | Patch `autoTranslate`, `defaultModel`, `transcribeLanguage`, `crossLanguageModel`, `crossLanguageMap`, `summaryModel`, `openWhenDone`, `rememberDeletions`, `theme`, `useGpu` |
 | `/api/sources` | POST | Replace `config.sources` wholesale (array-shaped, doesn't fit the scalar `/api/settings` patch) |
 | `/api/sources/explore` | POST | Open the folder a source's files currently land in (or will, on next sync) — `mapTo` when set, else `target/<sanitized source basename>/`. Used by the source-removal confirmation dialog |
 | `/api/reveal` | POST | Reveal a file, or open a folder |
@@ -164,6 +168,8 @@ outright. See the [UI's security model](ui.md#security-model).
 | `/api/notes/delete` | POST | Delete a recording and its sidecars |
 | `/api/notes/refresh` | POST | Recheck one note against disk (bypasses the duration cache) |
 | `/api/transcribe` | POST | Start a transcription job |
+| `/api/summarize` | POST | Start a summarization job for one recording (`{rel, model?}`) — optional, 412 if llama.cpp/a model isn't set up. See [summarization.md](summarization.md) |
+| `/api/summary` | PUT | Save a manually edited summary |
 | `/api/volumes` | GET | Detected volumes plus configured sources |
 | `/api/browse` | GET | List subfolders of a volume, one level |
 | `/api/browse-target` | GET | List subfolders of the target folder, one level — confined to `target`, powers the per-source "Folder in target" (`mapTo`) picker |

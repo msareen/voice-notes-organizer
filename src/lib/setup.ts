@@ -2,9 +2,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import fs from "fs-extra";
-import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources.ts";
+import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl, LLAMACPP_VERSION, llamacppReleaseTagUrl, llamacppCloneUrl } from "./webSources.ts";
 
-export type DependencyName = "ffmpeg" | "whisper";
+export type DependencyName = "ffmpeg" | "whisper" | "llama";
 
 export interface DependencyMeta {
   label: string;
@@ -42,6 +42,14 @@ export const DEPENDENCIES: Record<DependencyName, DependencyMeta> = {
     label: "whisper.cpp",
     commands: [],
     usedFor: "transcribing and translating recordings",
+  },
+  // Entirely optional - see cli/setup.ts's REQUIRED list, which never
+  // includes "llama". Nothing in vno's startup guard checks this; only the
+  // summarize route and `vno setup --llama`/`vno status` look at it.
+  llama: {
+    label: "llama.cpp",
+    commands: [],
+    usedFor: "summarizing transcripts (optional)",
   },
 };
 
@@ -108,6 +116,21 @@ export async function checkDependency(name: DependencyName): Promise<DependencyS
       usedFor: meta.usedFor,
       found: Boolean(binary),
       missing: binary ? [] : ["whisper-cli"],
+      path: binary?.path || null,
+    };
+  }
+
+  if (name === "llama") {
+    // Same vendored-not-PATH resolution as whisper.cpp, imported lazily for
+    // the same import-cycle reason.
+    const { resolveBinary } = await import("./llamacpp.ts");
+    const binary = await resolveBinary({});
+    return {
+      name,
+      label: meta.label,
+      usedFor: meta.usedFor,
+      found: Boolean(binary),
+      missing: binary ? [] : ["llama-cli"],
       path: binary?.path || null,
     };
   }
@@ -324,6 +347,22 @@ export function manualHelp(name: DependencyName): string[] {
     }
     return [
       `git clone --depth 1 --branch ${WHISPERCPP_VERSION} ${whispercppCloneUrl()}`,
+      "cmake -B build -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON for an NVIDIA GPU",
+      "cmake --build build -j --config Release",
+    ];
+  }
+  if (name === "llama") {
+    if (platform === "darwin") {
+      return ["brew install llama.cpp", "…or get Homebrew first from https://brew.sh"];
+    }
+    if (platform === "win32") {
+      return [
+        `Download a release zip from ${llamacppReleaseTagUrl()}`,
+        "…and extract it (keeping every .dll beside llama-cli.exe) into the location `vno setup --llama` reports",
+      ];
+    }
+    return [
+      `git clone --depth 1 --branch ${LLAMACPP_VERSION} ${llamacppCloneUrl()}`,
       "cmake -B build -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON for an NVIDIA GPU",
       "cmake --build build -j --config Release",
     ];

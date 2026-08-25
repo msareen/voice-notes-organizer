@@ -75,8 +75,14 @@ export interface Config {
   crossLanguage: CrossLanguage;
   rememberDeletions: boolean;
   openWhenDone: boolean;
+  /** Port the viewer serves on. See cli/visualize.ts:DEFAULT_PORT for why it's fixed rather than picked per run. */
+  port: number;
   theme: ThemeId;
   accel: AccelState;
+  /** The llama.cpp model to summarize with, by alias/filename - null until configured. Summarization is entirely optional; see lib/llamacpp.ts. */
+  summaryModel: string | null;
+  /** llama.cpp's accelerator backend, fixed at install time, mirroring `accel` above. */
+  llamaAccel: AccelState;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +135,9 @@ export interface Note {
   text: string;
   hasTranscript: boolean;
   transcriptExt: TranscriptExt | null;
+  /** From the <name>.summary.txt sidecar, if one exists. Optional feature — see lib/llama.ts. */
+  summary: string | null;
+  hasSummary: boolean;
   size: number | null;
   mtimeMs: number | null;
   durationSec: number | null;
@@ -218,6 +227,7 @@ export interface SyncSource extends Volume {
 /** The single long-running job. `guardJob` refuses a second one with 409. */
 export interface Job {
   id: string;
+  /** "transcribe" | "import" | "cleanup" | "summarize", ... - not an enum, callers pick their own label. */
   kind: string;
   title: string;
   total: number;
@@ -240,6 +250,7 @@ export interface StateConfig {
   defaultModel: string;
   transcribeLanguage: string;
   crossLanguage: CrossLanguage;
+  summaryModel: string | null;
   openWhenDone: boolean;
   rememberDeletions: boolean;
   theme: ThemeId;
@@ -266,6 +277,8 @@ export interface StateResponse {
   themes: readonly Theme[];
   ffmpeg: boolean;
   whisper: boolean;
+  /** Optional: whether summarization (llama.cpp + at least one valid model) is usable right now. */
+  summarization: { available: boolean; models: string[] };
   job: Job | null;
 }
 

@@ -14,6 +14,7 @@ interface SettingsBody {
   transcribeLanguage?: string;
   crossLanguageModel?: string | null;
   crossLanguageMap?: unknown;
+  summaryModel?: string | null;
   theme?: string;
   openWhenDone?: unknown;
   rememberDeletions?: unknown;
@@ -43,6 +44,12 @@ export function createSettingsRoutes(ctx: ServerContext) {
         ...crossLanguageState(config),
         map: normalizeLanguageMap(body.crossLanguageMap),
       };
+    }
+    // Validated against what's actually discovered on disk, not a fixed
+    // catalog - a dropped-in .gguf is a legitimate choice too.
+    if ("summaryModel" in body) {
+      const { models } = await ctx.summarizationStatus();
+      config.summaryModel = body.summaryModel && models.includes(body.summaryModel) ? body.summaryModel : null;
     }
     if ("theme" in body && (THEME_IDS as readonly string[]).includes(body.theme!)) {
       config.theme = body.theme as ThemeId;

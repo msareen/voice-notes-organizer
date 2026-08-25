@@ -125,6 +125,34 @@ export async function readTranscript(audioPath: string): Promise<TranscriptRead>
   };
 }
 
+// The summary sidecar's extension - parallel to TRANSCRIPT_EXTS's sidecar
+// convention (same stripExt(audioPath) + ext shape), kept separate from that
+// list since a summary is never itself a candidate transcript.
+export const SUMMARY_EXT = ".summary.txt";
+
+function summaryPath(audioPath: string): string {
+  return stripExt(audioPath) + SUMMARY_EXT;
+}
+
+/** The summary sidecar's path, only if it actually exists on disk. */
+export async function findSummary(audioPath: string): Promise<string | null> {
+  const summaryFile = summaryPath(audioPath);
+  return (await fs.pathExists(summaryFile)) ? summaryFile : null;
+}
+
+/** Reads a note's generated summary sidecar, if one exists. */
+export async function readSummary(audioPath: string): Promise<{ summary: string | null; hasSummary: boolean }> {
+  const summaryFile = await findSummary(audioPath);
+  if (!summaryFile) return { summary: null, hasSummary: false };
+  const raw = await fs.readFile(summaryFile, "utf8");
+  return { summary: raw.trim(), hasSummary: true };
+}
+
+/** Writes (or overwrites) a note's summary sidecar. */
+export async function writeSummary(audioPath: string, text: string): Promise<void> {
+  await fs.writeFile(summaryPath(audioPath), text.trim() + "\n", "utf8");
+}
+
 interface BuildNoteOptions {
   size?: number | null;
   mtimeMs?: number | null;
@@ -166,6 +194,7 @@ async function buildNote(
   }
 
   const transcript = await readTranscript(audioPath);
+  const summary = await readSummary(audioPath);
 
   // Recording date/time is pre-formatted here (it comes from the recorder's
   // wall-clock filename) so the browser doesn't shift it by time zone.
@@ -182,6 +211,8 @@ async function buildNote(
     text: transcript.text, // shown when there are no cues
     hasTranscript: transcript.hasTranscript,
     transcriptExt: transcript.transcriptExt,
+    summary: summary.summary,
+    hasSummary: summary.hasSummary,
     size: size ?? null, // bytes, or null
     mtimeMs: mtimeMs ?? null, // used to detect a changed file against the cache
     durationSec: durationSec ?? null, // seconds, or null

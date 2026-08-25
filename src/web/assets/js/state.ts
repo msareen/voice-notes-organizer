@@ -22,6 +22,8 @@ export interface AppState {
   THEMES: readonly Theme[];
   WHISPER: boolean;
   FFMPEG: boolean;
+  /** Optional feature - see lib/llama.ts. null until the first /api/state lands. */
+  SUMMARIZATION: { available: boolean; models: string[] } | null;
   selectedRel: string | null;
   searchTerm: string;
   alive: boolean;
@@ -41,6 +43,7 @@ export const state: AppState = {
   THEMES: [],
   WHISPER: true,
   FFMPEG: true,
+  SUMMARIZATION: null,
   selectedRel: null,
   // Current filter-box term, normalised + lowercased (see js/search.ts). Shared
   // so the deck can highlight the same term it was filtered by.

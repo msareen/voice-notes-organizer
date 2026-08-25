@@ -22,9 +22,25 @@ import {
   downloadModel,
   listModels,
   findStalePythonCache,
+  isManagedModel,
+  removeModel,
   DEFAULT_MODELS,
 } from "../lib/whispercpp.ts";
+import {
+  installLlamaCpp,
+  registerExternalBinary as registerExternalLlamaBinary,
+  resolveBinary as resolveLlamaBinary,
+  resolveInstallRoot as resolveLlamaInstallRoot,
+  readManifest as readLlamaManifest,
+  resolveModel as resolveLlamaModel,
+  downloadModel as downloadLlamaModel,
+  listModels as listLlamaModels,
+  listModelAliases,
+  isManagedModel as isManagedLlamaModel,
+  removeModel as removeLlamaModel,
+} from "../lib/llamacpp.ts";
 import { accelState } from "../lib/whisper.ts";
+import { llamaAccelState } from "../lib/llama.ts";
 import { loadConfig, saveConfig } from "../lib/config.ts";
 import { protocolStatus, registerProtocol } from "../lib/protocol.ts";
 import { prompt, CANCELLED } from "./prompt.ts";
@@ -282,6 +298,196 @@ async function registerExistingWhisper(mode: InstallMode): Promise<boolean> {
   }
 }
 
+/** What the "where should llama.cpp come from?" prompt can answer. */
+type LlamaChoice = InstallMode | "existing" | "skip";
+
+/**
+ * llama.cpp's install, entirely optional and only ever run when explicitly
+ * asked for (`vno setup --llama`) - never part of `ensureDependencies`'s
+ * REQUIRED list. Mirrors `installWhisper`'s shape exactly (per-platform
+ * acquisition, "local"/"global"/"existing"/"skip" prompt), with one addition:
+ * a fresh install walks straight into `runLlamaModelWizard` afterward, since
+ * a binary with no model isn't yet useful for anything.
+ */
+async function installLlama(mode: InstallMode | null): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    console.log(chalk.dim("\nllama.cpp isn't installed, and there's no terminal to ask how."));
+    printManual("llama");
+    return false;
+  }
+
+  const choice: LlamaChoice = mode || (await promptLlamaChoice());
+  if (choice === "skip") {
+    console.log(chalk.dim("Skipped - llama.cpp is still missing. Summarization stays unavailable."));
+    return false;
+  }
+  if (choice === "existing") {
+    return registerExistingLlama(mode || "local");
+  }
+
+  const resolvedMode: InstallMode = choice; // "local" | "global"
+  const root = resolveLlamaInstallRoot(resolvedMode);
+  console.log();
+  console.log(chalk.bold(`Installing llama.cpp (${resolvedMode}, into ${root})`));
+  console.log(chalk.dim(`  ${platformLlamaInstallDescription()}`));
+  console.log(chalk.dim("\nInstalling llama.cpp..."));
+  try {
+    const manifest = await installLlamaCpp({
+      mode: resolvedMode,
+      onLog: (line) => console.log(chalk.dim(`  ${line}`)),
+      onStep: (step) => console.log(chalk.dim(`$ ${step.command} ${step.args.join(" ")}`)),
+      onProgress: progressPrinter(),
+    });
+    console.log(chalk.green(`\nllama.cpp is ready: ${manifest.binary?.path} (${manifest.accel?.backend}).`));
+    await runLlamaModelWizard(resolvedMode);
+    return true;
+  } catch (err) {
+    console.log(chalk.red(`\nllama.cpp install failed: ${errorMessage(err)}`));
+    printManual("llama");
+    return false;
+  }
+}
+
+/** Asks where llama.cpp should come from - install fresh, or point at one already on the machine. */
+async function promptLlamaChoice(): Promise<LlamaChoice> {
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "choice",
+      message: "llama.cpp isn't installed. What would you like to do?",
+      choices: [
+        { name: `Install it locally, beside this vno install (${resolveLlamaInstallRoot("local")})`, value: "local" },
+        { name: `Install it globally (${resolveLlamaInstallRoot("global")})`, value: "global" },
+        { name: "I already have it installed — let me give the path", value: "existing" },
+        { name: "Skip for now", value: "skip" },
+      ],
+      default: "local",
+    },
+  ]);
+  return answer === CANCELLED ? "skip" : (answer.choice as LlamaChoice);
+}
+
+/** Points vno at a llama.cpp binary the user already has, instead of installing one. */
+async function registerExistingLlama(mode: InstallMode): Promise<boolean> {
+  const answer = await prompt([
+    { type: "input", name: "path", message: "Path to your llama.cpp binary (or the folder containing it)" },
+  ]);
+  if (answer === CANCELLED || !answer.path?.trim()) {
+    console.log(chalk.dim("Skipped - llama.cpp is still missing."));
+    return false;
+  }
+
+  const accelAnswer = await prompt([
+    {
+      type: "list",
+      name: "backend",
+      message: "Does this build have GPU acceleration (CUDA/Metal/Vulkan)?",
+      choices: [
+        { name: "Yes, or I'm not sure — try it, fall back to the CPU automatically if it fails", value: "unknown" },
+        { name: "No, this is a CPU-only build", value: "cpu" },
+      ],
+      default: "unknown",
+    },
+  ]);
+  const backend: AccelRecord["backend"] =
+    accelAnswer === CANCELLED ? "unknown" : (accelAnswer.backend as AccelBackend);
+
+  try {
+    const manifest = await registerExternalLlamaBinary(answer.path.trim(), { mode, backend });
+    console.log(chalk.green(`\nUsing your existing llama.cpp: ${manifest.binary?.path}.`));
+    // Someone pointing vno at a binary they already have presumably already
+    // has models to go with it too - the wizard is still one `vno setup --llama`
+    // away if they don't, rather than forced here.
+    return true;
+  } catch (err) {
+    console.log(chalk.red(`\nCouldn't use that: ${errorMessage(err)}`));
+    return false;
+  }
+}
+
+/**
+ * Lets the user pick a summarization model right after installing the
+ * binary - a curated alias, a `.gguf` they already have, or skip. Nothing
+ * downloads without this explicit choice; reachable again any time via
+ * `vno setup --llama` even once the binary is already installed, so skipping
+ * here isn't a dead end.
+ */
+async function runLlamaModelWizard(mode: InstallMode): Promise<void> {
+  if (!process.stdin.isTTY) {
+    console.log(chalk.dim("\nNo terminal to ask which summarization model to use - skipping. Run `vno setup --summary-model <name>` later."));
+    return;
+  }
+
+  const aliases = listModelAliases();
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "choice",
+      message: "Pick a summarization model to download, point at one you already have, or skip for now:",
+      choices: [
+        ...aliases.map((a) => ({
+          name: `${a.alias} — ${a.size ? `${(a.size / 1e9).toFixed(1)} GB` : "size unconfirmed"}${a.note ? `, ${a.note}` : ""}`,
+          value: a.alias,
+        })),
+        { name: "I already have a .gguf file — let me give the path", value: "existing" },
+        { name: "Skip for now — I'll add a model later", value: "skip" },
+      ],
+      default: aliases[0]?.alias || "skip",
+    },
+  ]);
+  if (answer === CANCELLED || answer.choice === "skip") {
+    console.log(chalk.dim("Skipped - no summarization model yet. Run `vno setup --llama` again any time to pick one."));
+    return;
+  }
+
+  if (answer.choice === "existing") {
+    const pathAnswer = await prompt([
+      { type: "input", name: "path", message: "Path to your .gguf model file" },
+    ]);
+    if (pathAnswer === CANCELLED || !pathAnswer.path?.trim()) {
+      console.log(chalk.dim("Skipped."));
+      return;
+    }
+    const resolved = await resolveLlamaModel(pathAnswer.path.trim());
+    if (!resolved) {
+      console.log(chalk.red(`\nCouldn't use ${pathAnswer.path.trim()} - it doesn't look like a valid GGUF file.`));
+      return;
+    }
+    console.log(chalk.green(`\nUsing ${resolved} for summarization. Set it as the default in Settings or \`vno setting\`.`));
+    return;
+  }
+
+  await ensureLlamaModel(mode, answer.choice as string);
+}
+
+/** Downloads one named llama model if it isn't already present, printing progress the same way `ensureModels` does. */
+async function ensureLlamaModel(mode: InstallMode, name: string): Promise<void> {
+  const existing = await resolveLlamaModel(name);
+  if (existing) {
+    console.log(chalk.dim(`\n"${name}" is already downloaded: ${existing}`));
+    return;
+  }
+  console.log(chalk.dim(`\nDownloading "${name}"...`));
+  try {
+    await downloadLlamaModel(name, {
+      mode,
+      onLog: (line) => console.log(chalk.dim(`  ${line}`)),
+      onProgress: progressPrinter(),
+    });
+    console.log(chalk.green(`  ${name} ready. Set it as the default in Settings or \`vno setting\`.`));
+  } catch (err) {
+    console.log(chalk.red(`  Couldn't download "${name}": ${errorMessage(err)}`));
+  }
+}
+
+function platformLlamaInstallDescription(): string {
+  const platform = os.platform();
+  if (platform === "darwin") return "Installs via Homebrew (brew install llama.cpp), Metal-accelerated on Apple silicon.";
+  if (platform === "win32")
+    return "Downloads a prebuilt release zip - CUDA-matched to this machine's driver if it has an NVIDIA GPU, an AVX2 CPU build otherwise.";
+  return "Downloads a prebuilt CPU binary, or builds from source with CUDA support if this machine has an NVIDIA GPU (needs cmake, git and a C++ compiler).";
+}
+
 function platformInstallDescription(): string {
   const platform = os.platform();
   if (platform === "darwin") return "Installs via Homebrew (brew install whisper-cpp), Metal-accelerated on Apple silicon.";
@@ -330,6 +536,8 @@ export interface VnoStatus {
   optional: {
     accel: { backend: AccelBackend | null; name: string | null; enabled: boolean };
     protocol: { registered: boolean; upToDate: boolean } | null;
+    /** Never affects `ready` - summarization is entirely optional. */
+    summarization: { installed: boolean; models: string[] };
   };
 }
 
@@ -354,6 +562,8 @@ export async function collectStatus(): Promise<VnoStatus> {
   const usable = models.filter((m) => m.valid);
   const accel = accelState(config);
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
+  const llamaInstalled = Boolean(await resolveLlamaBinary({}));
+  const llamaModels = llamaInstalled ? (await listLlamaModels()).filter((m) => m.valid).map((m) => m.filename) : [];
 
   const blockers: string[] = [];
   for (const dep of deps) {
@@ -396,6 +606,7 @@ export async function collectStatus(): Promise<VnoStatus> {
         enabled: Boolean(accel.backend) && accel.backend !== "cpu" && accel.use !== false,
       },
       protocol: protocol ? { registered: protocol.registered, upToDate: protocol.upToDate } : null,
+      summarization: { installed: llamaInstalled, models: llamaModels },
     },
   };
 }
@@ -419,6 +630,7 @@ export async function runStatus({ json = false }: { json?: boolean } = {}): Prom
   reportAccel(await loadConfig());
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
   if (protocol) reportProtocol(protocol);
+  await reportSummarization();
 
   const modelCount = status.required.models.length;
   console.log(
@@ -444,6 +656,16 @@ export interface SetupOptions {
   mode?: InstallMode | null;
   model?: string | null;
   listModelsOnly?: boolean;
+  /**
+   * `vno setup --remove-model [name]` - delete installed models to reclaim
+   * space. `true` (the bare flag) opens a picker; a string targets one model.
+   * Like `listModelsOnly`, it returns before any install/download work.
+   */
+  removeModel?: string | true | null;
+  /** `vno setup --llama` - offer/install llama.cpp, then the model wizard. Never implied by plain `vno setup`. */
+  llama?: boolean;
+  /** `vno setup --summary-model <name>` - fetch one summarization model non-interactively, skipping the wizard. */
+  summaryModel?: string | null;
 }
 
 /**
@@ -465,11 +687,21 @@ export async function runSetup({
   mode = null,
   model = null,
   listModelsOnly = false,
+  llama = false,
+  summaryModel = null,
+  removeModel: removeModelTarget = null,
 }: SetupOptions = {}): Promise<void> {
   console.log(chalk.bold(`vno setup — ${os.platform()} ${os.arch()}\n`));
 
   if (listModelsOnly) {
     await printModelInventory();
+    return;
+  }
+
+  // Ahead of the install path on purpose: a run that's here to free space
+  // must never start downloading anything on its way out.
+  if (removeModelTarget) {
+    await runRemoveModels(removeModelTarget);
     return;
   }
 
@@ -483,6 +715,7 @@ export async function runSetup({
   // Windows only for now - see lib/protocol.ts for why macOS/Linux aren't here yet.
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
   if (protocol) reportProtocol(protocol);
+  await reportSummarization();
 
   if (check) {
     // Report-only: never installs or downloads anything.
@@ -503,20 +736,132 @@ export async function runSetup({
       : chalk.yellow("\nSetup incomplete — vno will ask again next time it needs one of these.")
   );
 
-  if (!ok) return;
+  if (ok) {
+    // `mode` here is only what a flag forced, if anything - when the user was
+    // asked interactively (local / global / "I already have it"), the actual
+    // destination is whichever root the binary (or its vno-install.json entry)
+    // ended up in, which might not match. Ask the binary itself rather than
+    // trust the flag.
+    const binary = await resolveBinary({});
+    const activeMode = binary?.root ? modeForRoot(binary.root) : mode || "local";
 
-  // `mode` here is only what a flag forced, if anything - when the user was
-  // asked interactively (local / global / "I already have it"), the actual
-  // destination is whichever root the binary (or its vno-install.json entry)
-  // ended up in, which might not match. Ask the binary itself rather than
-  // trust the flag.
-  const binary = await resolveBinary({});
-  const activeMode = binary?.root ? modeForRoot(binary.root) : mode || "local";
+    await checkAccel(config, activeMode);
+    await ensureModels(activeMode, model);
+    await reportStalePythonCache();
+    if (protocol) await ensureProtocolHandler(protocol);
+  }
 
-  await checkAccel(config, activeMode);
-  await ensureModels(activeMode, model);
-  await reportStalePythonCache();
-  if (protocol) await ensureProtocolHandler(protocol);
+  // Entirely independent of the ffmpeg/whisper flow above: llama.cpp is
+  // optional, so nothing about it gates on `ok`. `--llama`/`--summary-model`
+  // drive it directly; plain `vno setup` asks instead of silently skipping,
+  // so the feature is actually discoverable rather than a hint someone has
+  // to already know to act on.
+  if (llama || summaryModel) {
+    await runLlamaSetup({ mode, llama, summaryModel });
+  } else {
+    await offerLlamaSetup(mode);
+  }
+}
+
+/**
+ * Plain `vno setup` (no `--llama`/`--summary-model`) asks once, right here,
+ * whether to set up summarization - rather than only ever hinting at it via
+ * `reportSummarization()`'s status line, which someone could read past for
+ * months without registering it as an offer. Skipped entirely once llama.cpp
+ * is already installed (nothing new to ask), and in any non-interactive run.
+ */
+async function offerLlamaSetup(mode: InstallMode | null): Promise<void> {
+  if (await resolveLlamaBinary({})) return;
+  if (!process.stdin.isTTY) return;
+
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "choice",
+      message: "Set up llama.cpp for optional transcript summarization?",
+      choices: [
+        { name: "Yes, set it up now", value: true },
+        { name: "Not now", value: false },
+      ],
+      default: false,
+    },
+  ]);
+  if (answer === CANCELLED || !answer.choice) return;
+
+  await runLlamaSetup({ mode, llama: true, summaryModel: null });
+}
+
+/**
+ * Everything `vno setup` does for the optional summarization engine.
+ * Silent (beyond the status line already printed) unless `--llama` or
+ * `--summary-model` was actually passed - see the module doc comment on
+ * `installLlama` for why this never joins `REQUIRED`.
+ */
+async function runLlamaSetup({
+  mode,
+  llama,
+  summaryModel,
+}: {
+  mode: InstallMode | null;
+  llama: boolean;
+  summaryModel: string | null;
+}): Promise<void> {
+  if (!llama && !summaryModel) return;
+
+  const existingBinary = await resolveLlamaBinary({});
+  if (!existingBinary) {
+    if (!llama) {
+      console.log(
+        chalk.yellow(`\nllama.cpp isn't installed. Run \`vno setup --llama --summary-model ${summaryModel}\` to add it and this model together.`)
+      );
+      return;
+    }
+    const installed = await installLlama(mode);
+    if (!installed) return;
+    const binary = await resolveLlamaBinary({});
+    const activeMode = binary?.root ? modeForLlamaRoot(binary.root) : mode || "local";
+    await checkLlamaAccel(activeMode);
+    // installLlama already ran the model wizard on a fresh install; an
+    // explicit --summary-model on top of that fetches (or confirms) that
+    // specific one non-interactively rather than trusting the wizard alone.
+    if (summaryModel) await ensureLlamaModel(activeMode, summaryModel);
+    return;
+  }
+
+  // Binary already installed: `--llama` re-run means "let me pick another
+  // model" (the wizard), while `--summary-model` alone is the quiet,
+  // scriptable path - see SetupOptions's doc comments.
+  const activeMode = modeForLlamaRoot(existingBinary.root || resolveLlamaInstallRoot(mode || "local"));
+  await checkLlamaAccel(activeMode);
+  if (llama) await runLlamaModelWizard(activeMode);
+  if (summaryModel) await ensureLlamaModel(activeMode, summaryModel);
+}
+
+/**
+ * llama.cpp's equivalent of `checkAccel`: reads the accelerator backend out
+ * of llama-cpp/vno-install.json into config.llamaAccel. No interactive
+ * "use it?" prompt here (unlike whisper's checkAccel) - summarization is
+ * opt-in already, so asking a second yes/no about the accelerator on top of
+ * `vno setup --llama` would be one confirmation too many; it defaults to
+ * "use it" the same way resolveLlamaAccel does when unasked, and Settings is
+ * where that's changed.
+ */
+async function checkLlamaAccel(mode: InstallMode): Promise<void> {
+  const manifest = await readLlamaManifest(resolveLlamaInstallRoot(mode));
+  if (!manifest?.accel) return;
+  const config = await loadConfig();
+  config.llamaAccel = {
+    ...llamaAccelState(config),
+    backend: manifest.accel.backend,
+    name: manifest.accel.name,
+    resolvedAt: new Date().toISOString(),
+  };
+  await saveConfig(config);
+}
+
+/** Which of the two known llama.cpp install roots a resolved path belongs to. */
+function modeForLlamaRoot(root: string): InstallMode {
+  return root === resolveLlamaInstallRoot("global") ? "global" : "local";
 }
 
 /** Which of the two known install roots a resolved path belongs to. */
@@ -561,6 +906,29 @@ function reportAccel(config: Config): void {
   }
   const state = accel.use === false ? chalk.dim("off by choice") : chalk.green("in use");
   console.log(`  ${chalk.green("✓")} ${"accel".padEnd(12)} ${chalk.dim(accel.name || accel.backend)} ${state}`);
+}
+
+/**
+ * Status line for the optional summarization engine, in the same
+ * informational (never red) shape as the accel/protocol lines - a machine
+ * that never opted in should never look broken over this.
+ */
+async function reportSummarization(): Promise<void> {
+  const binary = await resolveLlamaBinary({});
+  if (!binary) {
+    console.log(
+      `  ${chalk.dim("?")} ${"summarize".padEnd(12)} ${chalk.dim("optional, not installed — run `vno setup --llama`")}`
+    );
+    return;
+  }
+  const models = (await listLlamaModels()).filter((m) => m.valid);
+  if (models.length === 0) {
+    console.log(
+      `  ${chalk.dim("?")} ${"summarize".padEnd(12)} ${chalk.dim("llama.cpp installed, no model yet — run `vno setup --llama`")}`
+    );
+    return;
+  }
+  console.log(`  ${chalk.green("✓")} ${"summarize".padEnd(12)} ${chalk.dim(models.map((m) => m.filename).join(", "))}`);
 }
 
 /** Status line for the `vno://` browser-launch handler, in the same shape as the binary checks above. */
@@ -717,15 +1085,194 @@ async function printModelInventory(): Promise<void> {
   const entries = await listModels();
   if (entries.length === 0) {
     console.log(chalk.dim("No models found. Run `vno setup` to download the defaults, or `vno setup --model <name>` for one specifically."));
+  } else {
+    for (const entry of entries) {
+      const size = entry.size ? `${(entry.size / 1e6).toFixed(0)} MB` : "?";
+      console.log(
+        entry.valid
+          ? `  ${chalk.green("✓")} ${entry.stem.padEnd(24)} ${chalk.dim(`${size}  ${entry.path}`)}`
+          : `  ${chalk.red("✗")} ${entry.stem.padEnd(24)} ${chalk.dim(`invalid (${entry.reason}) — ${entry.path}`)}`
+      );
+    }
+  }
+
+  console.log();
+  console.log(chalk.bold("Summarization models (optional):"));
+  const llamaEntries = await listLlamaModels();
+  if (llamaEntries.length === 0) {
+    console.log(chalk.dim("  None found. Run `vno setup --llama` to install llama.cpp and pick one."));
     return;
   }
-  for (const entry of entries) {
+  for (const entry of llamaEntries) {
     const size = entry.size ? `${(entry.size / 1e6).toFixed(0)} MB` : "?";
     console.log(
       entry.valid
-        ? `  ${chalk.green("✓")} ${entry.stem.padEnd(24)} ${chalk.dim(`${size}  ${entry.path}`)}`
-        : `  ${chalk.red("✗")} ${entry.stem.padEnd(24)} ${chalk.dim(`invalid (${entry.reason}) — ${entry.path}`)}`
+        ? `  ${chalk.green("✓")} ${entry.filename.padEnd(40)} ${chalk.dim(`${size}  ${entry.path}`)}`
+        : `  ${chalk.red("✗")} ${entry.filename.padEnd(40)} ${chalk.dim(`invalid (${entry.reason}) — ${entry.path}`)}`
     );
+  }
+}
+
+/** One deletable model, flattened across both engines for a single picker. */
+interface RemovableModel {
+  engine: "whisper" | "llama";
+  /** What the user types to name it: a whisper stem, or a .gguf filename. */
+  name: string;
+  path: string;
+  size: number;
+  valid: boolean;
+}
+
+/**
+ * Every model vno installed itself, in the order the inventory prints them.
+ * Models found through Homebrew or a *_MODEL_PATH override are deliberately
+ * excluded - see `isManagedModel` for why vno won't delete those.
+ */
+async function removableModels(): Promise<RemovableModel[]> {
+  const [whisper, llama] = await Promise.all([listModels(), listLlamaModels()]);
+  const out: RemovableModel[] = [];
+  for (const m of whisper) {
+    if (!isManagedModel(m.path)) continue;
+    out.push({ engine: "whisper", name: m.stem, path: m.path, size: m.size ?? 0, valid: m.valid });
+  }
+  for (const m of llama) {
+    if (!isManagedLlamaModel(m.path)) continue;
+    out.push({ engine: "llama", name: m.filename, path: m.path, size: m.size ?? 0, valid: m.valid });
+  }
+  return out;
+}
+
+function formatGb(bytes: number): string {
+  return `${(bytes / 1e9).toFixed(2)} GB`;
+}
+
+/**
+ * Resolves a name typed after `--remove-model` against the installed models:
+ * exact match first, then a unique case-insensitive substring. Several
+ * matches lists them and resolves to nothing rather than guessing, the same
+ * contract as `resolveNamedFile` for recordings.
+ */
+function matchRemovable(models: RemovableModel[], name: string): RemovableModel[] {
+  const needle = name.trim().toLowerCase();
+  const exact = models.filter((m) => m.name.toLowerCase() === needle);
+  if (exact.length > 0) return exact;
+  return models.filter((m) => m.name.toLowerCase().includes(needle));
+}
+
+/**
+ * `vno setup --remove-model [name]` - reclaim disk space. Bare, it opens a
+ * picker over everything installed; with a name, it targets just that one.
+ * Either way the deletion itself is confirmed, defaulting to no, mirroring
+ * the leftover-.pt offer below and `vno cleanup`'s prompt.
+ *
+ * Models are the one dependency that grows without bound - a couple of
+ * whisper models plus a summarization GGUF is comfortably 10 GB - and
+ * re-downloading one is a single command, so this is the rare delete where
+ * the cost of being wrong is bandwidth rather than data.
+ */
+async function runRemoveModels(target: string | true): Promise<void> {
+  const models = await removableModels();
+  if (models.length === 0) {
+    console.log(chalk.dim("No vno-installed models to remove."));
+    console.log(chalk.dim("(Models from Homebrew or a *_MODEL_PATH override aren't vno's to delete.)"));
+    return;
+  }
+
+  // No terminal means nowhere to confirm, and deletion in this codebase is
+  // never unconfirmed - so this refuses rather than falling through to a
+  // silent delete, even when a model was named explicitly.
+  if (!process.stdin.isTTY) {
+    console.log(chalk.red("Removing a model needs a terminal to confirm in."));
+    process.exitCode = 1;
+    return;
+  }
+
+  let chosen: RemovableModel[];
+
+  if (typeof target === "string") {
+    const matches = matchRemovable(models, target);
+    if (matches.length === 0) {
+      console.log(chalk.red(`No installed model matches "${target}".`));
+      console.log(chalk.dim(`Installed: ${models.map((m) => m.name).join(", ")}`));
+      process.exitCode = 1;
+      return;
+    }
+    if (matches.length > 1) {
+      console.log(chalk.red(`"${target}" matches several models:`));
+      for (const m of matches) console.log(chalk.dim(`  ${m.name}`));
+      console.log(chalk.dim("Name one exactly, or run `vno setup --remove-model` for a picker."));
+      process.exitCode = 1;
+      return;
+    }
+    chosen = matches;
+  } else {
+    const picked = await prompt([
+      {
+        type: "checkbox",
+        name: "paths",
+        message: "Which models should go? (Space toggles, Enter confirms)",
+        choices: models.map((m) => ({
+          name: `${m.engine === "llama" ? "summarize" : "transcribe"}  ${m.name.padEnd(40)} ${formatGb(m.size)}${m.valid ? "" : chalk.red("  (invalid)")}`,
+          value: m.path,
+        })),
+      },
+    ]);
+    if (picked === CANCELLED) return;
+    const paths = new Set<string>(picked.paths as string[]);
+    chosen = models.filter((m) => paths.has(m.path));
+    if (chosen.length === 0) {
+      console.log(chalk.dim("Nothing selected."));
+      return;
+    }
+  }
+
+  const total = chosen.reduce((sum, m) => sum + m.size, 0);
+  console.log();
+  for (const m of chosen) console.log(chalk.dim(`  ${m.name} — ${formatGb(m.size)}  ${m.path}`));
+  console.log(chalk.dim(`  Total: ${formatGb(total)}`));
+
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "ok",
+      message: `Delete ${chosen.length === 1 ? "this model" : `these ${chosen.length} models`}?`,
+      choices: [
+        { name: "No, keep them", value: false },
+        { name: "Yes, delete", value: true },
+      ],
+      default: false,
+    },
+  ]);
+  if (answer === CANCELLED || !answer.ok) {
+    console.log(chalk.dim("Nothing deleted."));
+    return;
+  }
+
+  let freed = 0;
+  const gone: RemovableModel[] = [];
+  for (const m of chosen) {
+    const result = m.engine === "llama" ? await removeLlamaModel(m.path) : await removeModel(m.path);
+    if (result.removed) {
+      freed += result.freedBytes;
+      gone.push(m);
+    } else {
+      console.log(chalk.red(`  Couldn't remove ${m.name}: ${result.reason}`));
+    }
+  }
+
+  if (gone.length > 0) console.log(chalk.green(`  Deleted ${gone.length} model(s), reclaiming ${formatGb(freed)}.`));
+
+  // A config pointing at a model that no longer exists would fail at job
+  // time rather than here, so fix it now: summaryModel has no default to
+  // fall back on and is cleared, while defaultModel does, and re-downloads.
+  const config = await loadConfig();
+  const removedNames = new Set(gone.map((m) => m.name));
+  if (config.summaryModel && removedNames.has(config.summaryModel)) {
+    await saveConfig({ ...config, summaryModel: null });
+    console.log(chalk.dim(`  Cleared summaryModel (it pointed at ${config.summaryModel}).`));
+  }
+  if (config.defaultModel && removedNames.has(config.defaultModel)) {
+    console.log(chalk.yellow(`  defaultModel is still "${config.defaultModel}" — the next transcribe will offer to download it again.`));
   }
 }
 

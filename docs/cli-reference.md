@@ -203,6 +203,31 @@ More detail in [Transcription](transcription.md).
 
 ---
 
+## `vno summarize`
+
+Summarizes one recording's transcript with llama.cpp — **optional**, and
+never installed by anything else in vno. One recording at a time; no picker,
+no batch mode.
+
+```bash
+vno summarize 250810_1328
+vno summarize interview.mp3 -m phi4-mini
+```
+
+| Flag | Effect |
+| --- | --- |
+| `-m, --model <name>` | Summarization model to use. Defaults to [`summaryModel`](configuration.md#summarymodel) |
+
+The recording needs a transcript already (`vno t` first) — this reads the
+transcript text, it doesn't touch the audio. Writes `<name>.summary.txt` next
+to the audio, same convention as `.vtt`.
+
+If llama.cpp isn't installed, this points at `vno setup --llama` rather than
+trying to install anything itself. Full detail in
+[Summarization](summarization.md).
+
+---
+
 ## `vno visualize`
 
 Aliases: `vno v`, `vno viz`, `vno vis`, `vno --v`. (`-v` is reserved for `vno --version`.)
@@ -213,7 +238,7 @@ Starts a local web server and opens the two-pane organizer in your browser.
 
 | Flag | Effect |
 | --- | --- |
-| `-p, --port <number>` | Port to listen on. Default: `8477`, fixed across runs. If it's busy with another `vno v` instance, opens a tab to that instance instead of picking a new port. `0` picks a free port automatically instead |
+| `-p, --port <number>` | Port to listen on **for this run**, overriding the configured one ([`port`](configuration.md#port), default `9477`). Fixed across runs rather than picked per launch. If it's busy with another `vno v` instance, opens a tab to that instance instead of picking a new port. `0` picks a free port automatically instead |
 | `--no-open` | Start the server without opening a browser (prints the URL) |
 
 Startup measures every recording with `ffprobe`, which on a large library takes
@@ -409,6 +434,9 @@ vno setup --check         # report only, never offer to install
 vno setup --global        # install whisper.cpp under your home directory instead of beside vno
 vno setup --model small   # fetch just this model instead of the defaults
 vno setup --list-models   # print the model inventory and exit; installs nothing
+vno setup --remove-model  # pick installed models to delete and reclaim the space
+vno setup --llama         # optional: install llama.cpp and pick a summarization model
+vno setup --llama --summary-model phi4-mini    # ...with a specific model, no prompts
 ```
 
 | Flag | Effect |
@@ -417,7 +445,27 @@ vno setup --list-models   # print the model inventory and exit; installs nothing
 | `--local` | Install whisper.cpp beside this vno install, without asking |
 | `--global` | Install whisper.cpp under `~/.whisper-cpp` (`%LOCALAPPDATA%\whisper-cpp` on Windows), without asking |
 | `--model <name>` | Fetch just this model instead of the default set (`small` + `turbo`) |
-| `--list-models` | Print the model inventory and exit |
+| `--list-models` | Print the model inventory (whisper **and** summarization) and exit |
+| `--remove-model [name]` | Delete installed models to reclaim disk space. **Bare**, opens a picker over everything installed; with a name, targets that one. Always confirmed, defaulting to *no* |
+| `--llama` | Install llama.cpp for transcript summarization (optional), then walk through picking a model. Re-run any time to pick a different one |
+| `--summary-model <name>` | Fetch this summarization model non-interactively, skipping the picker (implies `--llama` if the binary isn't installed yet) |
+
+`--remove-model` only ever deletes models **vno installed itself**, under
+either install root's `models/`. One found through Homebrew's share directory
+or a `WHISPER_MODEL_PATH` / `VNO_LLAMA_MODEL_PATH` override belongs to
+whatever put it there — those are listed by `--list-models` but never offered
+for deletion. It needs a terminal to confirm in, so it refuses in a pipe or
+CI rather than deleting unprompted. If the model you delete is the one
+`summaryModel` names, that setting is cleared; if it's the one `defaultModel`
+names, you're told the next transcribe will offer to download it again.
+
+Plain `vno setup` (neither flag passed) still asks — once, and only if
+llama.cpp isn't installed yet — whether to set it up, right after the
+ffmpeg/whisper.cpp flow: "Set up llama.cpp for optional transcript
+summarization?". Say no (or press Esc) and nothing installs; vno asks again
+next time you run `vno setup` with llama.cpp still missing. A non-interactive
+run (a pipe, CI) skips the question entirely rather than hanging on it. See
+[Summarization](summarization.md).
 
 If whisper.cpp isn't installed and neither `--local` nor `--global` was
 passed, vno asks: install it locally, install it globally, or **point at one
@@ -546,7 +594,7 @@ Every command is also a package script, for running without linking:
 bun run import
 bun run transcribe --file 250810_1328
 bun run cleanup --dry-run
-bun run visualize --port 8477
+bun run visualize --port 9477
 bun run explore 250810_1328
 bun run setting
 bun run setup

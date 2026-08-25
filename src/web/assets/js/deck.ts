@@ -41,10 +41,14 @@ interface TranscriptHost extends HTMLElement {
   _editing?: boolean;
 }
 
+/** Which of the deck's two content tabs is showing. Reset on every select(). */
+var activeDeckTab: "transcript" | "summary" = "transcript";
+
 export function select(rel: string): void {
   var note = noteFor(rel);
   if (!note) return showPlaceholder("Select a take to play");
   state.selectedRel = rel;
+  activeDeckTab = "transcript";
   markActive();
 
   dom.detail.classList.remove("playing");
@@ -82,6 +86,9 @@ export function select(rel: string): void {
   actions.appendChild(button(note.hasTranscript ? "Re-transcribe" : "Transcribe", "",
     function () { openTranscribe(note!.rel); },
     "Run whisper on this recording"));
+  actions.appendChild(button(note.hasSummary ? "Re-summarize" : "Summarize", "",
+    function () { requestSummarize(note!); },
+    "Summarize this recording's transcript with llama.cpp (optional)"));
   actions.appendChild(button("Edit transcript", "", function () { startEdit(note!); },
     "Edit the transcript text (timings are kept)"));
   actions.appendChild(button("Delete", "danger", function () { confirmDelete(note!); },
@@ -102,10 +109,12 @@ export function select(rel: string): void {
   audio.addEventListener("pause", function () { dom.detail.classList.remove("playing"); });
   audio.addEventListener("ended", function () { dom.detail.classList.remove("playing"); });
 
+  dom.body.appendChild(buildDeckTabs(note));
+
   var transcript = document.createElement("div") as TranscriptHost;
   transcript.className = "transcript";
   transcript.id = "transcript";
-  renderTranscript(transcript, note, audio);
+  renderDeckContent(transcript, note, audio);
   dom.body.appendChild(transcript);
 
   dom.placeholder.classList.add("hidden");
@@ -342,7 +351,7 @@ function refreshSelected(rel: string): void {
       var transcriptHost = document.getElementById("transcript") as TranscriptHost | null;
       var audio = dom.body.querySelector("audio, video") as DeckMedia | null;
       if (transcriptHost && audio) {
-        renderTranscript(transcriptHost, res.note, audio);
+        renderDeckContent(transcriptHost, res.note, audio);
         if (audio._retick) audio._retick(res.note.cues);
       }
     })
@@ -362,7 +371,72 @@ export function showPlaceholder(message: string): void {
   dom.body.classList.add("hidden");
 }
 
-function renderTranscript(host: TranscriptHost, note: Note, audio: DeckMedia): void {
+/** The Transcript/Summary tab strip above the deck's content host. */
+function buildDeckTabs(note: Note): HTMLDivElement {
+  var rel = note.rel;
+  var strip = document.createElement("div");
+  strip.className = "deck-tabs";
+
+  function switchTo(tab: "transcript" | "summary") {
+    if (activeDeckTab === tab) return;
+    activeDeckTab = tab;
+    transcriptTab.classList.toggle("active", tab === "transcript");
+    summaryTab.classList.toggle("active", tab === "summary");
+    var host = document.getElementById("transcript") as TranscriptHost | null;
+    var audio = dom.body.querySelector("audio, video") as DeckMedia | null;
+    var current = noteFor(rel);
+    if (host && audio && current) renderDeckContent(host, current, audio);
+  }
+
+  var transcriptTab = button("Transcript", "tab active", function () { switchTo("transcript"); });
+  var summaryTab = button("Summary", "tab", function () { switchTo("summary"); });
+  strip.appendChild(transcriptTab);
+  strip.appendChild(summaryTab);
+  return strip;
+}
+
+function renderDeckContent(host: TranscriptHost, note: Note, audio: DeckMedia): void {
+  if (activeDeckTab === "summary") renderSummaryTab(host, note);
+  else renderTranscriptTab(host, note, audio);
+}
+
+function renderSummaryTab(host: TranscriptHost, note: Note): void {
+  host.textContent = "";
+  host._hlTargets = [];
+  if (note.summary) {
+    var plain = document.createElement("div");
+    plain.className = "plain";
+    plain.textContent = note.summary;
+    host.appendChild(plain);
+    return;
+  }
+  var empty = document.createElement("div");
+  empty.className = "empty";
+  empty.textContent = state.SUMMARIZATION && state.SUMMARIZATION.available
+    ? "No summary yet — click Summarize above."
+    : "Summarization isn't set up. Run `vno setup --llama` in a terminal to add it (optional).";
+  host.appendChild(empty);
+}
+
+/** Fires the Summarize action for the currently selected note - the info modal for the not-set-up case, a fire-and-forget job start otherwise. */
+function requestSummarize(note: Note): void {
+  if (!state.SUMMARIZATION || !state.SUMMARIZATION.available) {
+    modal({
+      title: "Summarization isn't set up",
+      message: "This is an optional feature. Run `vno setup --llama` in a terminal to install llama.cpp and pick a model, then come back here.",
+    });
+    return;
+  }
+  if (!note.hasTranscript) {
+    toast("Transcribe this recording first", "error");
+    return;
+  }
+  api("/api/summarize", { method: "POST", body: { rel: note.rel } })
+    .then(function () { toast("Summarizing…", "ok"); })
+    .catch(fail);
+}
+
+function renderTranscriptTab(host: TranscriptHost, note: Note, audio: DeckMedia): void {
   host.textContent = "";
   // What the filter box is searching for gets marked here too, so following a
   // transcript hit from the list lands you on the words that matched. The

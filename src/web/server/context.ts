@@ -3,9 +3,11 @@ import path from "node:path";
 import fs from "fs-extra";
 import chalk from "chalk";
 import { saveConfig, configFilePath } from "../../lib/config.ts";
-import { buildNotes, TRANSCRIPT_EXTS } from "../../lib/notes.ts";
+import { buildNotes, TRANSCRIPT_EXTS, SUMMARY_EXT } from "../../lib/notes.ts";
 import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper.ts";
 import { resolveModel } from "../../lib/whispercpp.ts";
+import { isLlamaInstalled } from "../../lib/llama.ts";
+import { listModels as listLlamaModels } from "../../lib/llamacpp.ts";
 import { checkDependencies } from "../../lib/setup.ts";
 import { recordDeletions } from "../../lib/ledger.ts";
 import { MEDIA_EXTENSIONS } from "../../lib/sync.ts";
@@ -47,8 +49,10 @@ export interface ServerContext {
   /** Absolute path for a target-relative `rel`, or null if it escapes the target. */
   resolveInside(rel: string | null | undefined): string | null;
   refreshNotes(): Promise<void>;
-  dependencyStatus(): Promise<{ ffmpeg: boolean; whisper: boolean }>;
+  dependencyStatus(): Promise<{ ffmpeg: boolean; whisper: boolean; llama: boolean }>;
   modelAvailability(): Promise<Record<string, boolean>>;
+  /** Optional: whether summarization (llama.cpp + at least one valid model) is usable right now. */
+  summarizationStatus(): Promise<{ available: boolean; models: string[] }>;
   stateResponse(): Promise<StateResponse>;
   startJob(kind: string, title: string, total: number): Job;
   jobLog(line: string): void;
@@ -140,9 +144,24 @@ export async function createContext({
   // Both probes are PATH lookups, so they're cheap enough to redo per request -
   // which also means the page notices an install done in another terminal as
   // soon as it refreshes, with nothing to invalidate.
-  async function dependencyStatus(): Promise<{ ffmpeg: boolean; whisper: boolean }> {
+  async function dependencyStatus(): Promise<{ ffmpeg: boolean; whisper: boolean; llama: boolean }> {
     const [ffmpeg, whisper] = await checkDependencies(["ffmpeg", "whisper"]);
-    return { ffmpeg: ffmpeg.found, whisper: whisper.found };
+    // llama.cpp is optional, so unlike ffmpeg/whisper this never gates
+    // anything on its own - callers decide what "not installed" means for
+    // them (the summarize route 412s; everything else ignores it).
+    const llama = await isLlamaInstalled();
+    return { ffmpeg: ffmpeg.found, whisper: whisper.found, llama };
+  }
+
+  // Mirrors dependencyStatus's llama check but also requires at least one
+  // valid model - the deck's Summarize action and Settings' model picker
+  // both need "genuinely usable right now", not just "the binary exists".
+  async function summarizationStatus(): Promise<{ available: boolean; models: string[] }> {
+    const llama = await isLlamaInstalled();
+    if (!llama) return { available: false, models: [] };
+    const entries = await listLlamaModels();
+    const models = entries.filter((m) => m.valid).map((m) => m.filename);
+    return { available: models.length > 0, models };
   }
 
   // Whether each model is already downloaded, so the picker can say so rather
@@ -156,6 +175,7 @@ export async function createContext({
   }
 
   async function stateResponse(): Promise<StateResponse> {
+    const deps = await dependencyStatus();
     return {
       notes,
       config: {
@@ -164,6 +184,7 @@ export async function createContext({
         autoTranslate: currentConfig.autoTranslate ?? null,
         defaultModel: currentConfig.defaultModel || "turbo",
         transcribeLanguage: currentConfig.transcribeLanguage || "auto",
+        summaryModel: currentConfig.summaryModel ?? null,
         // Guides auto-detect rather than overriding it - see
         // lib/config.ts:crossLanguage. Sent through the same defaulting
         // helper the transcribe path uses, so the dialog and the job can't
@@ -190,7 +211,9 @@ export async function createContext({
       modelAvailability: await modelAvailability(),
       languages: LANGUAGES,
       themes: THEMES,
-      ...(await dependencyStatus()),
+      ffmpeg: deps.ffmpeg,
+      whisper: deps.whisper,
+      summarization: await summarizationStatus(),
       job,
     };
   }
@@ -254,7 +277,7 @@ export async function createContext({
 
     const base = audio.slice(0, -path.extname(audio).length);
     let removed = 0;
-    for (const file of [audio, ...TRANSCRIPT_EXTS.map((ext) => base + ext)]) {
+    for (const file of [audio, ...TRANSCRIPT_EXTS.map((ext) => base + ext), base + SUMMARY_EXT]) {
       if (await fs.pathExists(file)) {
         await fs.remove(file);
         removed++;
@@ -305,6 +328,7 @@ export async function createContext({
     refreshNotes,
     dependencyStatus,
     modelAvailability,
+    summarizationStatus,
     stateResponse,
     startJob,
     jobLog,

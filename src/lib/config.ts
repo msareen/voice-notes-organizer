@@ -91,6 +91,13 @@ function defaultConfig(): Config {
     // files landed in and open the regenerated index.html player. Set to
     // false (or pass --no-open) to keep runs headless.
     openWhenDone: true,
+    // Port the viewer serves on, fixed across runs so bookmarks and an
+    // installed PWA's start_url keep working (cli/visualize.ts explains why
+    // it doesn't just pick a free one). Settable because some machines can't
+    // bind the default at all - Windows reserves TCP ranges for Hyper-V/WSL2,
+    // and a bind inside one fails as "already in use" with nothing listening.
+    // `--port` still overrides this for a single run.
+    port: 9477,
     // Colour theme for the browser UI, as one of the ids in lib/themes.ts
     // ("auto" follows the OS light/dark setting). Stored here rather than in
     // the browser's localStorage so the server can stamp it onto <html> in the
@@ -106,6 +113,17 @@ function defaultConfig(): Config {
     // re-checking on a hot path, since the backend can't change without a
     // fresh `vno setup`; see lib/whisper.ts:accelState.
     accel: { backend: null, name: null, use: null, resolvedAt: null },
+    // The llama.cpp model to summarize transcripts with (an alias or a
+    // dropped-in .gguf filename - see lib/llamacpp.ts). null until the user
+    // configures one via Settings or `vno setup --summary-model`;
+    // summarization is entirely optional and unset just means "not set up
+    // yet", unlike defaultModel's forced "turbo".
+    summaryModel: null,
+    // What `vno setup --llama` installed for llama.cpp's accelerator backend,
+    // mirroring `accel` above exactly but independent of it - whisper.cpp and
+    // llama.cpp are installed separately, so a machine can be accelerated for
+    // one and not the other.
+    llamaAccel: { backend: null, name: null, use: null, resolvedAt: null },
   };
 }
 
@@ -130,6 +148,7 @@ export async function loadConfig(): Promise<Config> {
       sources: normalizeSources(data.sources),
       knownMounts: { ...data.knownMounts },
       accel: { ...defaults.accel, ...data.accel },
+      llamaAccel: { ...defaults.llamaAccel, ...data.llamaAccel },
       crossLanguage: {
         ...defaults.crossLanguage,
         ...data.crossLanguage,

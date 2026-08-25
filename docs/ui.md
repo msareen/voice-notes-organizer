@@ -299,12 +299,12 @@ it once.
 These endpoints delete files and launch programs, so access is narrow by
 design:
 
-- The server binds to **`127.0.0.1`** on a **fixed default port (8477)** —
-  never an external interface. If that port is busy, `vno v` checks whether
-  it's a `vno v` instance already running and opens a tab to it instead of
-  picking a different port (bookmarked URLs and an installed PWA shortcut
-  depend on the port staying put); `-p/--port 0` asks for a random free port
-  instead.
+- The server binds to **`127.0.0.1`** on a **fixed port** ([`port`](configuration.md#port),
+  `9477` by default) — never an external interface. If that port is busy,
+  `vno v` checks whether it's a `vno v` instance already running and opens a
+  tab to it instead of picking a different port (bookmarked URLs and an
+  installed PWA shortcut depend on the port staying put); `-p/--port 0` asks
+  for a random free port instead.
 - Every request needs a **session token**, persisted in
   `~/.vno/session-token` and reused across runs (not regenerated per launch —
   what lets a bookmark or an installed PWA keep working), inlined into the

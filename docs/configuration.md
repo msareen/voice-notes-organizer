@@ -26,7 +26,9 @@ rather than crashing the tool.
   "openWhenDone": true,
   "rememberDeletions": true,
   "theme": "tape",
-  "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
+  "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
+  "summaryModel": null,
+  "llamaAccel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
 }
 ```
 
@@ -46,8 +48,11 @@ time.
 | `transcribeLanguage` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
+| `port` | ✅ | — (see below) | ✅ |
 | `theme` | ✅ | ✅ | ✅ |
 | `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
+| `summaryModel` | ✅ (once installed) | ✅ (once installed) | ✅ |
+| `llamaAccel` | on/off only | on/off only | ✅ (set by `vno setup --llama`) |
 
 ---
 
@@ -244,6 +249,24 @@ Toggle it from `vno setting` or the UI's Settings dialog; re-install with a
 different backend (e.g. after adding a GPU) by running `vno setup` again. See
 [Transcription](transcription.md#gpu-acceleration).
 
+## `summaryModel`
+
+The llama.cpp model used for transcript summarization — an alias
+(`"phi4-mini"`) or a dropped-in `.gguf` filename. `null` until you set one;
+unlike `defaultModel` there's no forced default, since summarization is
+entirely optional and unset just means "not configured yet".
+
+Set from `vno setting` → *Summarization model* (shown only once at least one
+model is installed) or the UI's Settings dialog. See
+[Summarization](summarization.md#choosing-a-model).
+
+## `llamaAccel`
+
+llama.cpp's accelerator backend, mirroring [`accel`](#accel) exactly but
+independent of it — whisper.cpp and llama.cpp are installed separately, so a
+machine can be accelerated for one and not the other. Set by `vno setup
+--llama`, toggled the same way `accel` is.
+
 ## `openWhenDone`
 
 Whether a finished `vno import` / `vno transcribe` run launches the
@@ -251,6 +274,33 @@ Whether a finished `vno import` / `vno transcribe` run launches the
 headless.
 
 `--no-open` overrides it for a single run.
+
+---
+
+## `port`
+
+The port the [browser UI](ui.md) serves on. `9477` by default — chosen to sit
+clear of the `8385–8484` block Windows commonly reserves for Hyper-V, which is
+where the previous default (`8477`) fell.
+
+The port is deliberately fixed rather than picked fresh each launch, so a
+bookmarked URL and an installed PWA's `start_url` — baked in at install time
+— keep working. This setting exists because the default isn't always usable:
+some machines can't bind it at all, most often on Windows, where whole TCP
+ranges are reserved for Hyper-V's dynamic allocator (WSL2, Docker Desktop)
+and a bind inside one fails as *"already in use"* with nothing listening.
+See [Troubleshooting](troubleshooting.md#port-is-already-in-use--but-nothing-is-using-it-windows).
+
+Set it from `vno setting` → *Viewer port*, or edit the file. `0` asks the OS
+for a free port on every run — convenient, but it gives up the stable URL.
+`-p/--port` overrides it for a single run without changing the setting.
+
+It's deliberately **not** in the UI's Settings dialog: the page you'd change
+it from is served on the very port being changed, so applying it would drop
+the connection out from under you. It's a terminal setting.
+
+Changing the port does **not** update an already-installed PWA shortcut;
+reinstall the app from the new URL to pick it up.
 
 ---
 

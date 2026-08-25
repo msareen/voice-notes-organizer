@@ -1,6 +1,6 @@
 {
   "name": "@msareen/voice-notes-organizer",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "description": "Import, transcribe, translate and organize voice recordings from voice recorders and SD cards - a replacement for the stalled desktop software that ships with them.",
   "type": "module",
   "keywords": [
@@ -27,37 +27,47 @@
     "url": "https://github.com/msareen/voice-notes-organizer/issues"
   },
   "bin": {
-    "vno": "bin/vno.js"
+    "vno": "bin/vno.ts"
   },
   "files": [
     "bin",
     "src",
-    "docs"
+    "docs",
+    "tsconfig.base.json",
+    "tsconfig.json"
   ],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
-    "node": ">=18"
+    "bun": ">=1.2"
   },
   "scripts": {
-    "start": "node bin/vno.js",
-    "import": "node bin/vno.js import",
-    "transcribe": "node bin/vno.js transcribe",
-    "cleanup": "node bin/vno.js cleanup",
-    "visualize": "node bin/vno.js visualize",
-    "explore": "node bin/vno.js explore",
-    "setting": "node bin/vno.js setting",
-    "setup": "node bin/vno.js setup",
-    "config": "node bin/vno.js config",
-    "prepublishOnly": "node bin/vno.js --version"
+    "start": "bun bin/vno.ts",
+    "import": "bun bin/vno.ts import",
+    "transcribe": "bun bin/vno.ts transcribe",
+    "cleanup": "bun bin/vno.ts cleanup",
+    "visualize": "bun bin/vno.ts visualize",
+    "explore": "bun bin/vno.ts explore",
+    "setting": "bun bin/vno.ts setting",
+    "setup": "bun bin/vno.ts setup",
+    "config": "bun bin/vno.ts config",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/web/assets && tsc --noEmit -p src/web/assets/tsconfig.sw.json",
+    "prepublishOnly": "bun run typecheck && bun bin/vno.ts --version"
   },
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "fs-extra": "^11.2.0",
     "inquirer": "^9.3.6",
-    "ora": "^8.1.0"
+    "ora": "^8.1.0",
+    "rxjs": "^7.8.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@types/fs-extra": "^11.0.4",
+    "@types/inquirer": "^9",
+    "typescript": "^7.0.2"
+  }
 }

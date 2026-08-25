@@ -35,7 +35,7 @@ whisper.cpp is vendored into `whisper-cpp/bin/` (local or global, see
 put on your system `PATH`, so a new terminal shouldn't be necessary — but if
 `vno setup --check` still shows it missing right after a successful install,
 something wrote the binary somewhere unexpected. The install log `vno setup`
-printed says exactly where it put it; check `install.json` in that
+printed says exactly where it put it; check `vno-install.json` in that
 `whisper-cpp/` folder for the recorded path.
 
 **On Windows**, every `.dll` the release zip shipped has to stay beside
@@ -195,24 +195,23 @@ acceleration](transcription.md#gpu-acceleration).
 
 ## `vno` isn't a recognised command
 
-Your shell hasn't picked up npm's global bin folder, or the install didn't take.
+Your shell hasn't picked up Bun's global bin folder, or the install didn't take.
 Restart the shell first, then check the package is actually there:
 
 ```bash
-npm ls -g --depth 0        # should list @msareen/voice-notes-organizer
-npm bin -g                 # this folder has to be on your PATH
+bun pm ls -g               # should list @msareen/voice-notes-organizer
 ```
 
-If that folder isn't on your `PATH`, add it — on Windows it's usually
-`%APPDATA%\npm`, on macOS/Linux something like `/usr/local/bin` or
-`~/.npm-global/bin`. Either way you can skip the global bin entirely:
+Bun's global bin is `~/.bun/bin` (`%USERPROFILE%\.bun\bin` on Windows) and has
+to be on your `PATH` — Bun's own installer adds it, but a shell that predates
+the install won't have it. Either way you can skip the global bin entirely:
 
 ```bash
-npx @msareen/voice-notes-organizer <command>
+bunx @msareen/voice-notes-organizer <command>
 ```
 
-Working from a clone (`npm link`)? Same checks apply, and you can always run it
-in place with `node bin/vno.js <command>`.
+Working from a clone (`bun link`)? Same checks apply, and you can always run it
+in place with `bun bin/vno.ts <command>`.
 
 ## The config file is broken
 

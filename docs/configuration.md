@@ -236,7 +236,7 @@ browser has nowhere to ask at job time.
 
 Unlike the old torch probe, this never needs re-checking on a hot path: the
 backend is fixed by which whisper.cpp binary got installed, and reading
-`install.json` back is free. Nothing depends on this block being present:
+`vno-install.json` back is free. Nothing depends on this block being present:
 delete it, or the whole file, and every command still runs (falling back to
 the CPU until the next `vno setup`).
 
@@ -326,12 +326,14 @@ and nothing is skipped. An existing ledger file is left alone but ignored.
 
 ---
 
-## Supported audio extensions
+## Supported audio and video extensions
 
-Recognised everywhere — import, transcribe, cleanup and the UI:
+Recognised everywhere — import, transcribe, cleanup and the UI. Video files play
+in the same deck as audio (whisper.cpp only reads their audio track):
 
 ```
 .mp3  .wav  .m4a  .aac  .flac  .ogg  .oga  .wma  .aiff  .opus  .amr  .3gp
+.mp4  .m4v  .mov  .mkv  .webm  .avi
 ```
 
 Anything else on the volume is ignored, so photos, firmware and the recorder's

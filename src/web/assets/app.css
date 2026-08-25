@@ -395,6 +395,16 @@ mark.hit {
 }
 .chip b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* A video recording gets its frame shown above the transport; audio has
+   nothing to display so its element stays invisible inside the transport
+   bar (see deck.ts:buildTransport). Capped height keeps a portrait/odd-aspect
+   clip from pushing the transport and transcript off screen. */
+.video-frame {
+  margin-bottom: 12px; border-radius: var(--r-lg); overflow: hidden;
+  background: #000; border: 1px solid var(--line);
+}
+.video-frame video { display: block; width: 100%; max-height: 60vh; }
+
 /* ---- Transport: the deck's own player, replacing the browser's default
    controls so it wears the theme and can show where the transcript's cues
    fall along the recording. The <audio> element stays in the DOM (muted of

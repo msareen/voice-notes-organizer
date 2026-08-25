@@ -152,7 +152,7 @@ the same:
 whisper-cpp/
 ├── bin/          # the whisper.cpp binary (+ its .dll/.so files, when vendored)
 ├── models/       # ggml-*.bin model files
-└── install.json  # what setup found or built: version, platform, binary path, accelerator, models
+└── vno-install.json  # what setup found or built: version, platform, binary path, accelerator, models
 ```
 
 Re-running `vno setup` is safe and fast — it only re-resolves what's already
@@ -164,7 +164,7 @@ Already have a whisper.cpp binary from somewhere else — a manual build, a
 different tool that vendors one? When `vno setup` asks where to install,
 choose **"I already have it installed"** and give it a path (the binary
 itself, or a folder to search). Nothing is copied; the path is recorded in
-`install.json` and used in place.
+`vno-install.json` and used in place.
 
 ## GPU acceleration
 

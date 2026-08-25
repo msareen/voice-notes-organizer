@@ -7,8 +7,9 @@ rather not let `vno setup` do it.
 
 ## What you need first
 
-- **Node.js 18+** (or [Bun](https://bun.sh)) to run the CLI. Everything else
-  `vno setup` can install for you.
+- **[Bun](https://bun.sh) 1.2+** to run the CLI. Everything else `vno setup`
+  can install for you. vno ships as TypeScript that Bun executes directly —
+  there is no build output, and Node can't run it.
 - **ffmpeg** on your `PATH` — whisper.cpp needs it to decode audio into the
   16kHz mono WAV it accepts, and `vno cleanup` uses `ffprobe` (shipped with
   ffmpeg) to measure durations.
@@ -22,27 +23,34 @@ self-contained binary.
 ## Installing the CLI
 
 ```bash
-npm install -g @msareen/voice-notes-organizer
+bun install -g @msareen/voice-notes-organizer
 ```
 
 That puts `vno` on your `PATH`. To try it without installing anything:
 
 ```bash
-npx @msareen/voice-notes-organizer          # same as `vno`
-npx @msareen/voice-notes-organizer v        # ...or any other command
+bunx @msareen/voice-notes-organizer          # same as `vno`
+bunx @msareen/voice-notes-organizer v        # ...or any other command
 ```
 
 To update later:
 
 ```bash
-npm update -g @msareen/voice-notes-organizer
+bun update -g @msareen/voice-notes-organizer
 ```
 
 To remove it:
 
 ```bash
-npm uninstall -g @msareen/voice-notes-organizer
+bun remove -g @msareen/voice-notes-organizer
 ```
+
+> **Coming from a 0.x install?** Those were installed with npm and run under
+> Node. Remove the old one first (`npm uninstall -g
+> @msareen/voice-notes-organizer`), then install as above — your recordings,
+> transcripts and `~/.vno` settings are untouched by either step. Re-run `vno
+> setup` afterwards on Windows so the `vno://` handler points at the new
+> install.
 
 That leaves `~/.vno` (your config, and the record of what you've deleted) and
 your recordings alone — uninstalling the tool never touches either. Delete

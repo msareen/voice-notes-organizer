@@ -14,21 +14,22 @@ no server, database, account, Python, or PyTorch. Transcripts are plain
 ## Commands
 
 ```bash
-npm install
-npm link                      # `vno` runs your working copy from anywhere
-node bin/vno.js <command>     # or run in place, without linking
+bun install
+bun link                      # `vno` runs your working copy from anywhere
+bun bin/vno.ts <command>      # or run in place, without linking
+bun run typecheck             # tsc --noEmit over all three TS projects
 
-node bin/vno.js               # import (default command)
-node bin/vno.js visualize     # browser UI; also `v` / `viz` / `vis` / `--v`
-node bin/vno.js transcribe    # also `t` / `--t`
-node bin/vno.js cleanup --dry-run
-node bin/vno.js status        # is vno ready? exits 0/1, --json for scripts
-node bin/vno.js setup         # check/install ffmpeg + whisper.cpp; also `doctor`
-node bin/vno.js config        # prints ~/.vno/config.json path
+bun bin/vno.ts               # import (default command)
+bun bin/vno.ts visualize     # browser UI; also `v` / `viz` / `vis` / `--v`
+bun bin/vno.ts transcribe    # also `t` / `--t`
+bun bin/vno.ts cleanup --dry-run
+bun bin/vno.ts status        # is vno ready? exits 0/1, --json for scripts
+bun bin/vno.ts setup         # check/install ffmpeg + whisper.cpp; also `doctor`
+bun bin/vno.ts config        # prints ~/.vno/config.json path
 ```
 
-npm scripts (`npm run import|transcribe|cleanup|visualize|setting|setup|config`) are
-thin wrappers over the same.
+Package scripts (`bun run import|transcribe|cleanup|visualize|setting|setup|config`)
+are thin wrappers over the same.
 
 ## The full `vno` surface
 
@@ -84,7 +85,7 @@ was deleted, so those recordings import again if the device still has them.
 Serves the browser UI on loopback and blocks until the tab closes, the page's Quit
 button is used, or Ctrl+C. Everything the CLI does is available in the page. Building
 the note model up front needs an ffprobe per recording for duration, but that's cached
-on disk keyed by size+mtime (`lib/notesCache.js`), so only new or changed files pay for
+on disk keyed by size+mtime (`lib/notesCache.ts`), so only new or changed files pay for
 it after the first run — a progress bar (count + current folder) still runs until the
 server is up, then clears itself, since a cold run or a large delta can still take a
 moment.
@@ -115,7 +116,7 @@ machine's own package manager (winget/choco/scoop, brew/port,
 apt/dnf/yum/pacman/zypper/apk), whisper.cpp per-platform — `brew install
 whisper-cpp` on macOS (Metal automatically); on Windows, a GitHub release zip
 with a CUDA build matched to the driver's supported CUDA runtime (via
-`nvidia-smi`'s header, not a toolkit check — see `lib/whispercpp.js:detectAccelCandidate`)
+`nvidia-smi`'s header, not a toolkit check — see `lib/whispercpp.ts:detectAccelCandidate`)
 if there's an NVIDIA GPU, a BLAS-accelerated CPU build otherwise (no Vulkan
 asset exists, so non-NVIDIA GPUs get no acceleration); on Linux, a prebuilt
 CPU tarball, or a `cmake` source build if there's an NVIDIA GPU (no prebuilt
@@ -126,7 +127,7 @@ installs without a confirmation. Also fetches the default model set (`small`
 + `large-v3-turbo`) into `whisper-cpp/models/`, reports (with an offer to
 delete) leftover `~/.cache/whisper/*.pt` files from a prior Python whisper
 install, and — Windows only — reports whether `vno://` is registered as a URL
-protocol handler and offers to (re-)register it (`lib/protocol.js`), so a
+protocol handler and offers to (re-)register it (`lib/protocol.ts`), so a
 browser can launch `vno v` the way a Teams/Zoom link launches its own app.
 
 | Flag | Effect |
@@ -140,32 +141,55 @@ browser can launch `vno v` the way a Teams/Zoom link launches its own app.
 Prints the path to `~/.vno/config.json`.
 
 **Name resolution for `-f`** (shared by `transcribe`, `cleanup` and `explore`, in
-`lib/notes.js:resolveNamedFile`): an absolute path, a path relative to the target, or
+`lib/notes.ts:resolveNamedFile`): an absolute path, a path relative to the target, or
 a bare filename matched case-insensitively — exact basename, then stem (so
 `250810_1328` finds `250810_1328.mp3`), then unique substring. Several matches means
 the command lists them and refuses rather than guessing.
 
-**There is no build, lint, or test tooling.** No test runner, no test files, no
-linter config. Verify changes by running the CLI or the UI by hand. `tsconfig.json`
-is a leftover Bun template — there is no TypeScript in the repo and nothing typechecks
-it; ignore it rather than trying to satisfy it.
+**The whole repo is TypeScript, and Bun runs it directly. There is still no
+build step anywhere** — not in development, not for the published package.
+`bun run typecheck` is a *check* (`tsc --noEmit`), never a compile; nothing in
+this repo emits JavaScript, and adding a build output would undo the point.
 
-**No build step for the UI either.** `src/web/assets/app.css`, `app.js` and every
-module under `assets/js/` are read from disk on *every request* (`server/assets.js`),
-so a browser reload shows a UI edit. Changes to `src/web/server/`, `page.js`, or
-anything in `src/lib/` need a server restart.
+**Three TS projects, because there are three global environments**, and each
+must not see the others': `tsconfig.json` = CLI + server (Bun, no DOM);
+`src/web/assets/tsconfig.json` = browser modules (DOM, no Bun);
+`src/web/assets/tsconfig.sw.json` = the service worker (WebWorker, neither).
+All extend `tsconfig.base.json`. `strict` is on; `noUncheckedIndexedAccess` is
+deliberately off (see the comment there). `src/types.ts` holds the domain types
+every layer shares and deliberately imports nothing, so the browser project can
+pull from it.
 
-**Published to npm as a public scoped package.** `@msareen/voice-notes-organizer`
-— `publishConfig.access` must stay `"public"`, since scoped packages default to
-restricted and `npm publish` fails without it. Users install with `npm i -g` or run
-it via `npx`; `npm link` is the *development* workflow, not the distribution story.
-There is still no build step: `files` ships `bin/`, `src/` and `docs/` as-is, and
-`src/web/assets/` is resolved off `import.meta.url` so it works from `node_modules`.
+**There is no lint or test tooling.** No test runner, no test files, no linter
+config. Verify changes with `bun run typecheck` plus running the CLI or the UI
+by hand.
 
-**`.gitattributes` pins the working tree to LF, and that is load-bearing.** `npm
-pack` packs the working tree rather than the git index, so on a clone with
-`core.autocrlf=true` the shebang in `bin/vno.js` would ship as `#!/usr/bin/env
-node\r` and every Linux/macOS install would fail with `env: 'node\r': No such file
+**No build step for the UI either — the browser modules are transpiled per
+request.** `src/web/assets/app.css`, `app.ts` and every module under
+`assets/js/` are read from disk on *every request* (`server/assets.ts`), so a
+browser reload shows a UI edit. The `.ts` ones are type-stripped on the way out
+with `Bun.Transpiler`, which rewrites no specifiers — `import "./deck.ts"`
+survives, and the browser fetches that URL back through the same route, keyed
+off the `text/javascript` Content-Type rather than the extension. Two rules
+follow: **client code must use `import type` for cross-module types** (a value
+import of `src/types.ts` would survive erasure and 404), and a syntax error
+comes back as a 500 naming the file rather than a blank page. Changes to
+`src/web/server/`, `page.ts`, or anything in `src/lib/` still need a server
+restart.
+
+**Published to npm as a public scoped package, but installed with Bun.**
+`@msareen/voice-notes-organizer` — `publishConfig.access` must stay `"public"`,
+since scoped packages default to restricted and `npm publish` fails without it.
+Users install with `bun i -g` or run it via `bunx`; **Node cannot run this
+package** (`engines.bun`, and `bin` points at `bin/vno.ts`). `bun link` is the
+*development* workflow, not the distribution story. `files` ships `bin/`,
+`src/`, `docs/` and the tsconfigs as-is, and `src/web/assets/` is resolved off
+`import.meta.url` so it works from `node_modules`.
+
+**`.gitattributes` pins the working tree to LF, and that is load-bearing.** A
+pack takes the working tree rather than the git index, so on a clone with
+`core.autocrlf=true` the shebang in `bin/vno.ts` would ship as `#!/usr/bin/env
+bun\r` and every Linux/macOS install would fail with `env: 'bun\r': No such file
 or directory`. Don't remove `* text=auto eol=lf`.
 
 ## Architecture
@@ -175,59 +199,65 @@ into `src/lib/` alongside `cli/`. **Nothing in `lib/` imports from `cli/` or `we
 which is what makes it shareable between the terminal and the browser paths. Keep it
 that way — if a CLI module grows logic the UI also needs, move it down into `lib/`.
 
-- `bin/vno.js` — commander definitions only. Version is read from `package.json` at
+- `bin/vno.ts` — commander definitions only. Version is read from `package.json` at
   runtime, never hardcoded. `--v`/`-t`/`--t` are rewritten into command names in
   `process.argv` before parse, since commander would otherwise read them as options
   (`v`/`viz`/`vis`/`t` are ordinary commander `.aliases()` and don't need this).
   `-v`/`--version` is a real option (`program.on("option:version", ...)`, not
   `.version()`'s built-in handler) so it can print a hint pointing at `v`/`viz`/`vis`
   alongside the version number.
-- `src/cli/*` — one module per command, each exporting `run<Command>()`. `import.js`
+- `src/cli/*` — one module per command, each exporting `run<Command>()`. `import.ts`
   ends by handing off to `runVisualize()`, so `vno` blocks until the browser tab closes.
 - `src/lib/*` — domain logic and OS access: config, volume detection, the flat copy,
   ffprobe, VTT parsing, the note model, the deletion ledger, opening folders,
-  `setup.js` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.js`
-  (installing whisper.cpp itself — `install.json`, per-platform binary acquisition,
+  `setup.ts` (PATH lookup + per-OS install recipes for ffmpeg), `whispercpp.ts`
+  (installing whisper.cpp itself — `vno-install.json`, per-platform binary acquisition,
   model resolution/download/validation; models come from Hugging Face with an
   hf-mirror.com fallback and a `VNO_MODEL_BASE` override — note the HF repo is
   still under `ggerganov` even though the GitHub org moved to `ggml-org`, so the
-  two URLs deliberately disagree), `themes.js` (the UI theme ids +
-  `themeOf()` — ids only, never colours), `languages.js` (the whisper
+  two URLs deliberately disagree), `themes.ts` (the UI theme ids +
+  `themeOf()` — ids only, never colours), `languages.ts` (the whisper
   language vocabulary + `normalizeLanguageMap()`, shared by both settings
-  surfaces for the same reason `themes.js` is) and `whisper.js` (resolving the installed
+  surfaces for the same reason `themes.ts` is) and `whisper.ts` (resolving the installed
   binary/model and running a transcription: ffmpeg pre-conversion to WAV, spawning
-  the binary, the accel-state helpers that replaced `gpu.js`), plus
-  `special-case-handling.js` (recovering Samsung `.m4a` files with a truncated
-  index — see the invariant below), `sessionToken.js` (the persisted `~/.vno/session-token`
-  the server reads at startup) and `protocol.js` (Windows-only: registers `vno://` as a
+  the binary, the accel-state helpers that replaced `gpu.ts`), plus
+  `special-case-handling.ts` (recovering Samsung `.m4a` files with a truncated
+  index — see the invariant below), `sessionToken.ts` (the persisted `~/.vno/session-token`
+  the server reads at startup) and `protocol.ts` (Windows-only: registers `vno://` as a
   URL protocol via `reg.exe`, so a browser can launch `vno v` the way a Teams/Zoom link
   launches its own app — `vno setup` is the only caller).
-- `src/web/server/` — the HTTP server, split by route group. `index.js` builds the
+- `src/web/server/` — the HTTP server, split by route group. `index.ts` builds the
   shared `ctx` (notes/config/job/SSE-clients state, plus the token gate and dispatch
-  table) and owns process/socket lifecycle; `context.js` defines `ctx` itself;
-  `assets.js`/`media.js`/`events.js` handle static files, range-request audio
-  streaming and the SSE stream; `routes/*.js` (state, settings, notes, transcribe,
+  table) and owns process/socket lifecycle; `context.ts` defines `ctx` itself;
+  `assets.ts`/`media.ts`/`events.ts` handle static files, range-request audio
+  streaming and the SSE stream; `routes/*.ts` (state, settings, notes, transcribe,
   import, cleanup) each export a `createXRoutes(ctx)` factory of closures over `ctx` -
-  add a new route by adding a case to `index.js`'s dispatch switch and a handler in
-  the matching (or a new) `routes/` file. `page.js` emits the HTML shell and nothing
+  add a new route by adding a case to `index.ts`'s dispatch switch and a handler in
+  the matching (or a new) `routes/` file. `page.ts` emits the HTML shell and nothing
   else.
-- `src/web/assets/app.js` — the client entry point, native ES modules (`<script
+- `src/web/assets/app.ts` — the client entry point, native ES modules (`<script
   type="module">`, no bundler, no framework, no dependencies - browsers resolve the
-  imports directly, so app.js is just wiring). The rest lives under `assets/js/`:
-  `state.js`/`dom.js` hold the shared mutable state and element refs every module
-  reads; `api.js`/`format.js`/`widgets.js` are generic helpers, as is `search.js`
+  imports directly off the per-request transpile, so app.ts is just wiring). The
+  folder is still called `js/` because its name is part of every import specifier
+  and every URL the browser fetches. The rest lives under `assets/js/`:
+  `state.ts`/`dom.ts` hold the shared mutable state and element refs every module
+  reads; `api.ts`/`format.ts`/`widgets.ts` are generic helpers, as is `search.ts`
   (the normalised name+path+transcript haystack the filter box searches, built once
-  per note in a `WeakMap` and warmed while the browser is idle); `list.js` (the
-  takes list) and `deck.js` (the playback/transcript deck) are mutually referential
+  per note in a `WeakMap` and warmed while the browser is idle); `list.ts` (the
+  takes list) and `deck.ts` (the playback/transcript deck) are mutually referential
   by design - selecting a row plays it, the deck's actions refresh the list - which
   is a safe ES module cycle as long as cross-calls happen inside event handlers rather
-  than at module-evaluation time; `panels/*.js` are the four command modals
-  (Settings, Import, Transcribe, Cleanup); `jobs.js` owns the SSE connection, the job
-  strip and page lifecycle (heartbeat, quit, deferred shutdown); `theme.js` writes the
-  theme id onto `<html>`; `icons.js` builds the few SVGs the client makes at
-  runtime (the topbar's are inline in `page.js`); `pwa.js` registers the service
-  worker and shows the "install as an app" banner off `beforeinstallprompt`. Keep the
-  "no build step" property: every file here must be loadable as-is by a browser.
+  than at module-evaluation time; `panels/*.ts` are the four command modals
+  (Settings, Import, Transcribe, Cleanup); `jobs.ts` owns the SSE connection, the job
+  strip and page lifecycle (heartbeat, quit, deferred shutdown); `theme.ts` writes the
+  theme id onto `<html>`; `icons.ts` builds the few SVGs the client makes at
+  runtime (the topbar's are inline in `page.ts`); `pwa.ts` registers the service
+  worker and shows the "install as an app" banner off `beforeinstallprompt`;
+  `sw.ts` is the service worker, which sits outside `js/` and typechecks as its
+  own project because it runs in a ServiceWorkerGlobalScope with no DOM. Keep the
+  "no build step" property: every file here must be loadable by a browser after
+  nothing more than type erasure - no JSX, no decorators, no enums, nothing that
+  needs real codegen.
 
 `docs/architecture.md` has the full route table and module responsibilities; read it
 before changing the API surface.
@@ -239,16 +269,16 @@ before changing the API surface.
   escaping the target folder. Never build a filesystem path from client input any
   other way.
 - **External tools are detected by looking them up, never by running them.**
-  `lib/setup.js:which()` scans PATH itself (PATHEXT-aware, `lstat` so Windows
-  App Execution Aliases resolve), used for ffmpeg. `lib/whispercpp.js:resolveBinary()`
+  `lib/setup.ts:which()` scans PATH itself (PATHEXT-aware, `lstat` so Windows
+  App Execution Aliases resolve), used for ffmpeg. `lib/whispercpp.ts:resolveBinary()`
   does the equivalent for whisper.cpp: checks the vendored `whisper-cpp/bin/`
   in both install roots (local beside this vno install, global under the
   user's home directory), then PATH under any of its binary names
   (`whisper-cpp`, `whisper-cli`, `whisper-cli.exe`). Both are directory scans,
   never executions, so the check runs at the start of every command that
   shells out and on every `/api/state` with no cache to invalidate — and it
-  resolves exactly the way `spawn` will. `lib/setup.js`/`lib/whispercpp.js`
-  never prompt — the offer-and-install flow is `cli/setup.js:ensureDependencies()`,
+  resolves exactly the way `spawn` will. `lib/setup.ts`/`lib/whispercpp.ts`
+  never prompt — the offer-and-install flow is `cli/setup.ts:ensureDependencies()`,
   which `transcribe`, `cleanup`'s duration scan and import's auto-translate all
   call before starting work. The browser can't install anything, so the page
   reports and points at `vno setup`.
@@ -257,10 +287,10 @@ before changing the API surface.
   probe to answer "is CUDA usable?" because a CPU-only torch wheel was a
   common trap), whisper.cpp's backend (CUDA/Metal/CPU — no Vulkan asset
   exists, so non-NVIDIA GPUs get no acceleration) is baked into which binary
-  `vno setup` installed — recorded in `install.json`, read back
-  by `cli/setup.js:checkAccel()` into `config.accel`, which costs nothing and
+  `vno setup` installed — recorded in `vno-install.json`, read back
+  by `cli/setup.ts:checkAccel()` into `config.accel`, which costs nothing and
   so runs on every `vno setup`, not gated behind a slow-path flag.
-  `lib/whisper.js:resolveAccel()` is the single place the "use it unless the
+  `lib/whisper.ts:resolveAccel()` is the single place the "use it unless the
   user said no" rule lives, because the browser has nowhere to ask at job
   time; `resolveAccel(config) !== "cpu"` decides, and `-ng` forces the CPU
   even on an accelerator-capable build. A failure mid-run just retries that
@@ -268,12 +298,12 @@ before changing the API surface.
   in config, since re-checking the backend is free.
 - **Notes are cached in the server closure, and durations are cached again on disk.**
   The in-memory `notes` array is rebuilt only when something changes it, then broadcast
-  over SSE (`refreshNotes()`). Within a rebuild, `buildNotes` (`lib/notes.js`) skips the
+  over SSE (`refreshNotes()`). Within a rebuild, `buildNotes` (`lib/notes.ts`) skips the
   ffprobe duration call for any file whose size+mtime match what's recorded in
-  `lib/notesCache.js` (`~/.vno/notes-cache/<hash of target>.json`) — the only thing worth
+  `lib/notesCache.ts` (`~/.vno/notes-cache/<hash of target>.json`) — the only thing worth
   caching, since it's the one field that costs a process spawn rather than a stat or a
   small file read. Selecting a note in the browser calls `POST /api/notes/refresh`
-  (`refreshNote` in `lib/notes.js`), which bypasses the cache for that one file — a
+  (`refreshNote` in `lib/notes.ts`), which bypasses the cache for that one file — a
   single ffprobe — updates the shared note object in place, and patches the disk cache,
   so a file changed outside vno doesn't show stale data indefinitely without forcing a
   full rescan.
@@ -285,13 +315,13 @@ before changing the API surface.
   nothing below those blocks may write a literal colour, or it won't survive a theme
   swap. The blocks are deliberately `[data-theme=…]` and not `:root[data-theme=…]`,
   so the settings dialog previews a theme by putting its id on a swatch element and
-  no hex value is ever repeated in JS. `page.js` stamps the saved theme onto `<html>`
+  no hex value is ever repeated in JS. `page.ts` stamps the saved theme onto `<html>`
   server-side, since a theme arriving with `/api/state` would flash the default first.
   `"auto"` has no palette of its own: it borrows Tape, and Daylight again inside a
   `prefers-color-scheme: light` media query — the one palette written twice, because
   a media query can't be referenced from another selector. Keep those two in step.
 - **The Samsung `.m4a` repair re-frames with ffmpeg, and only from a catch block.**
-  `lib/special-case-handling.js` handles recordings whose `moov` was cut off
+  `lib/special-case-handling.ts` handles recordings whose `moov` was cut off
   mid-`stsz` by an interrupted copy: `mdat` is intact, but AAC `raw_data_block`s
   have no length field, so the frame boundaries can't be byte-scanned. Rather than
   an FFI'd AAC decoder (an earlier version used `koffi`+libfaad2 — never satisfiable
@@ -304,7 +334,7 @@ before changing the API surface.
   re-encode; needs nothing beyond the ffmpeg vno already requires. The rebuild
   **replaces the recording in place** (so `rel`, the transcript name and every
   downstream consumer are unaffected), keeping the damaged file as
-  `<name>.original.m4a` — filtered out of `findAudioFiles`, removable via
+  `<name>.original.m4a` — filtered out of `findMediaFiles`, removable via
   `vno cleanup --originals` and the Cleanup dialog's checkbox, and never written to
   the deletion ledger. Verification runs *before* the swap, and the swap renames
   the original aside first, so a failed repair can't cost the user their file.
@@ -326,7 +356,7 @@ before changing the API surface.
   behind a confirmation. Nothing else in the codebase removes a user file. Keep it so.
   Those same three are the only writers to the deletion ledger, which is exactly why
   a file deleted by hand in Explorer can't be remembered and will re-import.
-- **The deletion ledger must never be load-bearing.** `lib/ledger.js` keeps
+- **The deletion ledger must never be load-bearing.** `lib/ledger.ts` keeps
   `~/.vno/deleted.json`, listing what was deleted so import doesn't copy it back off a
   device that still holds it. It swallows its own read *and* write failures: missing,
   corrupt and unreadable all mean "nothing is remembered", and a failed write can't
@@ -337,18 +367,18 @@ before changing the API surface.
 - **The page owns the CLI lifetime.** Losing the SSE stream schedules a deferred
   shutdown (so a reload doesn't kill the session); a running job is allowed to finish.
 - **Assets are deliberately *not* token-gated** and their routes sit ahead of the token
-  check, because the session token is inlined into the HTML by `page.js` and must never
+  check, because the session token is inlined into the HTML by `page.ts` and must never
   travel in an asset URL. `/sw.js` follows the same rule and is served at the root path
   rather than under `/assets/`, so the service worker's default scope covers the whole
   origin instead of just `/assets/*`. `/manifest.webmanifest` sits ahead of the gate too,
-  but unlike the assets it's generated per request (`page.js:renderManifest`), not read
+  but unlike the assets it's generated per request (`page.ts:renderManifest`), not read
   off disk — its `start_url` has to embed the current token, which a static file could
   never do. An already-installed PWA shortcut won't notice a `start_url` fix on its own
   (most browsers cache the manifest from install time); reinstalling the PWA is what
   actually picks up a changed one.
 - **Launching the viewer prefers the installed PWA over a browser tab, and `vno://`
-  never opens a second window.** `cli/visualize.js:openViewer()` calls
-  `lib/open.js:findInstalledPwaShortcut()` (Windows only, matching `vno://`'s own scope)
+  never opens a second window.** `cli/visualize.ts:openViewer()` calls
+  `lib/open.ts:findInstalledPwaShortcut()` (Windows only, matching `vno://`'s own scope)
   to look for the Start Menu shortcut Chrome/Edge name after the manifest's `name`
   ("Voice Notes.lnk") and opens that instead of the plain URL when found. The
   `open-protocol` command (the `vno://` handler's target) never runs the server in its
@@ -360,7 +390,7 @@ before changing the API surface.
   carries over the same reasoning either way — the tab or window that had the user
   click "Launch vno" is `offline.html`, already polling in the background, so opening
   anything there would just be a redundant second window.
-- **The session token is persisted, not regenerated per run.** `lib/sessionToken.js`
+- **The session token is persisted, not regenerated per run.** `lib/sessionToken.ts`
   keeps it in `~/.vno/session-token` and reuses it across `vno v` launches. It still
   gates every mutating route the same way (loopback is reachable by anything on the
   machine, including a hostile page's hidden iframe, so the token is what stops that
@@ -370,32 +400,37 @@ before changing the API surface.
 
 ### Conventions
 
-- ESM throughout (`"type": "module"`), Node 18+, `node:` prefix on builtins,
-  `fs-extra` for filesystem work.
-- Terminal prompts go through `src/cli/prompt.js`, not `inquirer` directly: `prompt()`
+- ESM throughout (`"type": "module"`), Bun 1.2+, `node:` prefix on builtins
+  (Bun implements them), `fs-extra` for filesystem work.
+- Relative imports carry the `.ts` extension (`allowImportingTsExtensions`).
+  That's not cosmetic on the client side: the specifier is what the browser
+  fetches back, so it has to name a file the asset route can serve.
+- `catch` binds `unknown` under `strict`. Modules that need a message from one
+  keep a small local `errorMessage(err)` helper rather than casting inline.
+- Terminal prompts go through `src/cli/prompt.ts`, not `inquirer` directly: `prompt()`
   resolves the `CANCELLED` sentinel on Esc, `promptStrict()` throws `PromptCancelled`.
   Callers are expected to handle backing out of a flow.
 - Config is a single global file, `~/.vno/config.json`, loaded via `loadConfig()` and
   merged over `defaultConfig()`; a corrupt file is backed up rather than crashing.
   New settings need a default there plus, usually, a case in `vno setting`, a field in
-  the UI's settings dialog (`assets/js/panels/settings.js:openSettings`), and
-  passthrough in the server's `routes/settings.js:settings` **and**
-  `context.js:stateResponse` — the dialog can't show what state doesn't
+  the UI's settings dialog (`assets/js/panels/settings.ts:openSettings`), and
+  passthrough in the server's `routes/settings.ts:settings` **and**
+  `context.ts:stateResponse` — the dialog can't show what state doesn't
   send. `~/.vno` also holds `deleted.json` and `session-token`; config is not the only
   file there.
-- **Long per-file work reports, it doesn't print.** `buildNotes`, `findAudioFiles` and
+- **Long per-file work reports, it doesn't print.** `buildNotes`, `findMediaFiles` and
   `syncVolume` take an optional `onProgress` and emit `{ phase: "scan", dir, found }`,
   `{ phase: "work", done, total, dir, name }` and `{ phase: "log", message, level }`.
-  The terminal renders those as a progress bar (`cli/progress.js`), the browser turns
+  The terminal renders those as a progress bar (`cli/progress.ts`), the browser turns
   the same events into job log lines and title updates — which is the whole reason
-  `lib/` can't do the printing itself. `lib/sync.js:reporter()` wraps the callback so
+  `lib/` can't do the printing itself. `lib/sync.ts:reporter()` wraps the callback so
   a display bug can never fail the work. Adding a new slow loop? Report, don't print.
 - Child processes (whisper.cpp, ffmpeg, ffprobe, `cmake`/`git` for a Linux
   source build) always pass `windowsHide: true`.
 - Comments in this codebase explain *why* a non-obvious choice was made, not what the
   line does. Match that when adding code.
 - Cross-platform matters: macOS, Windows and Linux are all supported paths in
-  `volumes.js` and `open.js`.
+  `volumes.ts` and `open.ts`.
 
 ## Documentation
 

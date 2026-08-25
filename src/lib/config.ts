@@ -1,0 +1,157 @@
+import fs from "fs-extra";
+import os from "node:os";
+import path from "node:path";
+import { normalizeLanguageMap } from "./languages.ts";
+import type { Config, RawSource, Source } from "../types.ts";
+
+const CONFIG_DIR = path.join(os.homedir(), ".vno");
+const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+
+/**
+ * The config file is user-editable, so what comes back from readJson is
+ * whatever they left there - every field is optional and none of it is
+ * trustworthy until merged over the defaults.
+ */
+type StoredConfig = Partial<Omit<Config, "sources">> & {
+  sources?: RawSource[];
+  /** A cached torch probe result from before whisper.cpp; dropped on load. */
+  gpu?: unknown;
+};
+
+function normalizeSources(list: RawSource[] | undefined): Source[] {
+  return (list || []).map((s) =>
+    typeof s === "string"
+      ? { path: s, pattern: "*", deleteAfterImport: false, recursive: false, mapTo: null }
+      : {
+          path: s.path,
+          pattern: s.pattern || "*",
+          deleteAfterImport: Boolean(s.deleteAfterImport),
+          recursive: Boolean(s.recursive),
+          mapTo: typeof s.mapTo === "string" && s.mapTo.trim() ? s.mapTo.trim() : null,
+        }
+  );
+}
+
+function defaultConfig(): Config {
+  return {
+    // Where imported/synced audio files land. Defaults to a "voice-notes"
+    // folder in whatever directory `vno` was first run from - configurable
+    // afterwards by editing this file.
+    target: path.join(process.cwd(), "voice-notes"),
+    // Optional manually-configured source folders to import from in addition
+    // to auto-detected removable volumes (e.g. network shares, a phone's
+    // Quick Share/Quick Send drop folder, or folders that are already
+    // mounted). Each entry is { path, pattern, deleteAfterImport, recursive, mapTo }:
+    // `pattern` is a "*"/"?" wildcard against the filename ("*" = any
+    // audio-extension file, today's behavior); `deleteAfterImport` removes the
+    // source file once it's safely copied in, for disposable landing folders
+    // where the original lives elsewhere (e.g. still on the phone) - see
+    // lib/sync.ts:syncVolume. `recursive` defaults to false (scan only the
+    // configured folder itself) since a source folder is usually a flat drop
+    // point, unlike a recorder's device volume which always walks the whole
+    // tree; tick it on to also pick up files nested in subfolders. `mapTo`,
+    // when set, is a target-relative path (may be nested, e.g. "Work/Notes")
+    // that this source's files land in instead of the default
+    // basename-of-path folder - see lib/sync.ts:resolveMappedDest. Editable
+    // via `vno setting` and the UI.
+    sources: [],
+    // keyed by a stable identifier for the volume (label + size), remembers
+    // whether the user wants it auto-imported and when it was last synced.
+    knownMounts: {},
+    // Whether freshly imported notes are auto-transcribed with whisper's
+    // translate task (audio in any language -> English transcript) as they
+    // come in. null = not decided yet, so `vno` asks once and remembers the
+    // answer here; true/false = translate imports (or don't) without asking.
+    autoTranslate: null,
+    // Default whisper model used for auto-translation and as the pre-selected
+    // choice in the transcribe picker.
+    defaultModel: "turbo",
+    // Language whisper.cpp is told to expect, as an ISO-639-1 code, or "auto"
+    // to let it detect per file. Worth pinning for speakers of acoustically
+    // similar languages whisper.cpp's auto-detect confuses (Hindi/Urdu is the
+    // classic case) - forcing "hi" still transcribes code-switched English
+    // fine, so this is also the fix for "mostly Hindi with English mixed in".
+    transcribeLanguage: "auto",
+    // Guides whisper.cpp's auto-detect instead of overriding it. `model` is
+    // the whisper model used for a fast `-dl` detection pass before the real
+    // run (null = off, no extra pass); `map` rewrites what that pass returns,
+    // e.g. { ur: "hi" } so Hindi heard as Urdu is transcribed as Hindi.
+    // whisper.cpp has no preference/candidate-restriction flag of its own -
+    // `-l` is a pin or nothing - so guiding it means detecting first and
+    // rewriting the answer. Only consulted when transcribeLanguage is "auto";
+    // a pinned language wins, since it's the more specific instruction.
+    crossLanguage: { model: null, map: {} },
+    // Whether recordings deleted through vno (the UI's delete/cleanup, and
+    // `vno cleanup`) are remembered in ~/.vno/deleted.json so a later import
+    // doesn't copy them back off a device that still has them. Turning this
+    // off stops both the remembering and the skipping; the ledger file itself
+    // can be thrown away at any time with `vno cleanup ledger`.
+    rememberDeletions: true,
+    // After an import/transcribe run finishes, reveal the folder(s) the new
+    // files landed in and open the regenerated index.html player. Set to
+    // false (or pass --no-open) to keep runs headless.
+    openWhenDone: true,
+    // Colour theme for the browser UI, as one of the ids in lib/themes.ts
+    // ("auto" follows the OS light/dark setting). Stored here rather than in
+    // the browser's localStorage so the server can stamp it onto <html> in the
+    // first response - a theme that only arrived with /api/state would flash
+    // the default palette first.
+    theme: "tape",
+    // What `vno setup` installed for whisper.cpp's accelerator backend, and
+    // what the user wants done with it. `backend` is fixed by which binary
+    // got installed - null = not installed yet, "cpu" = installed but no
+    // accelerator build available, "cuda"/"metal"/"vulkan" = installed with
+    // that backend. `use` is the answer to the offer: null = never asked,
+    // true/false = decided. Unlike the old torch probe this never needs
+    // re-checking on a hot path, since the backend can't change without a
+    // fresh `vno setup`; see lib/whisper.ts:accelState.
+    accel: { backend: null, name: null, use: null, resolvedAt: null },
+  };
+}
+
+export async function loadConfig(): Promise<Config> {
+  await fs.ensureDir(CONFIG_DIR);
+  if (!(await fs.pathExists(CONFIG_FILE))) {
+    const config = defaultConfig();
+    await fs.writeJson(CONFIG_FILE, config, { spaces: 2 });
+    return config;
+  }
+  try {
+    const data: StoredConfig = await fs.readJson(CONFIG_FILE);
+    const defaults = defaultConfig();
+    // The nested blocks are merged field by field, so a hand-edited partial
+    // `accel` (or an older config that predates it) still has every key. A
+    // stale `gpu` block from before this migration is dropped rather than
+    // migrated - it's a cached torch probe result, meaningless once
+    // transcription runs through whisper.cpp instead.
+    const merged: Config & { gpu?: unknown } = {
+      ...defaults,
+      ...data,
+      sources: normalizeSources(data.sources),
+      knownMounts: { ...data.knownMounts },
+      accel: { ...defaults.accel, ...data.accel },
+      crossLanguage: {
+        ...defaults.crossLanguage,
+        ...data.crossLanguage,
+        map: normalizeLanguageMap(data.crossLanguage?.map),
+      },
+    };
+    delete merged.gpu;
+    return merged;
+  } catch {
+    // corrupt config file - back it up and start fresh rather than crash
+    await fs.move(CONFIG_FILE, `${CONFIG_FILE}.bak-${Date.now()}`, { overwrite: true });
+    const config = defaultConfig();
+    await fs.writeJson(CONFIG_FILE, config, { spaces: 2 });
+    return config;
+  }
+}
+
+export async function saveConfig(config: Config): Promise<void> {
+  await fs.ensureDir(CONFIG_DIR);
+  await fs.writeJson(CONFIG_FILE, config, { spaces: 2 });
+}
+
+export function configFilePath(): string {
+  return CONFIG_FILE;
+}

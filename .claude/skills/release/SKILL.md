@@ -33,7 +33,7 @@ proactively, present what you found, and stop for a yes.
 Three numbers matter, and they drift apart:
 
 ```bash
-node -p "require('./package.json').version"   # what the repo thinks it is
+bun -e "console.log(require('./package.json').version)"   # what the repo thinks it is
 npm view @msareen/voice-notes-organizer version   # what users actually get
 git tag --list "v*" --sort=-v:refname | head -5   # what's been marked
 ```
@@ -76,7 +76,7 @@ normal commit alongside the code it describes. The tag gets created in step 5,
 after the checks have passed — tagging first would mean either an untested tag
 or a tag you have to move.
 
-Version lives in `package.json` only. `bin/vno.js` reads it at runtime, so
+Version lives in `package.json` only. `bin/vno.ts` reads it at runtime, so
 there's nothing else to keep in sync — don't go looking for a constant to edit.
 
 ## Step 3 — Preflight
@@ -120,9 +120,9 @@ tarball itself is the artifact to inspect. Three things are worth confirming,
 and the third is the one that has historically shipped broken:
 
 ```bash
-npm pack --dry-run --json | node -e "
+npm pack --dry-run --json | bun -e "
   const f = JSON.parse(require('fs').readFileSync(0))[0].files.map(x => x.path);
-  const want = ['bin/vno.js','src/web/assets/sw.js','src/web/assets/app.js','src/web/page.js'];
+  const want = ['bin/vno.ts','src/web/assets/sw.ts','src/web/assets/app.ts','src/web/page.ts'];
   want.forEach(w => console.log((f.includes(w) ? 'ok   ' : 'MISSING ') + w));
   console.log(f.length + ' files total');
 "
@@ -135,8 +135,8 @@ top-level directory would not be, and would vanish silently.
 **2. The CLI runs from a clean checkout's perspective:**
 
 ```bash
-node bin/vno.js --version
-node bin/vno.js setup --check
+bun bin/vno.ts --version
+bun bin/vno.ts setup --check
 ```
 
 `prepublishOnly` already runs the first of these, so a broken entry point fails
@@ -146,10 +146,10 @@ out before the irreversible step.
 **3. No CRLF has crept into the shipped source.** This is the load-bearing one:
 
 ```bash
-npm pack --dry-run --json 2>/dev/null | node -e "
+npm pack --dry-run --json 2>/dev/null | bun -e "
   const fs = require('fs');
   const files = JSON.parse(fs.readFileSync(0))[0].files.map(x => x.path);
-  const crlf = files.filter(p => /\.(js|json|md|html|css)$/.test(p) && fs.readFileSync(p).includes(13));
+  const crlf = files.filter(p => /\.(ts|js|json|md|html|css)$/.test(p) && fs.readFileSync(p).includes(13));
   const fatal = crlf.filter(p => p.startsWith('bin/'));
   if (fatal.length) console.log('BLOCKING — CRLF in an executable:\n  ' + fatal.join('\n  '));
   if (crlf.length) console.log('CRLF present in ' + crlf.length + ' packed file(s):\n  ' + crlf.join('\n  '));
@@ -157,12 +157,13 @@ npm pack --dry-run --json 2>/dev/null | node -e "
 "
 ```
 
-Anything under `bin/` is **blocking**: a `#!/usr/bin/env node\r` shebang makes
-every Linux and macOS install fail with `env: 'node\r': No such file or
+Anything under `bin/` is **blocking**: a `#!/usr/bin/env bun\r` shebang makes
+every Linux and macOS install fail with `env: 'bun\r': No such file or
 directory`, while Windows keeps working perfectly — so it passes local testing
-and breaks for everyone else. CRLF elsewhere isn't fatal (Node parses CRLF
-fine) but is against the repo's own policy and means something is
-reintroducing it, so fix it before shipping.
+and breaks for everyone else (see CLAUDE.md's note on `.gitattributes` pinning
+the tree to LF for exactly this reason). CRLF elsewhere isn't fatal but is
+against the repo's own policy and means something is reintroducing it, so fix
+it before shipping.
 
 The usual advice for this is `git rm --cached -r . && git reset --hard`. **Don't
 use it** — `reset --hard` destroys any uncommitted work in the tree, and you are
@@ -177,7 +178,7 @@ git add --renormalize .              # if the index itself holds CRLF; then comm
 
 `git checkout --` is the fix when only the working tree drifted (index `i/lf`,
 worktree `w/crlf`), which is the common case. `--renormalize` is for when CRLF
-actually got committed. Verify with `git ls-files --eol bin/vno.js` — you want
+actually got committed. Verify with `git ls-files --eol bin/vno.ts` — you want
 `w/lf`, not `w/crlf`.
 
 `git status` will **not** show this problem: with `core.autocrlf=true` the
@@ -216,7 +217,7 @@ publish, the whole thing goes:
 
 ```bash
 # you:
-VERSION=v$(node -p "require('./package.json').version")
+VERSION=v$(bun -e "console.log(require('./package.json').version)")
 git tag -a "$VERSION" -m "$VERSION"
 git push origin "$VERSION"
 
@@ -246,7 +247,7 @@ Check this against the registry rather than npm's local cache, which can serve
 a stale document:
 
 ```bash
-curl -s "https://registry.npmjs.org/@msareen%2Fvoice-notes-organizer" | node -e "
+curl -s "https://registry.npmjs.org/@msareen%2Fvoice-notes-organizer" | bun -e "
   const d = JSON.parse(require('fs').readFileSync(0));
   console.log('latest:', d['dist-tags'].latest, '| modified:', d.time.modified);
 "

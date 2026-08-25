@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import fs from "fs-extra";
-import { WHISPERCPP_REPO, WHISPERCPP_VERSION } from "./whispercpp.ts";
+import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources.ts";
 
 export type DependencyName = "ffmpeg" | "whisper";
 
@@ -318,12 +318,12 @@ export function manualHelp(name: DependencyName): string[] {
     }
     if (platform === "win32") {
       return [
-        `Download a release zip from https://github.com/${WHISPERCPP_REPO}/releases/tag/${WHISPERCPP_VERSION}`,
+        `Download a release zip from ${whispercppReleaseTagUrl()}`,
         "…and extract it (keeping every .dll beside whisper-cli.exe) into the location `vno setup` reports",
       ];
     }
     return [
-      `git clone --depth 1 --branch ${WHISPERCPP_VERSION} https://github.com/${WHISPERCPP_REPO}`,
+      `git clone --depth 1 --branch ${WHISPERCPP_VERSION} ${whispercppCloneUrl()}`,
       "cmake -B build -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON for an NVIDIA GPU",
       "cmake --build build -j --config Release",
     ];

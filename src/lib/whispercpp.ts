@@ -7,6 +7,16 @@ import fs from "fs-extra";
 import { which, detectPackageManager, runStep } from "./setup.ts";
 import type { AccelBackend } from "../types.ts";
 import type { InstallStep } from "./setup.ts";
+import {
+  WHISPERCPP_VERSION,
+  WHISPERCPP_REPO,
+  HOMEBREW_URL,
+  whispercppReleaseTagUrl,
+  whispercppReleaseApiUrl,
+  whispercppReleaseAssetUrl,
+  whispercppCloneUrl,
+  modelSources,
+} from "./webSources.ts";
 
 /**
  * Installing and resolving the whisper.cpp binary, its models and the
@@ -17,9 +27,6 @@ import type { InstallStep } from "./setup.ts";
  * (which mode, whether to install, whether to delete stale files) lives in
  * cli/setup.ts.
  */
-
-const WHISPER_CPP_VERSION = "v1.9.2";
-const GITHUB_REPO = "ggml-org/whisper.cpp";
 
 const isWindows = os.platform() === "win32";
 const isMac = os.platform() === "darwin";
@@ -235,7 +242,7 @@ export async function registerExternalBinary(
   const existing = (await readManifest(root)) || {};
   const manifest: InstallManifest = {
     ...existing,
-    version: existing.version || WHISPER_CPP_VERSION,
+    version: existing.version || WHISPERCPP_VERSION,
     platform: os.platform(),
     arch: os.arch(),
     mode,
@@ -506,7 +513,7 @@ export interface InstallOutcome {
 export async function installMacBinary(): Promise<InstallOutcome> {
   if (!(await which("brew"))) {
     throw new Error(
-      "Homebrew isn't installed. Get it from https://brew.sh, then run `vno setup` again."
+      `Homebrew isn't installed. Get it from ${HOMEBREW_URL}, then run \`vno setup\` again.`
     );
   }
   const result = await runStep({ command: "brew", args: ["install", "whisper-cpp"] });
@@ -534,7 +541,7 @@ interface ReleaseAsset {
  * wrong needs to be visible.
  */
 async function fetchReleaseAssets(version: string): Promise<ReleaseAsset[] | null> {
-  const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}`;
+  const url = whispercppReleaseApiUrl(version);
   const response = await fetch(url, { headers: { Accept: "application/vnd.github+json" } });
   if (response.status === 403) {
     return null; // rate-limited - caller falls back to a pinned name
@@ -628,7 +635,7 @@ export async function installWindowsBinary(
       : "No NVIDIA GPU detected; using the BLAS-accelerated CPU build."
   );
 
-  const assets = await fetchReleaseAssets(WHISPER_CPP_VERSION);
+  const assets = await fetchReleaseAssets(WHISPERCPP_VERSION);
   let picked: PickedAsset;
   let usedPinnedFallback = false;
 
@@ -636,7 +643,7 @@ export async function installWindowsBinary(
     const found = pickWindowsAsset(assets, accelCandidate);
     if (!found) {
       throw new Error(
-        `No matching Windows asset found in whisper.cpp ${WHISPER_CPP_VERSION}. Available assets:\n` +
+        `No matching Windows asset found in whisper.cpp ${WHISPERCPP_VERSION}. Available assets:\n` +
           assets.map((a) => `  - ${a.name}`).join("\n")
       );
     }
@@ -654,10 +661,10 @@ export async function installWindowsBinary(
     const backend: AccelBackend = pinnedKey === "cpu" ? "cpu" : "cuda";
     onLog(
       `GitHub's API is rate-limited right now, so falling back to a pinned asset name (${name}). ` +
-        `If this is wrong, run \`vno setup\` again later or check https://github.com/${GITHUB_REPO}/releases/tag/${WHISPER_CPP_VERSION} yourself.`
+        `If this is wrong, run \`vno setup\` again later or check ${whispercppReleaseTagUrl()} yourself.`
     );
     picked = {
-      asset: { name, url: `https://github.com/${GITHUB_REPO}/releases/download/${WHISPER_CPP_VERSION}/${name}` },
+      asset: { name, url: whispercppReleaseAssetUrl(name) },
       backend,
     };
   }
@@ -743,15 +750,15 @@ async function installLinuxPrebuilt(
 ): Promise<InstallOutcome> {
   const assetName = os.arch() === "arm64" ? "whisper-bin-ubuntu-arm64.tar.gz" : "whisper-bin-ubuntu-x64.tar.gz";
 
-  const assets = await fetchReleaseAssets(WHISPER_CPP_VERSION);
+  const assets = await fetchReleaseAssets(WHISPERCPP_VERSION);
   let url: string;
   if (assets) {
     const found = assets.find((a) => a.name === assetName);
-    if (!found) throw new Error(`no ${assetName} in the ${WHISPER_CPP_VERSION} release`);
+    if (!found) throw new Error(`no ${assetName} in the ${WHISPERCPP_VERSION} release`);
     url = found.url;
   } else {
     onLog(`GitHub's API is rate-limited right now, falling back to a pinned URL for ${assetName}.`);
-    url = `https://github.com/${GITHUB_REPO}/releases/download/${WHISPER_CPP_VERSION}/${assetName}`;
+    url = whispercppReleaseAssetUrl(assetName);
   }
 
   onLog(`Downloading ${assetName}...`);
@@ -812,9 +819,9 @@ async function installLinuxSource(
 
   const cloneStep: InstallStep = {
     command: "git",
-    args: ["clone", "--depth", "1", "--branch", WHISPER_CPP_VERSION, `https://github.com/${GITHUB_REPO}`, cloneDir],
+    args: ["clone", "--depth", "1", "--branch", WHISPERCPP_VERSION, whispercppCloneUrl(), cloneDir],
   };
-  onLog(`Cloning whisper.cpp ${WHISPER_CPP_VERSION}...`);
+  onLog(`Cloning whisper.cpp ${WHISPERCPP_VERSION}...`);
   onStep(cloneStep);
   let result = await runStep(cloneStep);
   if (!result.ok) throw new Error(`git clone failed:\n${result.output}`);
@@ -879,7 +886,7 @@ export async function installWhisperCpp({
   const existing = (await readManifest(root)) || {};
   const manifest: InstallManifest = {
     ...existing,
-    version: WHISPER_CPP_VERSION,
+    version: WHISPERCPP_VERSION,
     platform,
     arch: os.arch(),
     mode,
@@ -913,35 +920,6 @@ async function ensureGitignoreEntry(mode: InstallMode): Promise<void> {
 // ---------------------------------------------------------------------------
 // Model resolution & download
 // ---------------------------------------------------------------------------
-
-// Where ggml models come from, tried in order. Hugging Face is the canonical
-// home - whisper.cpp's own download-ggml-model.sh hardcodes it, and the old
-// ggml.ggerganov.com mirror it used to fall back to is gone (404s now), so
-// there is no official second source to point at. hf-mirror.com is a
-// community mirror with an identical path layout, which is what makes it a
-// usable fallback for networks where huggingface.co is blocked or throttled
-// rather than a different artifact entirely.
-//
-// Note the org mismatch is deliberate: the code moved to the ggml-org GitHub
-// org, but the *models* still live under `ggerganov` on Hugging Face
-// (huggingface.co/ggml-org/whisper.cpp 401s). Don't "fix" this to match
-// GITHUB_REPO above.
-const MODEL_SOURCES = [
-  { label: "Hugging Face", base: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main" },
-  { label: "hf-mirror.com", base: "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main" },
-];
-
-/**
- * `VNO_MODEL_BASE` overrides the list entirely with a single base URL, for an
- * internal mirror or an air-gapped copy. It's an env var rather than a config
- * key because the people who need it are usually setting it machine-wide for
- * every tool, not just this one.
- */
-function modelSources(): { label: string; base: string }[] {
-  const override = process.env.VNO_MODEL_BASE?.trim();
-  if (override) return [{ label: override, base: override.replace(/\/+$/, "") }];
-  return MODEL_SOURCES;
-}
 
 // Friendly names this project already uses (matching the model picker in
 // cli/transcribe.ts and the web MODELS list), plus their ggml filenames.
@@ -1248,6 +1226,3 @@ export async function findStalePythonCache(): Promise<StalePythonCache> {
   }
   return { dir, files: entries, totalBytes };
 }
-
-export const WHISPERCPP_VERSION = WHISPER_CPP_VERSION;
-export const WHISPERCPP_REPO = GITHUB_REPO;

@@ -147,16 +147,43 @@ The session token (inlined into the page URL) is persisted in
 `~/.vno/session-token` and reused across runs — a stable URL, so a
 bookmarked one (or an installed PWA shortcut) keeps working:
 
-- **The port is fixed at `8477`.** If something else is already bound to it,
-  `vno v` checks whether that something is a `vno v` instance already
-  running (same token) and, if so, just opens a browser tab to it instead of
-  starting a second server. If it's genuinely something else, pick a free
-  port with `--port`.
+- **The port is fixed** — `9477` unless you've changed it. If something else
+  is already bound to it, `vno v` checks whether that something is a `vno v`
+  instance already running (same token) and, if so, just opens a browser tab
+  to it instead of starting a second server. If it's genuinely something
+  else, pick a free port with `--port` for one run, or change it for good in
+  `vno setting` → *Viewer port* ([`port`](configuration.md#port)).
 - If a token still shows as invalid, the token file may have been deleted or
   corrupted between runs — reload the page vno just printed rather than an
   old bookmark.
 - If no browser opens, the URL is in the terminal — paste it manually.
 - `--no-open` starts the server without launching a browser at all.
+
+## "Port is already in use" — but nothing is using it (Windows)
+
+If `vno v` reports the port as taken and `netstat`/`Get-NetTCPConnection`
+shows nothing listening on it — and trying the next port up fails the same
+way — the port is probably inside a **reserved range**, not in use at all.
+Windows hands whole TCP ranges to Hyper-V's dynamic port allocator (WSL2 and
+Docker Desktop both pull it in), and a `bind()` inside one fails exactly like
+a real conflict. List them with:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+If the default falls inside a listed range, no amount of retrying will help —
+pick a port outside every range and make it stick:
+
+```bash
+vno setting     # → Viewer port
+```
+
+Reserved ranges are reassigned on reboot, so a port that worked yesterday can
+be swallowed today; picking one well away from the ephemeral range (say
+`9477`) is the durable fix. Note that changing the port means an **already
+installed PWA keeps pointing at the old one** — its `start_url` was baked in
+at install time, so reinstall the app from the new URL.
 
 ## The CLI exits as soon as I close the tab
 

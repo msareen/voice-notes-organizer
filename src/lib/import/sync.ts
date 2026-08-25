@@ -1,6 +1,6 @@
 import fs from "fs-extra";
 import path from "node:path";
-import { loadDeletionMatcher } from "./ledger.ts";
+import { loadDeletionMatcher } from "../notes/ledger.ts";
 import { isOriginalBackup } from "./special-case-handling.ts";
 import type {
   ProgressCallback,
@@ -8,7 +8,7 @@ import type {
   Source,
   SyncResult,
   SyncSource,
-} from "../types.ts";
+} from "../../types.ts";
 
 export const MEDIA_EXTENSIONS: ReadonlySet<string> = new Set([
   ".mp3",

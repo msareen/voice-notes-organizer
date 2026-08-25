@@ -98,12 +98,17 @@ export function reloadState(): Promise<StateResponse> {
     state.THEMES = s.themes || [];
     state.WHISPER = s.whisper;
     state.FFMPEG = s.ffmpeg;
+    state.SUMMARIZATION = s.summarization || { available: false, models: [] };
     // Normally a no-op (page.ts stamped the same theme onto <html> before
     // first paint), but it's what re-applies the saved one if a preview was
     // left behind, or picks up a theme changed elsewhere.
     applyTheme(state.CONFIG.theme);
     rememberTheme(state.CONFIG.theme);
-    document.getElementById("folderLabel")!.textContent = state.CONFIG.rootLabel;
+    // Only the name span, not the whole pill - it also carries the folder
+    // icon set by page.ts, which a bare .textContent assignment would wipe.
+    var folderLabel = document.getElementById("folderLabel")!;
+    folderLabel.title = state.CONFIG.rootLabel;
+    folderLabel.querySelector(".folder-name")!.textContent = state.CONFIG.rootLabel;
     renderList();
     if (state.selectedRel && noteFor(state.selectedRel)) select(state.selectedRel);
     else if (state.NOTES.length) select(state.NOTES[0].rel);

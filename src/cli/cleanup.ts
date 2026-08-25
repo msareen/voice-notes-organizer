@@ -3,15 +3,15 @@ import path from "node:path";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig } from "../lib/config.ts";
-import { findMediaFiles } from "../lib/sync.ts";
-import { resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
-import { getDurationSeconds } from "../lib/media.ts";
-import { recordDeletions, clearLedger, ledgerSummary } from "../lib/ledger.ts";
-import { listOriginalBackups, isOriginalBackup } from "../lib/special-case-handling.ts";
+import { findMediaFiles } from "../lib/import/sync.ts";
+import { resolveNamedFile, reportUnresolved, SUMMARY_EXT } from "../lib/notes/notes.ts";
+import { getDurationSeconds } from "../lib/import/media.ts";
+import { recordDeletions, clearLedger, ledgerSummary } from "../lib/notes/ledger.ts";
+import { listOriginalBackups, isOriginalBackup } from "../lib/import/special-case-handling.ts";
 import { prompt, CANCELLED } from "./prompt.ts";
 import { ensureDependencies } from "./setup.ts";
 import { createProgressBar, locationOf } from "./progress.ts";
-import type { DeletionItem } from "../lib/ledger.ts";
+import type { DeletionItem } from "../lib/notes/ledger.ts";
 
 // Transcript sidecars written next to an audio file (whisper .vtt, the
 // derived .txt, plus .srt for completeness) that should go with it on delete.
@@ -19,7 +19,7 @@ const TRANSCRIPT_EXTS = [".txt", ".vtt", ".srt"];
 
 function transcriptPathsFor(audioPath: string): string[] {
   const base = audioPath.slice(0, -path.extname(audioPath).length);
-  return TRANSCRIPT_EXTS.map((ext) => base + ext);
+  return [...TRANSCRIPT_EXTS.map((ext) => base + ext), base + SUMMARY_EXT];
 }
 
 function errorMessage(err: unknown): string {
@@ -48,7 +48,7 @@ export interface CleanupOptions {
  * go with the audio and the deletion ledger is written either way.
  *
  * `originals` adds the damaged pre-repair copies kept beside repaired Samsung
- * recordings (see lib/special-case-handling.ts) to the same offer. They're
+ * recordings (see lib/import/special-case-handling.ts) to the same offer. They're
  * listed and deleted separately from the recordings because they aren't
  * recordings: they have no transcripts of their own, and they must never reach
  * the deletion ledger - the recording they were made from is still there under

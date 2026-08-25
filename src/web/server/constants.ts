@@ -27,7 +27,7 @@ export const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
 // the CLI disagreed with - the route rejected codes the wizard accepted.
 // "auto" lets whisper.cpp detect per file; a pinned code overrides it, and
 // config.crossLanguage guides it without pinning.
-export { WHISPER_LANGUAGES as LANGUAGES } from "../../lib/languages.ts";
+export { WHISPER_LANGUAGES as LANGUAGES } from "../../lib/shared/languages.ts";
 
 // Extensions served out of assets/, resolved against this module rather than
 // the cwd, since vno is usually installed globally and run from wherever the

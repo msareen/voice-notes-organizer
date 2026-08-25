@@ -4,7 +4,7 @@
 import path from "node:path";
 import chalk from "chalk";
 import { renderPage, renderManifest } from "../page.ts";
-import { themeOf } from "../../lib/themes.ts";
+import { themeOf } from "../../lib/shared/themes.ts";
 import { getSessionToken } from "../../lib/sessionToken.ts";
 import { createContext } from "./context.ts";
 import { serveAsset } from "./assets.ts";
@@ -14,6 +14,7 @@ import { createStateRoutes } from "./routes/state.ts";
 import { createSettingsRoutes } from "./routes/settings.ts";
 import { createNotesRoutes } from "./routes/notes.ts";
 import { createTranscribeRoutes } from "./routes/transcribe.ts";
+import { createSummarizeRoutes } from "./routes/summarize.ts";
 import { createImportRoutes, MAX_UPLOAD_BYTES } from "./routes/import.ts";
 import { createCleanupRoutes } from "./routes/cleanup.ts";
 import type { Config, ProgressCallback } from "../../types.ts";
@@ -60,6 +61,7 @@ export async function startServer({
   const settingsRoutes = createSettingsRoutes(ctx);
   const notesRoutes = createNotesRoutes(ctx);
   const transcribeRoutes = createTranscribeRoutes(ctx);
+  const summarizeRoutes = createSummarizeRoutes(ctx);
   const importRoutes = createImportRoutes(ctx);
   const cleanupRoutes = createCleanupRoutes(ctx);
 
@@ -179,6 +181,7 @@ export async function startServer({
       "/api/settings": { POST: withAuth((req, body) => settingsRoutes.settings(body)) },
       "/api/sources": { POST: withAuth((req, body) => settingsRoutes.sources(body)) },
       "/api/sources/explore": { POST: withAuth((req, body) => settingsRoutes.exploreSourceDest(body)) },
+      "/api/settings/models-dir": { POST: withAuth((req, body) => settingsRoutes.openModelsDir(body)) },
 
       "/api/reveal": { POST: withAuth((req, body) => notesRoutes.reveal(body)) },
       "/api/transcript": { PUT: withAuth((req, body) => notesRoutes.saveTranscript(body)) },
@@ -186,6 +189,9 @@ export async function startServer({
       "/api/notes/refresh": { POST: withAuth((req, body) => notesRoutes.refresh(body)) },
 
       "/api/transcribe": { POST: withAuth((req, body) => transcribeRoutes.transcribe(body)) },
+
+      "/api/summarize": { POST: withAuth((req, body) => summarizeRoutes.summarize(body)) },
+      "/api/summary": { PUT: withAuth((req, body) => summarizeRoutes.saveSummary(body)) },
 
       "/api/volumes": { GET: withAuth(() => importRoutes.volumes()) },
       "/api/browse": { GET: withAuth((req) => importRoutes.browse(new URL(req.url).searchParams)) },

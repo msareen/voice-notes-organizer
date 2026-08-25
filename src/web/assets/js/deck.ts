@@ -11,6 +11,7 @@ import { renderList, markActive } from "./list.ts";
 import { markInto } from "./search.ts";
 import { revealFile } from "./actions.ts";
 import { openTranscribe } from "./panels/transcribe.ts";
+import { renderMarkdown } from "./markdown.ts";
 import type { Cue, Note } from "../../../types.ts";
 
 /**
@@ -24,6 +25,30 @@ import type { Cue, Note } from "../../../types.ts";
  */
 interface DeckMedia extends HTMLMediaElement {
   _retick?: (cues: Cue[] | null | undefined) => void;
+}
+
+/* ---- Video pane size/visibility persists across visits, same pattern as
+   list.ts's folder-collapse state. ---- */
+var VIDEO_H_KEY = "vno-video-h";
+var VIDEO_COLLAPSED_KEY = "vno-video-collapsed";
+var VIDEO_MIN_H = 120;
+var VIDEO_MAX_H = 800;
+
+function getVideoHeight(): number | null {
+  try {
+    var raw = localStorage.getItem(VIDEO_H_KEY);
+    var n = raw ? parseInt(raw, 10) : NaN;
+    return isFinite(n) && n > 0 ? n : null;
+  } catch (e) { return null; }
+}
+function saveVideoHeight(px: number): void {
+  try { localStorage.setItem(VIDEO_H_KEY, String(Math.round(px))); } catch (e) {}
+}
+function getVideoCollapsed(): boolean {
+  try { return localStorage.getItem(VIDEO_COLLAPSED_KEY) === "1"; } catch (e) { return false; }
+}
+function saveVideoCollapsed(collapsed: boolean): void {
+  try { localStorage.setItem(VIDEO_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch (e) {}
 }
 
 /** One run of transcript text the filter term can be re-marked into. */
@@ -41,10 +66,26 @@ interface TranscriptHost extends HTMLElement {
   _editing?: boolean;
 }
 
+/** Which of the deck's two content tabs is showing. Reset on every select(). */
+var activeDeckTab: "transcript" | "summary" = "transcript";
+
+/**
+ * Whether the deck should offer summarization UI at all - the Settings
+ * checkbox, independent of whether llama.cpp is actually installed
+ * (state.SUMMARIZATION.available). Off hides the Summary tab and the
+ * Summarize/Re-summarize action; it never touches a note's already-saved
+ * summary text, which stays on disk and reappears the moment this is
+ * switched back on.
+ */
+function summaryEnabled(): boolean {
+  return state.CONFIG.summaryEnabled !== false;
+}
+
 export function select(rel: string): void {
   var note = noteFor(rel);
   if (!note) return showPlaceholder("Select a take to play");
   state.selectedRel = rel;
+  activeDeckTab = "transcript";
   markActive();
 
   dom.detail.classList.remove("playing");
@@ -82,6 +123,11 @@ export function select(rel: string): void {
   actions.appendChild(button(note.hasTranscript ? "Re-transcribe" : "Transcribe", "",
     function () { openTranscribe(note!.rel); },
     "Run whisper on this recording"));
+  if (summaryEnabled()) {
+    actions.appendChild(button(note.hasSummary ? "Re-summarize" : "Summarize", "",
+      function () { requestSummarize(note!); },
+      "Summarize this recording's transcript with llama.cpp (optional)"));
+  }
   actions.appendChild(button("Edit transcript", "", function () { startEdit(note!); },
     "Edit the transcript text (timings are kept)"));
   actions.appendChild(button("Delete", "danger", function () { confirmDelete(note!); },
@@ -102,10 +148,12 @@ export function select(rel: string): void {
   audio.addEventListener("pause", function () { dom.detail.classList.remove("playing"); });
   audio.addEventListener("ended", function () { dom.detail.classList.remove("playing"); });
 
+  dom.body.appendChild(buildDeckTabs(note));
+
   var transcript = document.createElement("div") as TranscriptHost;
   transcript.className = "transcript";
   transcript.id = "transcript";
-  renderTranscript(transcript, note, audio);
+  renderDeckContent(transcript, note, audio);
   dom.body.appendChild(transcript);
 
   dom.placeholder.classList.add("hidden");
@@ -135,11 +183,79 @@ function buildTransport(note: Note, host: HTMLElement): DeckMedia {
   // fullscreen native player, which would bypass this transport entirely.
   if (video) (audio as unknown as HTMLVideoElement).playsInline = true;
 
+  var toggleVideoBtn: HTMLButtonElement | null = null;
   if (video) {
     var frame = document.createElement("div");
     frame.className = "video-frame";
     frame.appendChild(audio);
+
+    // Dragging this strip (or scrolling the wheel over it) resizes the frame;
+    // it sits on the boundary between the video and the transport below.
+    var handle = document.createElement("div");
+    handle.className = "video-resize-handle";
+    handle.setAttribute("aria-hidden", "true");
+    frame.appendChild(handle);
+
     host.appendChild(frame);
+
+    function setFrameHeight(px: number) {
+      var v = audio as unknown as HTMLVideoElement;
+      v.style.height = px + "px";
+      v.style.maxHeight = "none";
+    }
+    var savedH = getVideoHeight();
+    if (savedH) setFrameHeight(savedH);
+
+    var resizing = false;
+    var startY = 0;
+    var startH = 0;
+    handle.addEventListener("pointerdown", function (e) {
+      resizing = true;
+      startY = e.clientY;
+      startH = audio.getBoundingClientRect().height;
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener("pointermove", function (e) {
+      if (!resizing) return;
+      var next = Math.max(VIDEO_MIN_H, Math.min(VIDEO_MAX_H, startH + (e.clientY - startY)));
+      setFrameHeight(next);
+    });
+    function endResize(e: PointerEvent) {
+      if (!resizing) return;
+      resizing = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+      saveVideoHeight((audio as unknown as HTMLVideoElement).getBoundingClientRect().height);
+    }
+    handle.addEventListener("pointerup", endResize);
+    handle.addEventListener("pointercancel", endResize);
+    // Scrolling up on the boundary shrinks the pane; scrolling down grows it.
+    handle.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var cur = audio.getBoundingClientRect().height;
+      var next = Math.max(VIDEO_MIN_H, Math.min(VIDEO_MAX_H, cur - e.deltaY));
+      setFrameHeight(next);
+      saveVideoHeight(next);
+    }, { passive: false });
+
+    // Collapsing hides the frame but leaves the <video> in the DOM and
+    // playing, so playback continues as audio-only.
+    toggleVideoBtn = document.createElement("button");
+    toggleVideoBtn.type = "button";
+    toggleVideoBtn.className = "video-toggle";
+    function applyCollapsed(collapsed: boolean) {
+      frame.classList.toggle("collapsed", collapsed);
+      toggleVideoBtn!.textContent = "";
+      toggleVideoBtn!.appendChild(icon(collapsed ? "chevron-down" : "chevron-up", 14));
+      toggleVideoBtn!.appendChild(document.createTextNode(collapsed ? " Show video" : " Hide video"));
+      toggleVideoBtn!.setAttribute("aria-label", collapsed ? "Show video" : "Hide video");
+    }
+    applyCollapsed(getVideoCollapsed());
+    toggleVideoBtn.addEventListener("click", function () {
+      var next = !frame.classList.contains("collapsed");
+      applyCollapsed(next);
+      saveVideoCollapsed(next);
+    });
   }
 
   var wrap = document.createElement("div");
@@ -202,6 +318,7 @@ function buildTransport(note: Note, host: HTMLElement): DeckMedia {
     rateBtn.textContent = RATES[rateIdx] + "×";
   }, "Playback speed");
   keys.appendChild(rateBtn);
+  if (toggleVideoBtn) keys.appendChild(toggleVideoBtn);
   wrap.appendChild(keys);
 
   // Video already lives in its own frame above the transport (appended
@@ -326,7 +443,7 @@ function buildTransport(note: Note, host: HTMLElement): DeckMedia {
 
 /**
  * The list is built from a cached duration (fast startup on a big library -
- * see lib/notesCache.ts), so it can be stale. Selecting a note is the one
+ * see lib/notes/notesCache.ts), so it can be stale. Selecting a note is the one
  * moment worth paying for a fresh ffprobe: rechecks just this file and
  * patches the displayed duration + transcript in place, without touching
  * the <audio> element so playback in progress isn't interrupted.
@@ -342,7 +459,7 @@ function refreshSelected(rel: string): void {
       var transcriptHost = document.getElementById("transcript") as TranscriptHost | null;
       var audio = dom.body.querySelector("audio, video") as DeckMedia | null;
       if (transcriptHost && audio) {
-        renderTranscript(transcriptHost, res.note, audio);
+        renderDeckContent(transcriptHost, res.note, audio);
         if (audio._retick) audio._retick(res.note.cues);
       }
     })
@@ -362,7 +479,78 @@ export function showPlaceholder(message: string): void {
   dom.body.classList.add("hidden");
 }
 
-function renderTranscript(host: TranscriptHost, note: Note, audio: DeckMedia): void {
+/** The Transcript/Summary tab strip above the deck's content host. */
+function buildDeckTabs(note: Note): HTMLDivElement {
+  var rel = note.rel;
+  var strip = document.createElement("div");
+  strip.className = "deck-tabs";
+
+  function switchTo(tab: "transcript" | "summary") {
+    if (activeDeckTab === tab) return;
+    activeDeckTab = tab;
+    transcriptTab.classList.toggle("active", tab === "transcript");
+    if (summaryTab) summaryTab.classList.toggle("active", tab === "summary");
+    var host = document.getElementById("transcript") as TranscriptHost | null;
+    var audio = dom.body.querySelector("audio, video") as DeckMedia | null;
+    var current = noteFor(rel);
+    if (host && audio && current) renderDeckContent(host, current, audio);
+  }
+
+  var transcriptTab = button("Transcript", "tab active", function () { switchTo("transcript"); });
+  strip.appendChild(transcriptTab);
+
+  var summaryTab: HTMLButtonElement | null = null;
+  if (summaryEnabled()) {
+    summaryTab = button("Summary", "tab", function () { switchTo("summary"); });
+    strip.appendChild(summaryTab);
+  }
+  return strip;
+}
+
+function renderDeckContent(host: TranscriptHost, note: Note, audio: DeckMedia): void {
+  if (activeDeckTab === "summary") renderSummaryTab(host, note);
+  else renderTranscriptTab(host, note, audio);
+}
+
+function renderSummaryTab(host: TranscriptHost, note: Note): void {
+  host.textContent = "";
+  host._hlTargets = [];
+  if (note.summary) {
+    var rendered = document.createElement("div");
+    rendered.className = "summary-md";
+    // note.summary is the model's own output, never trusted markup -
+    // renderMarkdown escapes all text before composing any HTML around it.
+    rendered.innerHTML = renderMarkdown(note.summary);
+    host.appendChild(rendered);
+    return;
+  }
+  var empty = document.createElement("div");
+  empty.className = "empty";
+  empty.textContent = state.SUMMARIZATION && state.SUMMARIZATION.available
+    ? "No summary yet — click Summarize above."
+    : "Summarization isn't set up. Run `vno setup --llama` in a terminal to add it (optional).";
+  host.appendChild(empty);
+}
+
+/** Fires the Summarize action for the currently selected note - the info modal for the not-set-up case, a fire-and-forget job start otherwise. */
+function requestSummarize(note: Note): void {
+  if (!state.SUMMARIZATION || !state.SUMMARIZATION.available) {
+    modal({
+      title: "Summarization isn't set up",
+      message: "This is an optional feature. Run `vno setup --llama` in a terminal to install llama.cpp and pick a model, then come back here.",
+    });
+    return;
+  }
+  if (!note.hasTranscript) {
+    toast("Transcribe this recording first", "error");
+    return;
+  }
+  api("/api/summarize", { method: "POST", body: { rel: note.rel } })
+    .then(function () { toast("Summarizing…", "ok"); })
+    .catch(fail);
+}
+
+function renderTranscriptTab(host: TranscriptHost, note: Note, audio: DeckMedia): void {
   host.textContent = "";
   // What the filter box is searching for gets marked here too, so following a
   // transcript hit from the list lands you on the words that matched. The

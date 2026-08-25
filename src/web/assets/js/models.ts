@@ -16,3 +16,11 @@ export function modelOptions(): Option[] {
     return { label: tag ? m + " (" + tag + ")" : m, value: m };
   });
 }
+
+// state.LANGUAGES is lib/shared/languages.ts's list, sent whole by /api/state:
+// [{ code, label }]. "auto" isn't in it - it isn't a language, it's the
+// absence of a pin - so callers that want it prepend it themselves.
+// Shared by the Settings and Transcribe panels.
+export function languageOptions(): Option[] {
+  return state.LANGUAGES.map(function (l) { return { label: l.label, value: l.code }; });
+}

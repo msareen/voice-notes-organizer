@@ -6,6 +6,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { runImport } from "../src/cli/import.ts";
 import { runTranscribe } from "../src/cli/transcribe.ts";
+import { runSummarize } from "../src/cli/summarize.ts";
 import { runCleanup, runLedgerCleanup } from "../src/cli/cleanup.ts";
 import { runVisualize, DEFAULT_PORT } from "../src/cli/visualize.ts";
 import { runSettings } from "../src/cli/settings.ts";
@@ -175,6 +176,30 @@ program
   });
 
 program
+  .command("summarize")
+  .argument("<file>", "summarize this recording's transcript (name, relative path, or absolute path)")
+  .description("Summarize a recording's transcript with llama.cpp (optional; run `vno setup --llama` first)")
+  .option("-m, --model <name>", "summarization model to use (defaults to the one set in `vno setting`)")
+  .addHelpText(
+    "after",
+    examples([
+      ["vno setup --llama", "one-time: install llama.cpp and pick a model"],
+      ["vno summarize 250810_1328", "summarize one imported recording, matched by name"],
+      ["vno summarize interview.mp3 -m my-model-Q4_K_M.gguf", "use a specific installed model for this run"],
+    ]) +
+      chalk.dim(
+        "\nOne recording at a time - no picker, no batch mode. The recording needs a\n" +
+          "transcript already (`vno t` first). The summary is written to a\n" +
+          "<name>.summary.txt file next to the audio, same as .vtt is for transcripts.\n" +
+          "This is the CLI counterpart to the deck's Summarize button in `vno v`.\n"
+      )
+  )
+  .action(async (file, opts) => {
+    const ok = await runSummarize({ file, model: opts.model });
+    if (!ok) process.exitCode = 1;
+  });
+
+program
   .command("cleanup")
   .argument(
     "[what]",
@@ -231,10 +256,11 @@ program
   .description(
     "Launch the browser UI: play, edit transcripts, import, transcribe, clean up and change settings (alias: v, viz, vis, --v)"
   )
+  // No commander default here on purpose: it would make `opts.port` always
+  // set, and "not passed" is exactly what has to fall through to config.port.
   .option(
     "-p, --port <number>",
-    `port to listen on, fixed across runs (default: ${DEFAULT_PORT}). If it's held by another vno v, opens a tab to it instead`,
-    String(DEFAULT_PORT)
+    `port to listen on for this run only, overriding the configured one (default: ${DEFAULT_PORT}). If it's held by another vno v, opens a tab to it instead`
   )
   .option("--no-open", "start the server without opening a browser")
   .addHelpText(
@@ -245,15 +271,19 @@ program
       ["vno v -p 0", "pick any free port instead of the fixed one"],
     ]) +
       chalk.dim(
-        `\nThe port is fixed at ${DEFAULT_PORT} so bookmarks and an installed app keep working.\n` +
-          "If another vno v already holds it, this opens a tab to that one rather than\n" +
-          "starting a second server. The command blocks until you close the tab, press\n" +
-          "the page's Quit button, or hit Ctrl+C.\n"
+        `\nThe port is fixed (${DEFAULT_PORT} unless you've changed it) so bookmarks and an\n` +
+          "installed app keep working. Change it for good in `vno setting` → Viewer port;\n" +
+          "-p is just for one run. If another vno v already holds the port, this opens a\n" +
+          "tab to that one rather than starting a second server. The command blocks until\n" +
+          "you close the tab, press the page's Quit button, or hit Ctrl+C.\n"
       )
   )
   .action(async (opts) => {
-    const port = parseInt(opts.port, 10);
-    await runVisualize({ open: opts.open, port: Number.isNaN(port) ? DEFAULT_PORT : port });
+    const parsed = opts.port === undefined ? null : parseInt(opts.port, 10);
+    await runVisualize({
+      open: opts.open,
+      port: parsed === null || Number.isNaN(parsed) ? null : parsed,
+    });
   });
 
 // Invoked by Windows, not by a person: the target of the `vno://` registry
@@ -332,7 +362,11 @@ program
   .option("--local", "install whisper.cpp beside this vno install, without asking")
   .option("--global", "install whisper.cpp under the user's home directory, without asking")
   .option("--model <name>", "fetch just this model instead of the defaults")
+  .option("--whisper", "pick which whisper.cpp models to install from a checklist (tiny, base, small, medium, large-v3, turbo)")
   .option("--list-models", "print the model inventory and exit; installs nothing")
+  .option("--remove-model [name]", "delete installed models to reclaim disk space; bare, opens a picker")
+  .option("--llama", "install llama.cpp for transcript summarization (optional; never installed otherwise)")
+  .option("--summary-model <name>", "fetch this summarization model non-interactively; pair with --llama if llama.cpp isn't installed yet")
   .addHelpText(
     "after",
     examples([
@@ -340,13 +374,19 @@ program
       ["vno setup --check", "report only - installs and downloads nothing"],
       ["vno setup --global", "put whisper.cpp under your home dir, not beside vno"],
       ["vno setup --model small", "fetch one model instead of the default set"],
+      ["vno setup --whisper", "pick any number of whisper models to install from a checklist"],
       ["vno setup --list-models", "show which models are already on disk"],
+      ["vno setup --remove-model", "pick installed models to delete and reclaim the space"],
+      ["vno setup --llama", "install llama.cpp and pick a summarization model"],
+      ["vno setup --llama --summary-model phi-4-mini", "install llama.cpp with a specific model, no prompts"],
     ]) +
       chalk.dim(
         "\nNothing installs without you confirming it. This same check runs by itself\n" +
           "before transcribe, cleanup's duration scan and an auto-translating import, so\n" +
           "a missing tool surfaces as an offer rather than a failure part-way through.\n" +
-          "Re-run it after adding a GPU or changing drivers to pick up a better backend.\n"
+          "Re-run it after adding a GPU or changing drivers to pick up a better backend.\n\n" +
+          "llama.cpp (transcript summarization) is entirely optional and never installed\n" +
+          "by plain `vno setup` - only `vno setup --llama` touches it.\n"
       )
   )
   .action(async (opts) => {
@@ -354,7 +394,11 @@ program
       check: Boolean(opts.check),
       mode: opts.global ? "global" : opts.local ? "local" : null,
       model: opts.model || null,
+      whisper: Boolean(opts.whisper),
       listModelsOnly: Boolean(opts.listModels),
+      llama: Boolean(opts.llama),
+      summaryModel: opts.summaryModel || null,
+      removeModel: opts.removeModel ?? null,
     });
   });
 

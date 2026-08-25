@@ -26,7 +26,12 @@ rather than crashing the tool.
   "openWhenDone": true,
   "rememberDeletions": true,
   "theme": "tape",
-  "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null }
+  "accel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
+  "summaryModel": null,
+  "summaryEnabled": true,
+  "llamaAccel": { "backend": null, "name": null, "use": null, "resolvedAt": null },
+  "summaryPrompt": null,
+  "llamaCliPath": null
 }
 ```
 
@@ -46,8 +51,14 @@ time.
 | `transcribeLanguage` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
+| `port` | ✅ | — (see below) | ✅ |
 | `theme` | ✅ | ✅ | ✅ |
 | `accel` | on/off only | on/off only | ✅ (set by `vno setup`) |
+| `summaryModel` | ✅ (once installed) | ✅ (once installed) | ✅ |
+| `summaryEnabled` | — | ✅ | ✅ |
+| `llamaAccel` | on/off only | on/off only | ✅ (set by `vno setup --llama`) |
+| `summaryPrompt` | — | ✅ | ✅ |
+| `llamaCliPath` | — | — | ✅ (set by `vno setup --llama` when asked) |
 
 ---
 
@@ -244,6 +255,48 @@ Toggle it from `vno setting` or the UI's Settings dialog; re-install with a
 different backend (e.g. after adding a GPU) by running `vno setup` again. See
 [Transcription](transcription.md#gpu-acceleration).
 
+## `summaryModel`
+
+The llama.cpp model used for transcript summarization — a dropped-in `.gguf`
+filename you placed in your models folder yourself (see
+[Summarization](summarization.md)). `null` until you set one; unlike
+`defaultModel` there's no forced default, since summarization is entirely
+optional and unset just means "not configured yet".
+
+Set from `vno setting` → *Summarization model* (shown only once at least one
+model is present) or the UI's Settings dialog.
+
+## `summaryEnabled`
+
+Whether the deck shows a **Summary** tab and **Summarize** button at all.
+`true` by default (or unset — same thing); set to `false` to hide them.
+Purely a UI switch: existing `.summary.txt` files are untouched either way,
+and flipping it back to `true` brings them straight back into view. Set from
+the UI's Settings dialog (*Show the Summary tab in the deck*). See
+[Summarization](summarization.md#hiding-the-summary-tab).
+
+## `llamaAccel`
+
+llama.cpp's accelerator backend, mirroring [`accel`](#accel) exactly but
+independent of it — whisper.cpp and llama.cpp are installed separately, so a
+machine can be accelerated for one and not the other. Unlike `accel`,
+llama.cpp's backend isn't detected (there's no vno-picked binary variant to
+read it from) — it's whatever you answer when `vno setup --llama` asks
+whether your build has GPU acceleration.
+
+## `llamaCliPath`
+
+Manual override for where the llama.cpp binary lives, for when a fresh
+`winget install`/`brew install` isn't visible on PATH in the same shell
+session. `null` means "trust PATH". Set automatically when `vno setup
+--llama` asks for the path after an install; editable by hand.
+
+## `summaryPrompt`
+
+Replaces the built-in summarization instruction wholesale when set. `null`
+(the default) means "use the built-in one" — a whitespace-only value is
+treated the same way. Set from the UI's Settings dialog (*Override prompt*).
+
 ## `openWhenDone`
 
 Whether a finished `vno import` / `vno transcribe` run launches the
@@ -251,6 +304,33 @@ Whether a finished `vno import` / `vno transcribe` run launches the
 headless.
 
 `--no-open` overrides it for a single run.
+
+---
+
+## `port`
+
+The port the [browser UI](ui.md) serves on. `9477` by default — chosen to sit
+clear of the `8385–8484` block Windows commonly reserves for Hyper-V, which is
+where the previous default (`8477`) fell.
+
+The port is deliberately fixed rather than picked fresh each launch, so a
+bookmarked URL and an installed PWA's `start_url` — baked in at install time
+— keep working. This setting exists because the default isn't always usable:
+some machines can't bind it at all, most often on Windows, where whole TCP
+ranges are reserved for Hyper-V's dynamic allocator (WSL2, Docker Desktop)
+and a bind inside one fails as *"already in use"* with nothing listening.
+See [Troubleshooting](troubleshooting.md#port-is-already-in-use--but-nothing-is-using-it-windows).
+
+Set it from `vno setting` → *Viewer port*, or edit the file. `0` asks the OS
+for a free port on every run — convenient, but it gives up the stable URL.
+`-p/--port` overrides it for a single run without changing the setting.
+
+It's deliberately **not** in the UI's Settings dialog: the page you'd change
+it from is served on the very port being changed, so applying it would drop
+the connection out from under you. It's a terminal setting.
+
+Changing the port does **not** update an already-installed PWA shortcut;
+reinstall the app from the new URL to pick it up.
 
 ---
 

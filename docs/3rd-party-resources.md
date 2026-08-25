@@ -49,9 +49,17 @@ Python path's runtime CUDA probe.
 **6. Make sure the default models are present.**
 vno takes an inventory of what model files actually exist on disk right now
 (both folders, plus a couple of platform extras), and for anything from the
-default set (`small`, `turbo`, or whichever single model `--model` asked for)
-that isn't already there, downloads it straight into the *active* folder's
-`models/`.
+default set (`small`, `turbo`, or whichever single model `--model` asked for,
+or a checklist of any of them with `--whisper`) that isn't already there,
+downloads it straight into the *active* folder's `models/` — checksum-verified
+against the catalog entry's SHA-256 once, right after the download finishes.
+
+**7. llama.cpp, separately and only if asked.** None of the steps above touch
+llama.cpp — summarization is entirely optional, so a plain `vno setup` never
+installs or configures it. That's its own explicit step, `vno setup
+--llama`; see
+[llama.cpp (optional summarization) is managed very differently](#llamacpp-optional-summarization-is-managed-very-differently)
+below.
 
 That's the whole flow — everything after this (running a transcription) just
 reuses steps 1 and 4's lookup, without re-asking anything.
@@ -174,6 +182,73 @@ vno sets up for you:
 
 Neither one affects where the *binary* is found — that's always one of the
 two fixed folders, `vno-install.json`, or `PATH`, with no environment override.
+
+## llama.cpp (optional summarization) is managed very differently
+
+Everything above is `lib/whisper/whispercpp.ts` — llama.cpp
+(`lib/llama/llamacpp.ts`) mirrors it for *models* (a curated catalog with
+SHA-256 verification, resumable `fetch()` downloads, the same
+`lib/engineInstall.ts` primitives) but stays deliberately stripped down for
+the *binary*, because installing/updating llama.cpp itself is the OS package
+manager's job, not vno's. Worth knowing the two aren't quite the same shape,
+if you're reading one file expecting the other's conventions throughout.
+
+**The binary isn't vendored at all.** `vno` doesn't download or build
+llama.cpp itself:
+
+- macOS: `brew install llama.cpp`
+- Windows: `winget install --id ggml.llamacpp`
+- Linux: not automated — `vno setup --llama` just prints manual instructions
+  (no prebuilt asset story here the way whisper.cpp has one)
+
+So there's no `bin/`, no local/global *binary* install root, and no
+`vno-install.json` recording what got built. `lib/llama/llamacpp.ts:resolveBinary()`
+just checks `config.llamaCliPath` (a manual override, explained below) and
+then `PATH` — that's the entire resolution chain. Compare this to
+whisper.cpp's `resolveBinary()` above, which never touches `PATH` at all.
+
+**Why the manual override exists.** A fresh `winget install` in particular
+often doesn't update `PATH` for the *current* shell — the classic "works
+after you open a new terminal" problem. Rather than make every command
+re-probe and hope, `vno setup --llama` falls back to asking for the binary's
+path directly when PATH still doesn't see it right after an install, and
+saves that into `config.llamaCliPath` (`~/.vno/config.json`). It's checked
+before `PATH`, so once set it wins outright — there's no "prefer PATH unless
+stale" logic to reason about.
+
+**Models can come from vno's catalog, or be entirely yours to manage.**
+`resolveInstallRoot`/`installPaths`/`bothInstallRoots` from
+`lib/engineInstall.ts` (the same generic helpers whisper.cpp uses) are
+reused here too, but **only for the `models/` folder** — "local" and
+"global" mean "which folder do my `.gguf` files live in", nothing about the
+binary. `vno setup --llama` asks that question once, creates the folder, and
+offers a checkbox picker over `lib/webSources/llamaModels.ts`'s curated,
+tiered catalog (repo, filename, approximate size, and — for every entry that
+has one — a SHA-256). Picking one downloads it into that folder the same way
+`downloadModel` works for whisper (mirror fallback, resumable via `.part` +
+`Range`, GGUF-magic-bytes validation, then a checksum check against the
+catalog's hash if it has one). A checksum mismatch is never auto-deleted —
+`onChecksumMismatch` asks first, same contract as whisper's. You can just as
+easily skip all of that and drop your own `.gguf` file into the folder
+instead (or point `VNO_LLAMA_MODEL_PATH` at your own location); a
+user-supplied file has no catalog entry, so `listModels()`/`resolveModel()`
+fall back to the plain scan — readable, non-empty, starts with the `GGUF`
+magic bytes — with no checksum to check.
+
+`vno setup --remove-model` still works the same way as whisper.cpp's: it only
+ever deletes files sitting inside one of the two `models/` folders above
+(`isManagedModel`/`removeEngineModel` in `engineInstall.ts`, shared by both
+engines), never anything found through `VNO_LLAMA_MODEL_PATH` or reached some
+other way.
+
+**The accelerator backend isn't detected either.** whisper.cpp's `accel` is
+read straight out of `vno-install.json` because vno itself picked (or built)
+a CUDA/Metal/CPU variant. llama.cpp has no such record to read anymore, so
+`config.llamaAccel.backend` is set directly by `vno setup --llama`: `"metal"`
+after a Homebrew install (Homebrew's formula is Metal-accelerated on Apple
+silicon by default), or by asking the same "does this build have GPU
+acceleration?" yes/not-sure/no question on Windows/Linux — there's nothing
+else to read it from.
 
 ---
 

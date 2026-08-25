@@ -3,14 +3,16 @@ import fs from "fs-extra";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { loadConfig, saveConfig, configFilePath } from "../lib/config.ts";
-import { THEMES, themeOf } from "../lib/themes.ts";
-import { ledgerSummary, clearLedger } from "../lib/ledger.ts";
+import { THEMES, themeOf } from "../lib/shared/themes.ts";
+import { ledgerSummary, clearLedger } from "../lib/notes/ledger.ts";
 import { checkDependencies } from "../lib/setup.ts";
-import { accelState, crossLanguageState } from "../lib/whisper.ts";
-import { WHISPER_LANGUAGES, languageLabel } from "../lib/languages.ts";
-import { resolveModel } from "../lib/whispercpp.ts";
+import { accelState, crossLanguageState } from "../lib/whisper/whisper.ts";
+import { WHISPER_LANGUAGES, languageLabel } from "../lib/shared/languages.ts";
+import { resolveModel } from "../lib/whisper/whispercpp.ts";
+import { listModels as listLlamaModels } from "../lib/llama/llamacpp.ts";
 import { prompt, CANCELLED } from "./prompt.ts";
 import { runSetup } from "./setup.ts";
+import { DEFAULT_PORT } from "./visualize.ts";
 import type { Config, Source } from "../types.ts";
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
@@ -440,6 +442,11 @@ export async function runSettings(): Promise<void> {
     const ledger = await ledgerSummary(config.target);
     const deps = await checkDependencies(["ffmpeg", "whisper"]);
     const missingDeps = deps.filter((d) => !d.found).map((d) => d.label);
+    // Entirely optional, so this only ever adds a menu entry, never a
+    // blocker - a machine that never ran `vno setup --llama` sees nothing
+    // about it here beyond the "Check ffmpeg + whisper" entry's own scope,
+    // which deliberately doesn't cover llama.cpp (see cli/setup.ts:REQUIRED).
+    const llamaModels = (await listLlamaModels()).filter((m) => m.valid);
 
     const answer = await prompt([
       {
@@ -453,9 +460,13 @@ export async function runSettings(): Promise<void> {
           { name: `Transcription language  ${chalk.dim(`[${config.transcribeLanguage || "auto"}]`)}`, value: "language" },
           { name: `Cross-language detection  ${chalk.dim("[")}${crossLanguageLabel(config)}${chalk.dim("]")}`, value: "crossLanguage" },
           { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
+          ...(llamaModels.length > 0
+            ? [{ name: `Summarization model     ${chalk.dim(`[${config.summaryModel || "none"}]`)}`, value: "summaryModel" }]
+            : []),
           { name: `Target (import) folder  ${chalk.dim(`[${config.target}]`)}`, value: "target" },
           { name: `Open folder + player when done  ${chalk.dim("[")}${onOffLabel(config.openWhenDone !== false)}${chalk.dim("]")}`, value: "openWhenDone" },
           { name: `Viewer theme            ${chalk.dim(`[${themeOf(config)}]`)}`, value: "theme" },
+          { name: `Viewer port             ${chalk.dim(`[${config.port ?? DEFAULT_PORT}]`)}`, value: "port" },
           { name: `Remember deleted recordings  ${chalk.dim("[")}${onOffLabel(config.rememberDeletions !== false)}${chalk.dim("]")}`, value: "rememberDeletions" },
           { name: `Source folders  ${chalk.dim(`[${(config.sources || []).length} configured]`)}`, value: "sources" },
           { name: `Forget remembered volume choices  ${chalk.dim(`[${knownCount} remembered]`)}`, value: "resetMounts" },
@@ -578,6 +589,21 @@ export async function runSettings(): Promise<void> {
         config.accel = { ...accel, use: res.value };
         await saveConfig(config);
       }
+    } else if (answer.action === "summaryModel") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "Default summarization model (used by the deck's Summarize button and `vno summarize`)",
+          default: config.summaryModel || llamaModels[0]?.filename,
+          choices: llamaModels.map((m) => ({ name: m.filename, value: m.filename })),
+          loop: false,
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.summaryModel = res.value;
+        await saveConfig(config);
+      }
     } else if (answer.action === "target") {
       const res = await prompt([
         {
@@ -608,6 +634,33 @@ export async function runSettings(): Promise<void> {
       if (res !== CANCELLED) {
         config.openWhenDone = res.value;
         await saveConfig(config);
+      }
+    } else if (answer.action === "port") {
+      const res = await prompt([
+        {
+          type: "input",
+          name: "value",
+          message: `Port for the browser viewer (${DEFAULT_PORT} is the default; 0 picks a free one each run)`,
+          default: String(config.port ?? DEFAULT_PORT),
+          // Ports above 1023 only: the low range needs elevation on macOS and
+          // Linux, and vno has no business asking for that to show a player.
+          validate: (input: string) => {
+            const n = Number(input.trim());
+            if (!Number.isInteger(n) || n < 0 || n > 65535) return "Enter a port between 0 and 65535.";
+            if (n > 0 && n < 1024) return "Ports below 1024 need elevated privileges — pick a higher one.";
+            return true;
+          },
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.port = Number(String(res.value).trim());
+        await saveConfig(config);
+        console.log(chalk.dim(`Viewer port set to ${config.port}. Restart \`vno v\` for it to take effect.`));
+        if (process.platform === "win32") {
+          console.log(
+            chalk.dim("If a port keeps reporting as in use with nothing listening, check Windows'\nreserved ranges: netsh interface ipv4 show excludedportrange protocol=tcp")
+          );
+        }
       }
     } else if (answer.action === "theme") {
       const res = await prompt([

@@ -5,7 +5,7 @@ import { toast, fail } from "./api.ts";
    Each file is POSTed raw (no multipart) to /api/upload, which streams it
    straight to disk - see server/routes/import.ts:upload. Kept as its own
    fixed regex rather than derived from state.CONFIG.mediaExtensions (the
-   server's lib/sync.ts:MEDIA_EXTENSIONS is authoritative; this only needs to
+   server's lib/import/sync.ts:MEDIA_EXTENSIONS is authoritative; this only needs to
    avoid uploading obviously-wrong files before the server rejects them). ---- */
 var MEDIA_EXT_RE = /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|wma|aiff|amr|3gp|mp4|m4v|mov|mkv|webm|avi)$/i;
 

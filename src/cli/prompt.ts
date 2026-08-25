@@ -4,6 +4,9 @@ import type { Answers, QuestionCollection } from "inquirer";
 /** Resolved by `prompt` when the user pressed Esc to back out of a menu. */
 export const CANCELLED = Symbol("prompt.cancelled");
 
+/** A non-selectable heading row for a "list"/"checkbox" choices array - re-exported so callers don't need their own `inquirer` import just for this. */
+export const Separator = inquirer.Separator;
+
 /** Thrown by `promptStrict` on Esc, so callers can bail out of a whole flow. */
 export class PromptCancelled extends Error {
   constructor() {

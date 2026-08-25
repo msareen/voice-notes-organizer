@@ -1,6 +1,7 @@
 // Generic DOM widgets (buttons, the modal shell, form fields, checkbox
 // picklists) reused by every panel - nothing here knows about notes or jobs.
 import { fail } from "./api.ts";
+import { icon } from "./icons.ts";
 import type { Option } from "./models.ts";
 
 export function button(
@@ -14,6 +15,24 @@ export function button(
   b.type = "button";
   b.textContent = label;
   if (title) b.title = title;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+/** A bare icon button, label carried only in `title`/aria-label - for a spot
+ * (e.g. a section heading) where a labelled button would crowd the row. */
+export function iconButton(
+  name: string,
+  title: string,
+  onClick: (e: MouseEvent) => void,
+  cls?: string
+): HTMLButtonElement {
+  var b = document.createElement("button");
+  b.className = "btn icon" + (cls ? " " + cls : "");
+  b.type = "button";
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.appendChild(icon(name));
   b.addEventListener("click", onClick);
   return b;
 }
@@ -45,6 +64,13 @@ export interface ModalSpec {
   /** Fires for every way out that isn't a completed confirm. */
   onCancel?: () => void;
   confirmLabel?: string;
+  /**
+   * Replaces the confirm button's label while its promise is pending - a
+   * quiet "this is taking a moment" instead of a spinner, for confirms that
+   * can run a beat or two (a filesystem scan, say). Reverts to confirmLabel
+   * whether the promise resolves or rejects.
+   */
+  busyLabel?: string;
   danger?: boolean;
   panel?: boolean;
   wide?: boolean;
@@ -87,15 +113,18 @@ export function modal(spec: ModalSpec): ModalHandle {
   var confirm: HTMLButtonElement | null = null;
   var confirmed = false;
   if (spec.onConfirm) {
-    confirm = button(spec.confirmLabel || "OK", spec.danger ? "danger" : "primary", function () {
+    var confirmLabel = spec.confirmLabel || "OK";
+    confirm = button(confirmLabel, spec.danger ? "danger" : "primary", function () {
       confirm!.disabled = true;
       cancel.disabled = true;
+      if (spec.busyLabel) confirm!.textContent = spec.busyLabel;
       // new Promise() so a synchronous throw inside onConfirm is caught too.
       new Promise(function (resolve) { resolve(spec.onConfirm!()); })
         .then(function () { confirmed = true; close(); })
         .catch(function (err) {
           confirm!.disabled = false;
           cancel.disabled = false;
+          confirm!.textContent = confirmLabel;
           fail(err);
         });
     });
@@ -194,6 +223,34 @@ export function selectField(
   if (helpHint) field.appendChild(helpHint);
   host.appendChild(field);
   return sel;
+}
+
+export function textareaField(
+  host: HTMLElement,
+  labelText: string,
+  value: string | null | undefined,
+  placeholder?: string,
+  helpText?: string
+): HTMLTextAreaElement {
+  var field = document.createElement("div");
+  field.className = "field";
+  var label = document.createElement("label");
+  label.textContent = labelText;
+  field.appendChild(label);
+  var helpHint: HTMLParagraphElement | null = null;
+  if (helpText) {
+    var h = helpToggle(helpText);
+    label.appendChild(h.button);
+    helpHint = h.hint;
+  }
+  var ta = document.createElement("textarea");
+  ta.value = value || "";
+  if (placeholder) ta.placeholder = placeholder;
+  ta.rows = 4;
+  field.appendChild(ta);
+  if (helpHint) field.appendChild(helpHint);
+  host.appendChild(field);
+  return ta;
 }
 
 /* ---- Reusable checkbox list for the command modals ---- */

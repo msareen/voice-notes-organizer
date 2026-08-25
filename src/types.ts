@@ -75,8 +75,30 @@ export interface Config {
   crossLanguage: CrossLanguage;
   rememberDeletions: boolean;
   openWhenDone: boolean;
+  /** Port the viewer serves on. See cli/visualize.ts:DEFAULT_PORT for why it's fixed rather than picked per run. */
+  port: number;
   theme: ThemeId;
   accel: AccelState;
+  /** The llama.cpp model to summarize with, by alias/filename - null until configured. Summarization is entirely optional; see lib/llama/llamacpp.ts. */
+  summaryModel: string | null;
+  /**
+   * Whether the deck shows its Summary tab/action at all - independent of
+   * whether llama.cpp is actually installed. `false` hides the UI only;
+   * already-generated `.summary.txt` sidecars are never touched by this.
+   * Missing/undefined (an older config) means on, same idiom as
+   * `openWhenDone`/`rememberDeletions` below.
+   */
+  summaryEnabled?: boolean;
+  /** llama.cpp's accelerator backend, fixed at install time, mirroring `accel` above. */
+  llamaAccel: AccelState;
+  /** Replaces lib/llama/llama.ts's default instruction wholesale when set - null (or whitespace-only) means "use the built-in one". */
+  summaryPrompt: string | null;
+  /**
+   * Manual override for where the llama.cpp binary lives - set when PATH
+   * lookup right after a fresh `winget`/`brew` install isn't reliable in the
+   * same shell session. Checked before PATH; null means "trust PATH".
+   */
+  llamaCliPath: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +151,9 @@ export interface Note {
   text: string;
   hasTranscript: boolean;
   transcriptExt: TranscriptExt | null;
+  /** From the <name>.summary.txt sidecar, if one exists. Optional feature — see lib/llama/llama.ts. */
+  summary: string | null;
+  hasSummary: boolean;
   size: number | null;
   mtimeMs: number | null;
   durationSec: number | null;
@@ -186,7 +211,7 @@ export interface ProgressOptions {
 // Volumes
 // ---------------------------------------------------------------------------
 
-/** A detected removable volume. See lib/volumes.ts. */
+/** A detected removable volume. See lib/import/volumes.ts. */
 export interface Volume {
   /** Human-readable label. */
   name: string;
@@ -200,7 +225,7 @@ export interface Volume {
 /**
  * What `syncVolume` actually takes: a detected volume, or a manually
  * configured source dressed as one. Every field past `Volume`'s is only ever
- * set on a configured source — see lib/sync.ts:syncVolume for what each does.
+ * set on a configured source — see lib/import/sync.ts:syncVolume for what each does.
  */
 export interface SyncSource extends Volume {
   /** Overrides `name` when choosing the destination folder. */
@@ -218,6 +243,7 @@ export interface SyncSource extends Volume {
 /** The single long-running job. `guardJob` refuses a second one with 409. */
 export interface Job {
   id: string;
+  /** "transcribe" | "import" | "cleanup" | "summarize", ... - not an enum, callers pick their own label. */
   kind: string;
   title: string;
   total: number;
@@ -240,6 +266,9 @@ export interface StateConfig {
   defaultModel: string;
   transcribeLanguage: string;
   crossLanguage: CrossLanguage;
+  summaryModel: string | null;
+  summaryPrompt: string | null;
+  summaryEnabled: boolean;
   openWhenDone: boolean;
   rememberDeletions: boolean;
   theme: ThemeId;
@@ -266,6 +295,8 @@ export interface StateResponse {
   themes: readonly Theme[];
   ffmpeg: boolean;
   whisper: boolean;
+  /** Optional: whether summarization (llama.cpp + at least one valid model) is usable right now. */
+  summarization: { available: boolean; models: string[]; defaultPrompt: string };
   job: Job | null;
 }
 

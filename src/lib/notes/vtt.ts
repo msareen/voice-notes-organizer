@@ -4,7 +4,7 @@
  * follow-along transcript highlight). No external dependency - the format is
  * simple enough to walk line by line.
  */
-import type { Cue } from "../types.ts";
+import type { Cue } from "../../types.ts";
 
 /**
  * Turns a timestamp like "00:01:02.500" (VTT) or "00:01:02,500" (SRT) - or

@@ -2,9 +2,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import fs from "fs-extra";
-import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources.ts";
+import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources/whisperModels.ts";
 
-export type DependencyName = "ffmpeg" | "whisper";
+export type DependencyName = "ffmpeg" | "whisper" | "llama";
 
 export interface DependencyMeta {
   label: string;
@@ -42,6 +42,14 @@ export const DEPENDENCIES: Record<DependencyName, DependencyMeta> = {
     label: "whisper.cpp",
     commands: [],
     usedFor: "transcribing and translating recordings",
+  },
+  // Entirely optional - see cli/setup.ts's REQUIRED list, which never
+  // includes "llama". Nothing in vno's startup guard checks this; only the
+  // summarize route and `vno setup --llama`/`vno status` look at it.
+  llama: {
+    label: "llama.cpp",
+    commands: [],
+    usedFor: "summarizing transcripts (optional)",
   },
 };
 
@@ -98,9 +106,9 @@ export async function checkDependency(name: DependencyName): Promise<DependencyS
   if (name === "whisper") {
     // whisper.cpp isn't found on PATH the way ffmpeg is - it's usually
     // vendored under whisper-cpp/bin/ by `vno setup`. Imported lazily to
-    // avoid a static import cycle (lib/whispercpp.ts itself uses which() and
+    // avoid a static import cycle (lib/whisper/whispercpp.ts itself uses which() and
     // runStep() from this module).
-    const { resolveBinary } = await import("./whispercpp.ts");
+    const { resolveBinary } = await import("./whisper/whispercpp.ts");
     const binary = await resolveBinary({});
     return {
       name,
@@ -109,6 +117,25 @@ export async function checkDependency(name: DependencyName): Promise<DependencyS
       found: Boolean(binary),
       missing: binary ? [] : ["whisper-cli"],
       path: binary?.path || null,
+    };
+  }
+
+  if (name === "llama") {
+    // llama.cpp is found on PATH (or config.llamaCliPath) rather than
+    // vendored - see lib/llama/llamacpp.ts. Nothing calls this with "llama" today
+    // (it's not in REQUIRED, and cli/setup.ts's own llama flow calls
+    // llamacpp.ts directly with the real config), but it's kept correct for
+    // DependencyName's sake. Imported lazily for the same import-cycle
+    // reason as whisper.cpp above.
+    const { resolveBinary } = await import("./llama/llamacpp.ts");
+    const binaryPath = await resolveBinary(null);
+    return {
+      name,
+      label: meta.label,
+      usedFor: meta.usedFor,
+      found: Boolean(binaryPath),
+      missing: binaryPath ? [] : ["llama-cli"],
+      path: binaryPath,
     };
   }
 
@@ -259,7 +286,7 @@ const SELF_ELEVATING = new Set(["winget", "choco", "scoop", "brew"]);
  *
  * whisper.cpp isn't built here: its install is per-platform binary/source
  * acquisition (brew formula, GitHub release zip, cmake build), not a package
- * manager one-liner - see `lib/whispercpp.ts:installWhisperCpp`.
+ * manager one-liner - see `lib/whisper/whispercpp.ts:installWhisperCpp`.
  */
 export async function buildInstallPlan(name: DependencyName): Promise<InstallPlan | null> {
   if (name !== "ffmpeg") throw new Error(`Unknown dependency "${name}"`);
@@ -326,6 +353,21 @@ export function manualHelp(name: DependencyName): string[] {
       `git clone --depth 1 --branch ${WHISPERCPP_VERSION} ${whispercppCloneUrl()}`,
       "cmake -B build -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON for an NVIDIA GPU",
       "cmake --build build -j --config Release",
+    ];
+  }
+  if (name === "llama") {
+    if (platform === "darwin") {
+      return ["brew install llama.cpp", "…or get Homebrew first from https://brew.sh"];
+    }
+    if (platform === "win32") {
+      return [
+        "winget install --id ggml.llamacpp -e",
+        "…then either open a new terminal, or give vno the binary's path when `vno setup --llama` asks",
+      ];
+    }
+    return [
+      "install it via your distro's package manager or build it yourself:",
+      "https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md",
     ];
   }
   return [];
@@ -399,7 +441,7 @@ export async function runPlan(
  * this an install always ends in "restart your terminal" - which is a poor end
  * to `vno t` that just installed what it needed. (whisper.cpp itself doesn't
  * go through PATH - it's vendored into whisper-cpp/bin/ and resolved directly
- * by `lib/whispercpp.ts:resolveBinary`, so this only ever matters for ffmpeg.)
+ * by `lib/whisper/whispercpp.ts:resolveBinary`, so this only ever matters for ffmpeg.)
  *
  * Windows keeps the real PATH in the registry, so we ask it for the current
  * value. Elsewhere it's enough to add the handful of directories package

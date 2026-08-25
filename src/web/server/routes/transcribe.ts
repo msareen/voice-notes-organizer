@@ -8,7 +8,8 @@ import {
   isDeviceError,
   lastLine,
   resolveLanguagePlan,
-} from "../../../lib/whisper.ts";
+} from "../../../lib/whisper/whisper.ts";
+import { isLanguageChoice } from "../../../lib/shared/languages.ts";
 import { MODELS } from "../constants.ts";
 import type { ServerContext } from "../context.ts";
 
@@ -19,6 +20,8 @@ function errorMessage(err: unknown): string {
 export interface WhisperRunOptions {
   model: string;
   translate: boolean;
+  /** Per-job language pin from the Transcribe dialog - see resolveLanguagePlan's `override`. */
+  language?: string | null;
 }
 
 /** Runs whisper over one file, with this job's shared device decision. */
@@ -38,9 +41,9 @@ export type WhisperRun = (file: string) => Promise<void>;
  * reuses the exact same fallback behaviour.
  */
 export function createWhisperRunner(ctx: ServerContext) {
-  return function whisperRunner({ model, translate }: WhisperRunOptions): WhisperRun {
+  return function whisperRunner({ model, translate, language: languageOverride = null }: WhisperRunOptions): WhisperRun {
     let device: string = resolveAccel(ctx.config);
-    const { language, crossLanguage } = resolveLanguagePlan(ctx.config);
+    const { language, crossLanguage } = resolveLanguagePlan(ctx.config, languageOverride);
     if (device !== "cpu") {
       const accel = accelState(ctx.config);
       ctx.jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
@@ -66,6 +69,7 @@ interface TranscribeBody {
   rels?: unknown;
   model?: string;
   translate?: unknown;
+  language?: unknown;
 }
 
 /** POST /api/transcribe. */
@@ -90,12 +94,13 @@ export function createTranscribeRoutes(ctx: ServerContext) {
 
     const model = MODELS.includes(body.model!) ? body.model! : ctx.config.defaultModel || "turbo";
     const translate = Boolean(body.translate);
+    const language = isLanguageChoice(body.language) ? body.language : null;
 
     ctx.startJob("transcribe", `${translate ? "Translating" : "Transcribing"} ${rels.length} file(s)`, rels.length);
 
     (async () => {
       const verb = translate ? "Translating" : "Transcribing";
-      const runWhisper = whisperRunner({ model, translate });
+      const runWhisper = whisperRunner({ model, translate, language });
       let done = 0;
       for (const rel of rels) {
         const full = ctx.resolveInside(rel);

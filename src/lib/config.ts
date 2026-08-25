@@ -1,7 +1,7 @@
 import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
-import { normalizeLanguageMap } from "./languages.ts";
+import { normalizeLanguageMap } from "./shared/languages.ts";
 import type { Config, RawSource, Source } from "../types.ts";
 
 const CONFIG_DIR = path.join(os.homedir(), ".vno");
@@ -46,13 +46,13 @@ function defaultConfig(): Config {
     // audio-extension file, today's behavior); `deleteAfterImport` removes the
     // source file once it's safely copied in, for disposable landing folders
     // where the original lives elsewhere (e.g. still on the phone) - see
-    // lib/sync.ts:syncVolume. `recursive` defaults to false (scan only the
+    // lib/import/sync.ts:syncVolume. `recursive` defaults to false (scan only the
     // configured folder itself) since a source folder is usually a flat drop
     // point, unlike a recorder's device volume which always walks the whole
     // tree; tick it on to also pick up files nested in subfolders. `mapTo`,
     // when set, is a target-relative path (may be nested, e.g. "Work/Notes")
     // that this source's files land in instead of the default
-    // basename-of-path folder - see lib/sync.ts:resolveMappedDest. Editable
+    // basename-of-path folder - see lib/import/sync.ts:resolveMappedDest. Editable
     // via `vno setting` and the UI.
     sources: [],
     // keyed by a stable identifier for the volume (label + size), remembers
@@ -91,7 +91,14 @@ function defaultConfig(): Config {
     // files landed in and open the regenerated index.html player. Set to
     // false (or pass --no-open) to keep runs headless.
     openWhenDone: true,
-    // Colour theme for the browser UI, as one of the ids in lib/themes.ts
+    // Port the viewer serves on, fixed across runs so bookmarks and an
+    // installed PWA's start_url keep working (cli/visualize.ts explains why
+    // it doesn't just pick a free one). Settable because some machines can't
+    // bind the default at all - Windows reserves TCP ranges for Hyper-V/WSL2,
+    // and a bind inside one fails as "already in use" with nothing listening.
+    // `--port` still overrides this for a single run.
+    port: 9477,
+    // Colour theme for the browser UI, as one of the ids in lib/shared/themes.ts
     // ("auto" follows the OS light/dark setting). Stored here rather than in
     // the browser's localStorage so the server can stamp it onto <html> in the
     // first response - a theme that only arrived with /api/state would flash
@@ -104,8 +111,26 @@ function defaultConfig(): Config {
     // that backend. `use` is the answer to the offer: null = never asked,
     // true/false = decided. Unlike the old torch probe this never needs
     // re-checking on a hot path, since the backend can't change without a
-    // fresh `vno setup`; see lib/whisper.ts:accelState.
+    // fresh `vno setup`; see lib/whisper/whisper.ts:accelState.
     accel: { backend: null, name: null, use: null, resolvedAt: null },
+    // The llama.cpp model to summarize transcripts with (an alias or a
+    // dropped-in .gguf filename - see lib/llama/llamacpp.ts). null until the user
+    // configures one via Settings or `vno setup --summary-model`;
+    // summarization is entirely optional and unset just means "not set up
+    // yet", unlike defaultModel's forced "turbo".
+    summaryModel: null,
+    // What `vno setup --llama` installed for llama.cpp's accelerator backend,
+    // mirroring `accel` above exactly but independent of it - whisper.cpp and
+    // llama.cpp are installed separately, so a machine can be accelerated for
+    // one and not the other.
+    llamaAccel: { backend: null, name: null, use: null, resolvedAt: null },
+    // Replaces lib/llama/llama.ts's built-in summarization instruction wholesale
+    // when set. null (the default) means "use the built-in one" - Settings
+    // treats a whitespace-only value the same way rather than storing it.
+    summaryPrompt: null,
+    // Manual override for the llama.cpp binary's path - see the field comment
+    // on types.ts's Config. null means "trust PATH".
+    llamaCliPath: null,
   };
 }
 
@@ -130,6 +155,7 @@ export async function loadConfig(): Promise<Config> {
       sources: normalizeSources(data.sources),
       knownMounts: { ...data.knownMounts },
       accel: { ...defaults.accel, ...data.accel },
+      llamaAccel: { ...defaults.llamaAccel, ...data.llamaAccel },
       crossLanguage: {
         ...defaults.crossLanguage,
         ...data.crossLanguage,

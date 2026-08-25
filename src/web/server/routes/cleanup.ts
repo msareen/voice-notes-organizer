@@ -1,8 +1,7 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { findMediaFiles } from "../../../lib/sync.ts";
-import { getDurationSeconds } from "../../../lib/media.ts";
-import { listOriginalBackups, isOriginalBackup } from "../../../lib/special-case-handling.ts";
+import { findMediaFiles } from "../../../lib/import/sync.ts";
+import { listOriginalBackups, isOriginalBackup } from "../../../lib/import/special-case-handling.ts";
 import type { ServerContext } from "../context.ts";
 
 /** A recording short enough to offer for deletion. */
@@ -24,23 +23,19 @@ interface OriginalRow {
 export function createCleanupRoutes(ctx: ServerContext) {
   async function scan(params: URLSearchParams): Promise<Response> {
     const threshold = Math.max(0, parseFloat(params.get("threshold") ?? "") || 3);
-    const files = await findMediaFiles(ctx.target);
-    const short: ShortRecording[] = [];
-    for (const file of files) {
-      const duration = await getDurationSeconds(file);
-      if (duration !== null && duration < threshold) {
-        short.push({
-          rel: path.relative(ctx.target, file).split(path.sep).join("/"),
-          name: path.basename(file),
-          durationSec: duration,
-        });
-      }
-    }
+    // Durations come from ctx.notes (already ffprobed and cached in
+    // notesCache.ts when the deck first loaded) rather than re-probing every
+    // recording here - a fresh ffprobe per file was what made a scan of any
+    // real-sized library slow enough to look hung.
+    const short: ShortRecording[] = ctx.notes
+      .filter((n) => n.durationSec != null && n.durationSec < threshold)
+      .map((n) => ({ rel: n.rel, name: path.basename(n.rel), durationSec: n.durationSec as number }));
 
     // Only looked for when asked: it's a stat per recording, and the dialog
     // doesn't show the group unless the box is ticked anyway.
     const originals: OriginalRow[] = [];
     if (params.get("originals") === "1") {
+      const files = await findMediaFiles(ctx.target);
       for (const { backup, recording, size } of await listOriginalBackups(files)) {
         originals.push({
           rel: path.relative(ctx.target, backup).split(path.sep).join("/"),
@@ -51,7 +46,7 @@ export function createCleanupRoutes(ctx: ServerContext) {
       }
     }
 
-    return ctx.sendJson(200, { threshold, short, originals, scanned: files.length });
+    return ctx.sendJson(200, { threshold, short, originals, scanned: ctx.notes.length });
   }
 
   async function run(body: { rels?: unknown; originals?: unknown }): Promise<Response> {

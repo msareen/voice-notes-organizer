@@ -2,8 +2,8 @@ import fs from "fs-extra";
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../lib/config.ts";
-import { findMediaFiles } from "../lib/sync.ts";
-import { resolveNamedFile, reportUnresolved } from "../lib/notes.ts";
+import { findMediaFiles } from "../lib/import/sync.ts";
+import { resolveNamedFile, reportUnresolved } from "../lib/notes/notes.ts";
 import { openPath, revealInFolder } from "../lib/open.ts";
 import { createProgressBar } from "./progress.ts";
 

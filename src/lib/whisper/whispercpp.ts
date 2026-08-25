@@ -1,12 +1,9 @@
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-import zlib from "node:zlib";
 import fs from "fs-extra";
-import { which, detectPackageManager, runStep } from "./setup.ts";
-import type { AccelBackend } from "../types.ts";
-import type { InstallStep } from "./setup.ts";
+import { which, detectPackageManager, runStep } from "../setup.ts";
+import type { AccelBackend } from "../../types.ts";
+import type { InstallStep } from "../setup.ts";
 import {
   WHISPERCPP_VERSION,
   WHISPERCPP_REPO,
@@ -16,7 +13,43 @@ import {
   whispercppReleaseAssetUrl,
   whispercppCloneUrl,
   modelSources,
-} from "./webSources.ts";
+  whisperModelCatalog,
+  WHISPER_DEFAULT_MODELS,
+} from "../webSources/whisperModels.ts";
+import {
+  isWindows,
+  isMac,
+  errorMessage,
+  findFile,
+  probeCommand,
+  downloadFile,
+  sha256File,
+  extractZip,
+  extractTarGz,
+  detectAccelCandidate,
+  ensureGitignoreEntry,
+  resolveInstallRoot as resolveEngineInstallRoot,
+  installPaths,
+  readManifest as readEngineManifest,
+  writeManifest as writeEngineManifest,
+  bothInstallRoots as bothEngineInstallRoots,
+  registerExternalBinary as registerExternalEngineBinary,
+  isManagedModel as isEngineManagedModel,
+  removeEngineModel,
+} from "../engineInstall.ts";
+import type {
+  InstallMode,
+  BinaryRecord,
+  AccelRecord,
+  InstallManifest,
+  InstallLayout,
+  EngineRoot,
+  AccelCandidate,
+  DownloadProgress,
+  DownloadProgressCallback,
+  ModelRemoval,
+  ChecksumMismatchHandler,
+} from "../engineInstall.ts";
 
 /**
  * Installing and resolving the whisper.cpp binary, its models and the
@@ -26,6 +59,12 @@ import {
  * detection, acquisition, manifest bookkeeping. Asking the user anything
  * (which mode, whether to install, whether to delete stale files) lives in
  * cli/setup.ts.
+ *
+ * The generic parts of this (root/manifest handling, download, archive
+ * extraction, GPU detection) live in lib/engineInstall.ts, shared with
+ * lib/llama/llamacpp.ts - everything below is whisper.cpp-specific: per-platform
+ * asset picking, the model alias/size tables, and the ggml-*.bin naming
+ * convention.
  */
 
 // Purely informational - never read back by vno itself. Explains the file to
@@ -37,99 +76,56 @@ const MANIFEST_DESCRIPTION =
   "models downloaded here) so future runs don't have to redetect it. Safe to delete - vno recreates it " +
   "the next time `vno setup` runs. Not read for anything vno can't re-derive on its own.";
 
-const isWindows = os.platform() === "win32";
-const isMac = os.platform() === "darwin";
+const ENGINE: EngineRoot = { folderName: "whisper-cpp", manifestDescription: MANIFEST_DESCRIPTION };
 
-/** Which install root a call targets: beside this vno install, or under $HOME. */
-export type InstallMode = "local" | "global";
-
-/** The binary an install produced or was pointed at, as recorded in vno-install.json. */
-export interface BinaryRecord {
-  path: string;
-  name: string;
-  source: string;
-  /** The release asset it came out of, when it came from one. */
-  asset?: string;
-}
-
-/** The accelerator backend baked into the installed binary. */
-export interface AccelRecord {
-  backend: AccelBackend;
-  name: string | null;
-}
-
-/** vno-install.json. Every field but `description` is whatever the run that wrote it recorded. */
-export interface InstallManifest {
-  /** Human-readable, for anyone who opens the file - never read back by vno. */
-  description?: string;
-  version?: string;
-  platform?: string;
-  arch?: string;
-  mode?: InstallMode;
-  binary?: BinaryRecord;
-  accel?: AccelRecord;
-  installedAt?: string;
-  /** Absolute paths of models downloaded into this root, keyed by ggml stem. */
-  models?: Record<string, string>;
-}
-
-export interface InstallLayout {
-  root: string;
-  binDir: string;
-  modelsDir: string;
-  manifestPath: string;
-}
-
-// vno is a globally-installed CLI, not a project you `bun install` into, so
-// "local" has no cwd to anchor to. The natural equivalent is beside vno's own
-// install - resolved off import.meta.url the same way the server finds its
-// asset directory - so the binary/model set travels with this install of vno
-// and survives an update in place.
-const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+export type { InstallMode, BinaryRecord, AccelRecord, InstallManifest, InstallLayout };
 
 /** Where whisper-cpp/ lives for the given mode. */
 export function resolveInstallRoot(mode: InstallMode = "local"): string {
-  if (mode === "global") {
-    if (isWindows) {
-      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-      return path.join(localAppData, "whisper-cpp");
-    }
-    return path.join(os.homedir(), ".whisper-cpp");
-  }
-  return path.join(PACKAGE_ROOT, "whisper-cpp");
+  return resolveEngineInstallRoot(ENGINE, mode);
 }
 
-/** The fixed layout inside an install root, local or global. */
-export function installPaths(root: string): InstallLayout {
-  return {
-    root,
-    binDir: path.join(root, "bin"),
-    modelsDir: path.join(root, "models"),
-    manifestPath: path.join(root, "vno-install.json"),
-  };
-}
+export { installPaths };
 
 /** Reads vno-install.json for a root, or null if it's not there or unreadable. */
 export async function readManifest(root: string): Promise<InstallManifest | null> {
-  const { manifestPath } = installPaths(root);
-  try {
-    return await fs.readJson(manifestPath);
-  } catch {
-    return null;
-  }
+  return readEngineManifest(root);
 }
 
 /** Writes vno-install.json, creating the root/bin/models layout if needed. */
 export async function writeManifest(root: string, data: InstallManifest): Promise<void> {
-  const paths = installPaths(root);
-  await fs.ensureDir(paths.binDir);
-  await fs.ensureDir(paths.modelsDir);
-  await fs.writeJson(paths.manifestPath, { ...data, description: MANIFEST_DESCRIPTION }, { spaces: 2 });
+  return writeEngineManifest(ENGINE, root, data);
 }
 
 /** Both install roots, local first - used by resolution that must check both. */
 export function bothInstallRoots(): string[] {
-  return [resolveInstallRoot("local"), resolveInstallRoot("global")];
+  return bothEngineInstallRoots(ENGINE);
+}
+
+/**
+ * The models/ folder to show the user - whichever install root already has
+ * one on disk (local first), or the local root's folder (created if
+ * missing) when neither does yet, so "Show models folder" always opens
+ * somewhere real rather than erroring on a fresh install.
+ */
+export async function resolveModelsDir(): Promise<string> {
+  for (const root of bothInstallRoots()) {
+    const { modelsDir } = installPaths(root);
+    if (await fs.pathExists(modelsDir)) return modelsDir;
+  }
+  const { modelsDir } = installPaths(resolveInstallRoot("local"));
+  await fs.ensureDir(modelsDir);
+  return modelsDir;
+}
+
+/** Whether vno installed this model itself, and may therefore delete it. */
+export function isManagedModel(filePath: string): boolean {
+  return isEngineManagedModel(ENGINE, filePath);
+}
+
+/** Deletes one vno-installed model file. Refuses anything `isManagedModel` rejects. */
+export async function removeModel(filePath: string): Promise<ModelRemoval> {
+  return removeEngineModel(ENGINE, filePath);
 }
 
 const BINARY_NAMES = isWindows
@@ -223,288 +219,13 @@ const ALL_BINARY_NAMES = ["whisper-cpp", "whisper-cli", "whisper-cli.exe"];
  */
 export async function registerExternalBinary(
   inputPath: string,
-  {
-    mode = "local",
-    backend = "unknown",
-    name = null,
-  }: { mode?: InstallMode; backend?: AccelRecord["backend"]; name?: string | null } = {}
+  opts: { mode?: InstallMode; backend?: AccelRecord["backend"]; name?: string | null } = {}
 ): Promise<InstallManifest> {
-  const expanded = inputPath.replace(/^~(?=$|[\\/])/, os.homedir());
-  const resolved = path.resolve(expanded);
-  const stats = await fs.stat(resolved).catch(() => null);
-  if (!stats) throw new Error(`${resolved} doesn't exist.`);
-
-  let binaryPath = resolved;
-  if (stats.isDirectory()) {
-    let found: string | null = null;
-    for (const candidateName of ALL_BINARY_NAMES) {
-      found = await findFile(resolved, candidateName);
-      if (found) break;
-    }
-    if (!found) {
-      throw new Error(
-        `Couldn't find a whisper.cpp binary (${ALL_BINARY_NAMES.join(", ")}) under ${resolved}.`
-      );
-    }
-    binaryPath = found;
-  }
-
-  const root = resolveInstallRoot(mode);
-  const existing = (await readManifest(root)) || {};
-  const manifest: InstallManifest = {
-    ...existing,
-    version: existing.version || WHISPERCPP_VERSION,
-    platform: os.platform(),
-    arch: os.arch(),
-    mode,
-    binary: { path: binaryPath, name: path.basename(binaryPath), source: "external" },
-    accel: { backend, name },
-    installedAt: new Date().toISOString(),
-  };
-  await writeManifest(root, manifest);
-  return manifest;
+  return registerExternalEngineBinary(ENGINE, ALL_BINARY_NAMES, WHISPERCPP_VERSION, inputPath, opts);
 }
 
-/** Runs a command and collects stdout, never throwing - used for probes. */
-function probeCommand(command: string, args: string[]): Promise<string | null> {
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-    } catch {
-      resolve(null);
-      return;
-    }
-    let out = "";
-    child.stdout.on("data", (d: Buffer) => (out += d.toString()));
-    child.on("error", () => resolve(null));
-    child.on("close", (code) => resolve(code === 0 ? out.trim() : null));
-  });
-}
-
-/** What accelerator this machine could plausibly use, decided at install time. */
-export interface AccelCandidate {
-  backend: "cpu" | "cuda";
-  name: string | null;
-  driverVersion: string | null;
-  cudaVersion: string | null;
-}
-
-/**
- * What accelerator this machine can plausibly use, decided at install time
- * rather than probed at runtime - whisper.cpp's accel backend is fixed by
- * which binary got installed, not chosen per run the way torch's device is.
- *
- * The CUDA version that matters for picking a prebuilt asset is the driver's
- * supported runtime - plain `nvidia-smi` prints it as "CUDA Version: X.Y" in
- * its header - not whether a CUDA *toolkit* (`nvcc`) is installed. NVIDIA
- * drivers are backward compatible with older CUDA runtimes, and the release
- * zips bundle their own runtime DLLs, so a machine with a current driver and
- * no toolkit at all still runs a prebuilt CUDA build fine. Checking for
- * `nvcc` instead would wrongly report "no CUDA" on exactly that (common)
- * machine.
- */
-export async function detectAccelCandidate(): Promise<AccelCandidate> {
-  const gpuInfo = await probeCommand("nvidia-smi", ["--query-gpu=name,driver_version", "--format=csv,noheader"]);
-  if (!gpuInfo) {
-    // No NVIDIA card, or no driver. whisper.cpp ships no Vulkan asset, so
-    // there's nothing structural to offer AMD/Intel here - BLAS or plain CPU
-    // is the whole story off NVIDIA.
-    return { backend: "cpu", name: null, driverVersion: null, cudaVersion: null };
-  }
-  const [name, driverVersion] = gpuInfo.split(",").map((s) => s.trim());
-
-  const plain = await probeCommand("nvidia-smi", []);
-  const versionMatch = plain && plain.match(/CUDA Version:\s*([\d.]+)/i);
-
-  return {
-    backend: "cuda",
-    name: name || "NVIDIA GPU",
-    driverVersion: driverVersion || null,
-    cudaVersion: versionMatch ? versionMatch[1] : null,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Downloading: shared by the Windows binary zip and model files.
-// Redirect-following and resumable, writes to a .part file so an
-// interrupted run never leaves something that looks complete.
-// ---------------------------------------------------------------------------
-
-/** Bytes received so far, and the total when the server declared one. */
-export interface DownloadProgress {
-  received: number;
-  total: number | null;
-}
-
-export type DownloadProgressCallback = (progress: DownloadProgress) => void;
-
-interface DownloadOptions {
-  onProgress?: DownloadProgressCallback | null;
-  headers?: Record<string, string>;
-}
-
-/**
- * Downloads `url` to `destPath`, following redirects and resuming a partial
- * `.part` file with an HTTP Range request when one exists. Renames to the
- * final name only once the response has been fully written.
- */
-export async function downloadFile(
-  url: string,
-  destPath: string,
-  { onProgress = null, headers = {} }: DownloadOptions = {}
-): Promise<string> {
-  const partPath = `${destPath}.part`;
-  await fs.ensureDir(path.dirname(destPath));
-
-  let startAt = 0;
-  if (await fs.pathExists(partPath)) {
-    startAt = (await fs.stat(partPath)).size;
-  }
-
-  const requestHeaders: Record<string, string> = { ...headers };
-  if (startAt > 0) requestHeaders.Range = `bytes=${startAt}-`;
-
-  const response = await fetch(url, { headers: requestHeaders, redirect: "follow" });
-  if (!response.ok && response.status !== 206) {
-    // A server that doesn't honour Range starts over from the top.
-    if (startAt > 0 && response.status !== 416) {
-      await fs.remove(partPath);
-      return downloadFile(url, destPath, { onProgress, headers });
-    }
-    throw new Error(`Download failed: ${response.status} ${response.statusText} (${url})`);
-  }
-  if (!response.body) throw new Error(`Download failed: ${url} returned no body`);
-
-  const resumed = response.status === 206;
-  const total = Number(response.headers.get("content-length") || 0) + (resumed ? startAt : 0);
-  const writeStream = fs.createWriteStream(partPath, { flags: resumed ? "a" : "w" });
-
-  let received = resumed ? startAt : 0;
-  const reader = response.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.length;
-    await new Promise<void>((resolve, reject) => {
-      writeStream.write(Buffer.from(value), (err) => (err ? reject(err) : resolve()));
-    });
-    if (onProgress) onProgress({ received, total: total || null });
-  }
-  await new Promise<void>((resolve, reject) => writeStream.end((err?: Error | null) => (err ? reject(err) : resolve())));
-
-  await fs.move(partPath, destPath, { overwrite: true });
-  return destPath;
-}
-
-// ---------------------------------------------------------------------------
-// Minimal tar.gz extraction (no archiver dependency) - the Linux prebuilt
-// asset shape. Handles regular files only, which is all a whisper.cpp
-// release tarball contains.
-// ---------------------------------------------------------------------------
-
-/** Extracts every regular file in a gzipped tar into destDir. */
-export async function extractTarGz(tarGzPath: string, destDir: string): Promise<string[]> {
-  const gz = await fs.readFile(tarGzPath);
-  const buffer = zlib.gunzipSync(gz);
-
-  const extracted: string[] = [];
-  let offset = 0;
-  while (offset + 512 <= buffer.length) {
-    const header = buffer.subarray(offset, offset + 512);
-    if (header.every((b) => b === 0)) break; // end-of-archive marker
-
-    const name = tarString(header, 0, 100);
-    if (!name) break;
-    const prefix = tarString(header, 345, 155);
-    const fullName = prefix ? `${prefix}/${name}` : name;
-    const size = parseInt(tarString(header, 124, 12) || "0", 8) || 0;
-    const typeFlag = String.fromCharCode(header[156]);
-
-    const dataStart = offset + 512;
-    if (typeFlag === "0" || typeFlag === "\0") {
-      const destPath = path.join(destDir, fullName);
-      if (!path.resolve(destPath).startsWith(path.resolve(destDir) + path.sep)) {
-        throw new Error(`Refusing to extract ${fullName}: escapes the destination directory`);
-      }
-      await fs.ensureDir(path.dirname(destPath));
-      await fs.writeFile(destPath, buffer.subarray(dataStart, dataStart + size));
-      extracted.push(destPath);
-    }
-
-    offset = dataStart + Math.ceil(size / 512) * 512;
-  }
-  return extracted;
-}
-
-function tarString(header: Buffer, start: number, length: number): string {
-  const slice = header.subarray(start, start + length);
-  const nul = slice.indexOf(0);
-  return (nul === -1 ? slice : slice.subarray(0, nul)).toString("utf8").trim();
-}
-
-// ---------------------------------------------------------------------------
-// Minimal ZIP extraction (no archiver dependency - only DEFLATE and store are
-// supported, which is what GitHub release zips use).
-// ---------------------------------------------------------------------------
-
-const EOCD_SIGNATURE = 0x06054b50;
-const CENTRAL_DIR_SIGNATURE = 0x02014b50;
-const LOCAL_FILE_SIGNATURE = 0x04034b50;
-
-/** Extracts every file in a zip into destDir, keeping its internal paths. */
-export async function extractZip(zipPath: string, destDir: string): Promise<string[]> {
-  const buffer = await fs.readFile(zipPath);
-
-  let eocdOffset = -1;
-  for (let i = buffer.length - 22; i >= 0; i--) {
-    if (buffer.readUInt32LE(i) === EOCD_SIGNATURE) {
-      eocdOffset = i;
-      break;
-    }
-  }
-  if (eocdOffset === -1) throw new Error(`${zipPath} doesn't look like a zip file (no end-of-central-directory)`);
-
-  const entryCount = buffer.readUInt16LE(eocdOffset + 10);
-  let centralDirOffset = buffer.readUInt32LE(eocdOffset + 16);
-
-  const extracted: string[] = [];
-  for (let i = 0; i < entryCount; i++) {
-    if (buffer.readUInt32LE(centralDirOffset) !== CENTRAL_DIR_SIGNATURE) {
-      throw new Error(`${zipPath} has a corrupt central directory entry`);
-    }
-    const compressionMethod = buffer.readUInt16LE(centralDirOffset + 10);
-    const compressedSize = buffer.readUInt32LE(centralDirOffset + 20);
-    const nameLength = buffer.readUInt16LE(centralDirOffset + 28);
-    const extraLength = buffer.readUInt16LE(centralDirOffset + 30);
-    const commentLength = buffer.readUInt16LE(centralDirOffset + 32);
-    const localHeaderOffset = buffer.readUInt32LE(centralDirOffset + 42);
-    const name = buffer.toString("utf8", centralDirOffset + 46, centralDirOffset + 46 + nameLength);
-
-    if (buffer.readUInt32LE(localHeaderOffset) !== LOCAL_FILE_SIGNATURE) {
-      throw new Error(`${zipPath} has a corrupt local file header for ${name}`);
-    }
-    const localNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
-    const localExtraLength = buffer.readUInt16LE(localHeaderOffset + 28);
-    const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
-    const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
-
-    if (!name.endsWith("/")) {
-      const destPath = path.join(destDir, name);
-      // Zip slip: refuse anything that would land outside destDir.
-      if (!path.resolve(destPath).startsWith(path.resolve(destDir) + path.sep)) {
-        throw new Error(`Refusing to extract ${name}: escapes the destination directory`);
-      }
-      await fs.ensureDir(path.dirname(destPath));
-      const data = compressionMethod === 8 ? zlib.inflateRawSync(compressed) : compressed;
-      await fs.writeFile(destPath, data);
-      extracted.push(destPath);
-    }
-
-    centralDirOffset += 46 + nameLength + extraLength + commentLength;
-  }
-  return extracted;
-}
+export type { AccelCandidate, DownloadProgress, DownloadProgressCallback };
+export { detectAccelCandidate, downloadFile, extractTarGz, extractZip };
 
 // ---------------------------------------------------------------------------
 // Per-platform binary acquisition
@@ -703,20 +424,6 @@ export async function installWindowsBinary(
   };
 }
 
-async function findFile(dir: string, filename: string): Promise<string | null> {
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const found = await findFile(full, filename);
-      if (found) return found;
-    } else if (entry.name.toLowerCase() === filename.toLowerCase()) {
-      return full;
-    }
-  }
-  return null;
-}
-
 interface LinuxInstallOptions {
   onLog?: LogCallback;
   onStep?: StepCallback;
@@ -748,10 +455,6 @@ export async function installLinuxBinary(
   }
 
   return installLinuxSource(root, { onLog, onStep, useCuda, accelCandidate });
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** The CPU-only prebuilt tarball - the fast path when there's no GPU to build for. */
@@ -906,57 +609,43 @@ export async function installWhisperCpp({
     installedAt: new Date().toISOString(),
   };
   await writeManifest(root, manifest);
-  await ensureGitignoreEntry(mode);
+  await ensureGitignoreEntry(ENGINE, mode);
   return manifest;
-}
-
-/**
- * Adds whisper-cpp/ to .gitignore, but only in a dev checkout of this
- * repo (a .git directory beside package.json) - a globally installed vno
- * has no working tree to ignore anything in, and touching a file there would
- * be pointless at best.
- */
-async function ensureGitignoreEntry(mode: InstallMode): Promise<void> {
-  if (mode !== "local") return;
-  const gitDir = path.join(PACKAGE_ROOT, ".git");
-  const gitignorePath = path.join(PACKAGE_ROOT, ".gitignore");
-  if (!(await fs.pathExists(gitDir)) || !(await fs.pathExists(gitignorePath))) return;
-
-  const content = await fs.readFile(gitignorePath, "utf8");
-  if (/(^|\n)whisper-cpp\/?(\r?\n|$)/.test(content)) return;
-  const separator = content.endsWith("\n") ? "" : "\n";
-  await fs.appendFile(gitignorePath, `${separator}\n# whisper.cpp binary + models (vno setup, local mode)\nwhisper-cpp/\n`);
 }
 
 // ---------------------------------------------------------------------------
 // Model resolution & download
 // ---------------------------------------------------------------------------
 
+// Every ggml-*.bin this project knows about now lives in one place -
+// webSources/whisperModels.ts:whisperModelCatalog - shared with llama.cpp's catalog shape.
+// The three tables below are just that catalog reshaped into the lookups the
+// rest of this file wants; nothing here is hand-maintained.
+const WHISPER_CATALOG = whisperModelCatalog();
+
 // Friendly names this project already uses (matching the model picker in
 // cli/transcribe.ts and the web MODELS list), plus their ggml filenames.
 // Anything not in this map falls through to `ggml-<name>.bin` so quantized
 // and less common variants (small.en-q5_1, large-v3-turbo-q8_0, ...) still work.
-const MODEL_ALIASES: Record<string, string> = {
-  tiny: "tiny",
-  base: "base",
-  small: "small",
-  medium: "medium",
-  large: "large-v3",
-  turbo: "large-v3-turbo",
-};
+const MODEL_ALIASES: Record<string, string> = Object.fromEntries(
+  WHISPER_CATALOG.flatMap((m) => (m.aliases || []).map((alias) => [alias, m.stem] as const))
+);
 
 // Approximate sizes for the models this project offers by default, used only
 // as a sanity check (~10% tolerance) against a corrupt or truncated download.
 // Anything outside this table skips the size check but still gets the magic-
 // byte and readability checks.
-const MODEL_SIZES: Record<string, number> = {
-  tiny: 77_700_000,
-  base: 148_000_000,
-  small: 488_000_000,
-  medium: 1_530_000_000,
-  "large-v3": 3_100_000_000,
-  "large-v3-turbo": 1_620_000_000,
-};
+const MODEL_SIZES: Record<string, number> = Object.fromEntries(
+  WHISPER_CATALOG.map((m) => [m.stem, m.approxBytes] as const)
+);
+
+// SHA-256 of each ggml-*.bin - see WhisperModelSource's doc comment in
+// webSources/interfaces.ts for provenance. Checked once, right after download - see
+// downloadModel below. A stem missing here just skips the check, same as a
+// missing MODEL_SIZES entry skips the size check.
+const MODEL_SHA256: Record<string, string> = Object.fromEntries(
+  WHISPER_CATALOG.filter((m) => m.sha256).map((m) => [m.stem, m.sha256 as string] as const)
+);
 
 /**
  * Normalizes anything a caller might pass - a bare alias ("turbo"), a ggml
@@ -1069,17 +758,27 @@ interface DownloadModelOptions {
   mode?: InstallMode;
   onProgress?: DownloadProgressCallback | null;
   onLog?: LogCallback;
+  /**
+   * Asked only if MODEL_SHA256 has an entry for this model and the download
+   * doesn't match it - see ChecksumMismatchHandler's doc comment. Omitted
+   * entirely, a mismatch is logged and the file is kept rather than silently
+   * deleted.
+   */
+  onChecksumMismatch?: ChecksumMismatchHandler;
 }
 
 /**
  * Downloads a model that `resolveModel` couldn't find, into the given
  * install root's models/ directory. A file that fails validation once is
  * deleted and re-fetched exactly once rather than reused - an interrupted
- * earlier run must never look like a completed one.
+ * earlier run must never look like a completed one. When MODEL_SHA256 knows
+ * this model's checksum, it's verified once here, right after the download -
+ * never on every later `listModels()`/`resolveModel()` scan, which would mean
+ * re-hashing a multi-gigabyte file on every startup.
  */
 export async function downloadModel(
   name: string,
-  { mode = "local", onProgress = null, onLog = () => {} }: DownloadModelOptions = {}
+  { mode = "local", onProgress = null, onLog = () => {}, onChecksumMismatch }: DownloadModelOptions = {}
 ): Promise<string> {
   const { filename: stem, explicitPath } = normalizeModelName(name);
   if (explicitPath) {
@@ -1094,12 +793,14 @@ export async function downloadModel(
   const destPath = path.join(modelsDir, modelFileName(stem));
   const sources = modelSources();
   const failures: string[] = [];
+  const expectedSha256 = MODEL_SHA256[stem];
 
   for (const source of sources) {
     const url = `${source.base}/${modelFileName(stem)}`;
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       onLog(`Downloading ${modelFileName(stem)}${attempt > 1 ? " (retry)" : ""} from ${source.label}...`);
+      onLog(`  URL: ${url}`);
       try {
         await downloadFile(url, destPath, { onProgress });
       } catch (err) {
@@ -1114,17 +815,35 @@ export async function downloadModel(
       }
 
       const result = await validateModelFile(destPath, stem);
-      if (result.valid) {
-        const manifest = (await readManifest(root)) || {};
-        manifest.models = { ...manifest.models, [stem]: destPath };
-        await writeManifest(root, manifest);
-        return destPath;
+      if (!result.valid) {
+        onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
+        await fs.remove(destPath);
+        await fs.remove(`${destPath}.part`).catch(() => {});
+        if (attempt === 2) failures.push(`${source.label}: failed validation twice (${result.reason})`);
+        continue;
       }
 
-      onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
-      await fs.remove(destPath);
-      await fs.remove(`${destPath}.part`).catch(() => {});
-      if (attempt === 2) failures.push(`${source.label}: failed validation twice (${result.reason})`);
+      if (expectedSha256) {
+        const actual = await sha256File(destPath);
+        if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
+          onLog(`Checksum mismatch for ${modelFileName(stem)} (expected ${expectedSha256}, got ${actual}).`);
+          const shouldDelete = onChecksumMismatch
+            ? await onChecksumMismatch({ filename: modelFileName(stem), expected: expectedSha256, actual })
+            : false;
+          if (shouldDelete) {
+            await fs.remove(destPath);
+            await fs.remove(`${destPath}.part`).catch(() => {});
+            if (attempt === 2) failures.push(`${source.label}: checksum mismatch (deleted)`);
+            continue;
+          }
+          onLog("Keeping the downloaded file despite the checksum mismatch.");
+        }
+      }
+
+      const manifest = (await readManifest(root)) || {};
+      manifest.models = { ...manifest.models, [stem]: destPath };
+      await writeManifest(root, manifest);
+      return destPath;
     }
   }
 
@@ -1136,7 +855,7 @@ export async function downloadModel(
 }
 
 /** The model names this project ensures are present unless told otherwise. */
-export const DEFAULT_MODELS = ["small", "turbo"];
+export const DEFAULT_MODELS = WHISPER_DEFAULT_MODELS;
 
 /** One model file found on disk, wherever it lives. */
 export interface ModelEntry {

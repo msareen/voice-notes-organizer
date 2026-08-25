@@ -2,8 +2,8 @@
 // the source-folders editor (including its own server-side folder browser).
 import { state } from "../state.ts";
 import { api, toast } from "../api.ts";
-import { button, modal, selectField, helpToggle } from "../widgets.ts";
-import { modelOptions } from "../models.ts";
+import { button, iconButton, modal, selectField, textareaField, helpToggle } from "../widgets.ts";
+import { modelOptions, languageOptions } from "../models.ts";
 import { applyTheme, currentTheme } from "../theme.ts";
 import type { Source, StateConfig, ThemeId } from "../../../../types.ts";
 import type { Option } from "../models.ts";
@@ -29,6 +29,9 @@ interface SettingsPatch {
   openWhenDone: boolean;
   rememberDeletions: boolean;
   useGpu?: boolean;
+  summaryModel?: string | null;
+  summaryPrompt?: string | null;
+  summaryEnabled: boolean;
 }
 
 /** One level of the unconfined filesystem browser (GET /api/browse-fs). */
@@ -47,13 +50,6 @@ interface TargetLevel {
   folders: string[];
 }
 
-// state.LANGUAGES is lib/languages.ts's list, sent whole by /api/state:
-// [{ code, label }]. "auto" isn't in it - it isn't a language, it's the
-// absence of a pin - so the pin menu prepends it.
-function languageOptions(): Option[] {
-  return state.LANGUAGES.map(function (l) { return { label: l.label, value: l.code }; });
-}
-
 function languageLabel(code: string): string {
   var found = state.LANGUAGES.filter(function (l) { return l.code === code; })[0];
   return found ? found.label : code;
@@ -70,6 +66,9 @@ export function openSettings(): void {
     crossFromSel: HTMLSelectElement,
     crossToSel: HTMLSelectElement,
     crossAddBtn: HTMLButtonElement;
+  var summaryEnabledSel: HTMLSelectElement;
+  var summaryModelSel: HTMLSelectElement | null;
+  var summaryPromptTa: HTMLTextAreaElement | null;
   var crossMap: Record<string, string> = {};
   var sourceRows: SourceRow[] = [];
   // Theme is previewed live on the whole page, so the panel has to remember
@@ -105,6 +104,8 @@ export function openSettings(): void {
       transcriptionCol.className = "settings-col";
       var th = document.createElement("h4");
       th.textContent = "Transcription";
+      th.appendChild(iconButton("folder", "Open the folder holding the whisper.cpp .bin model files",
+        function () { openModelsDir("whisper"); }, "icon-btn-end"));
       transcriptionCol.appendChild(th);
       grid.appendChild(transcriptionCol);
 
@@ -177,6 +178,49 @@ export function openSettings(): void {
         "Deletes made here and by cleanup are logged, so importing again won't copy them back. " +
         "\"vno cleanup ledger\" forgets them.");
 
+      // Summarization. Its own full-width section rather than a field in the
+      // Transcription column - the prompt override needs room a half-width
+      // column doesn't have. Optional feature, hidden behind its own
+      // availability check the same way the GPU field above is when the
+      // engine isn't there at all. See lib/llama/llamacpp.ts.
+      var summarySection = document.createElement("div");
+      summarySection.className = "settings-full";
+      host.appendChild(summarySection);
+
+      var sumLabel = document.createElement("h4");
+      sumLabel.textContent = "Summarization";
+      summarySection.appendChild(sumLabel);
+
+      summaryEnabledSel = selectField(summarySection, "Show the Summary tab in the deck", [
+        { label: "On", value: "true" },
+        { label: "Off — hide the Summary tab and action (existing summaries stay on disk)", value: "false" }
+      ], String(CONFIG.summaryEnabled !== false));
+
+      var summarization = state.SUMMARIZATION;
+      summaryModelSel = null;
+      summaryPromptTa = null;
+      if (summarization && summarization.available) {
+        sumLabel.appendChild(iconButton("folder", "Open the folder holding the llama.cpp .gguf model files",
+          function () { openModelsDir("llama"); }, "icon-btn-end"));
+        summaryModelSel = selectField(summarySection, "Default model", [
+          { label: "None", value: "" }
+        ].concat(summarization.models.map(function (m) { return { label: m, value: m }; })),
+          CONFIG.summaryModel || "",
+          "Used by the deck's Summarize button (optional) and \`vno summarize\`. To add more choices here, " +
+          "drop a .gguf file into the llama.cpp models folder yourself, or run \`vno setup --llama\` to pick " +
+          "from vno's supported and tested models.");
+
+        summaryPromptTa = textareaField(summarySection, "Override prompt", CONFIG.summaryPrompt || "",
+          summarization.defaultPrompt,
+          "Replaces the instruction sent to the model before each transcript. Leave blank to use the " +
+          "default shown as placeholder above. Whitespace-only input is treated the same as blank.");
+      } else {
+        var sh = document.createElement("p");
+        sh.className = "hint";
+        sh.textContent = "Summarization: optional, not set up - run \"vno setup --llama\" in a terminal to add it.";
+        summarySection.appendChild(sh);
+      }
+
       // Cross-language detection. A full-width row rather than a field in the
       // Transcription column: three dropdowns and a button don't fit in half
       // the dialog, and the saved rewrites need somewhere to sit.
@@ -187,8 +231,8 @@ export function openSettings(): void {
       var crossLabel = document.createElement("h4");
       crossLabel.textContent = "Cross-language detection";
       var crossHelp = helpToggle("whisper.cpp guesses the language from the first 30 seconds of each recording, " +
-        "and it confuses languages that sound alike — Hindi and Urdu are the same language to it, so the same " +
-        "voice can come out in Devanagari one day and Arabic script the next. It has no setting for \"prefer " +
+        "and it confuses languages that sound alike — for example: Hindi and Urdu are the same language to it, " +
+        "so the same voice can come out in Devanagari one day and Arabic script the next. It has no setting for \"prefer " +
         "this one\", only a hard pin that would also mislabel your English notes. So: pick a model here and vno " +
         "runs a quick detection pass before each transcription and rewrites the answer using your list below. " +
         "Leave the model off and nothing extra runs. On costs one extra model load per file — \"small\" is " +
@@ -409,9 +453,12 @@ export function openSettings(): void {
       crossLanguageModel: crossModelSel.value || null,
       crossLanguageMap: crossMap,
         openWhenDone: openSel.value === "true",
-        rememberDeletions: rememberSel.value === "true"
+        rememberDeletions: rememberSel.value === "true",
+        summaryEnabled: summaryEnabledSel.value === "true"
       };
       if (gpuSel) patch.useGpu = gpuSel.value === "true";
+      if (summaryModelSel) patch.summaryModel = summaryModelSel.value || null;
+      if (summaryPromptTa) patch.summaryPrompt = summaryPromptTa.value.trim() || null;
       var sources = sourceRows
         .map(function (r) {
           return {
@@ -521,6 +568,12 @@ function confirmRemoveSource(sourcePath: string, mapTo: string | null, onRemove:
 
 function exploreSourceDest(sourcePath: string, mapTo: string | null): Promise<void> {
   return api("/api/sources/explore", { method: "POST", body: { path: sourcePath, mapTo: mapTo } })
+    .then(function () { toast("Opened folder"); })
+    .catch(function (err) { toast(String(err instanceof Error ? err.message : err), "err"); });
+}
+
+function openModelsDir(engine: "whisper" | "llama"): void {
+  api("/api/settings/models-dir", { method: "POST", body: { engine: engine } })
     .then(function () { toast("Opened folder"); })
     .catch(function (err) { toast(String(err instanceof Error ? err.message : err), "err"); });
 }

@@ -12,7 +12,20 @@ import type { ServerHandle } from "../web/server/index.ts";
 // updated to chase a fallback port) instead of changing every launch.
 // `--port 0` still asks for an OS-assigned free port explicitly, which is
 // why the already-running check below skips it.
-export const DEFAULT_PORT = 8477;
+//
+// This is only the fallback: `config.port` overrides it, because a machine
+// can be unable to bind the default at all, and no amount of retrying fixes it.
+// Windows reserves whole TCP ranges for Hyper-V/WSL2's dynamic allocator
+// (`netsh interface ipv4 show excludedportrange protocol=tcp`), and a bind
+// inside one fails as EADDRINUSE with nothing actually listening - so the
+// "is a vno already running?" check below finds nobody and correctly reports
+// it as squatted. Changing the port is the only fix, and it has to persist,
+// or every launch needs the flag again.
+// 9477 rather than 8477: Windows reserves 8385-8484 on some machines (the
+// Hyper-V range above), which makes the old default unbindable there with no
+// way to tell it apart from a real conflict. 9477 sits clear of both that and
+// the ephemeral range.
+export const DEFAULT_PORT = 9477;
 const HOST = "127.0.0.1"; // matches startServer's own default
 
 /** Node tags a bind failure with `code`, which is the only part worth branching on. */
@@ -65,7 +78,8 @@ async function openViewer(url: string): Promise<void> {
 
 export interface VisualizeOptions {
   open?: boolean;
-  port?: number;
+  /** `--port`. Left null, `config.port` decides, falling back to DEFAULT_PORT. */
+  port?: number | null;
   quiet?: boolean;
 }
 
@@ -80,10 +94,14 @@ export interface VisualizeOptions {
  */
 export async function runVisualize({
   open = true,
-  port = DEFAULT_PORT,
+  port = null,
   quiet = false,
 }: VisualizeOptions = {}): Promise<string | null> {
   const config = await loadConfig();
+
+  // `??` rather than `||` so an explicit `--port 0` (ask the OS for a free
+  // one) isn't mistaken for "unset" and replaced by the configured port.
+  const resolvedPort = port ?? config.port ?? DEFAULT_PORT;
 
   // The folder may not exist yet on a first run; create it so the viewer can
   // be used to import into it.
@@ -96,13 +114,14 @@ export async function runVisualize({
 
   let server: ServerHandle;
   try {
-    server = await startServer({ config, port, host: HOST, onScanProgress: bar.report });
+    server = await startServer({ config, port: resolvedPort, host: HOST, onScanProgress: bar.report });
   } catch (err) {
-    if (errorCode(err) !== "EADDRINUSE" || port === 0) throw err;
+    if (errorCode(err) !== "EADDRINUSE" || resolvedPort === 0) throw err;
 
-    const runningUrl = await findRunningInstance(port);
+    const runningUrl = await findRunningInstance(resolvedPort);
     if (!runningUrl) {
-      console.log(chalk.red(`Port ${port} is already in use by something else. Pick a free one with --port.`));
+      console.log(chalk.red(`Port ${resolvedPort} is already in use by something else.`));
+      console.log(chalk.dim("Pick a free one with --port, or set it permanently in `vno setting` → Viewer port."));
       return null;
     }
 

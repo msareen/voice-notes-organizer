@@ -51,7 +51,7 @@ import { open } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { which } from "./setup.ts";
+import { which } from "../setup.ts";
 
 const execFileAsync = promisify(execFile);
 

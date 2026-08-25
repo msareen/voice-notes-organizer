@@ -96,6 +96,10 @@ effect on disk immediately.
 - **Full toolbar** — import, transcribe, cleanup, explore and settings, all
   without leaving the page. Long jobs show a progress bar and stream
   whisper.cpp's live output into a log panel.
+- **Optional Summary tab** — turn a transcript into a short summary with a
+  local llama.cpp model, right next to the transcript. Off by default until
+  you set it up, and can be hidden again from Settings without losing any
+  summary you've already generated.
 - **Six themes** — dark, light, high-contrast, or follow your system. Pick one
   in Settings and watch the page change as you click.
 - **Installs as an app** — a manifest and service worker make it installable,
@@ -132,6 +136,7 @@ whisper.cpp by hand instead of letting `vno setup` do it:
 | `vno` | `vno import` | Detect your recorder, import anything new, open the UI |
 | `vno transcribe` | `vno t`, `vno --t` | Pick recordings and transcribe (or translate) them |
 | `vno transcribe <file>` | `vno t <file>` | Transcribe one file directly — no picker, no prompts |
+| `vno summarize <file>` | — | Summarize one recording's transcript with llama.cpp (optional) |
 | `vno visualize` | `vno v`, `vno viz`, `vno vis`, `vno --v` | Open the browser UI |
 | `vno cleanup` | — | Delete recordings shorter than 3 seconds, after confirming |
 | `vno cleanup -f <files>` | — | Delete named recordings and their transcripts |
@@ -168,6 +173,10 @@ A few things worth knowing up front:
   This form is built to script: it exits non-zero if the transcription fails,
   and with `-o -` the transcript is the only thing on stdout, so
   `vno t clip.mp4 -o - 2>/dev/null | your-tool` pipes cleanly.
+- **Video files transcribe too, in this direct mode.** `.mp4`, `.mkv`, `.mov`
+  and `.webm` all work — ffmpeg pulls the audio track out, video ignored.
+  They're not part of the library import (which is audio-only), just this
+  one-shot form.
 - **Nothing deletes without asking.** Only `cleanup` and the UI's delete
   buttons remove files, always behind a confirmation. Import and transcribe
   never delete anything.
@@ -194,6 +203,36 @@ detail.
 
 ---
 
+## Summarization, optional and local
+
+Turn a transcript into a short summary with [llama.cpp](https://github.com/ggml-org/llama.cpp)
+running small "edge" instruct models — same locally-run, no-account, no-upload
+deal as transcription, and entirely optional: nothing else in vno depends on
+it, and the app works exactly as before if you never touch it.
+
+```bash
+vno setup --llama
+```
+
+Installs llama.cpp itself via `brew`/`winget`, then offers a curated,
+checksum-verified checklist of small models (sub-1GB up to ~6GB, grouped by
+size) to pick from — or just drop your own `.gguf` file into the models
+folder it creates. Pick as many as you like and switch between them later.
+
+```bash
+vno summarize 250810_1328              # writes 250810_1328.summary.txt
+```
+
+Or click **Summarize** on a transcribed recording in the app — it runs in the
+background and lands in a **Summary** tab next to the transcript. The tab can
+be hidden from Settings if you'd rather not see it; existing summaries are
+never deleted, only hidden.
+
+📖 **[Full summarization guide →](docs/summarization.md)** — models, the
+prompt override, and how the Summary tab works.
+
+---
+
 ## Documentation
 
 | Page | What's in it |
@@ -204,6 +243,7 @@ detail.
 | [Configuration](docs/configuration.md) | `~/.vno/config.json`, key by key |
 | [Import & sync](docs/import-and-sync.md) | Volume detection, flat imports, remembered devices |
 | [Transcription](docs/transcription.md) | Whisper models, translation, the `.vtt` format |
+| [Summarization](docs/summarization.md) | Optional: installing llama.cpp, picking a model, the Summary tab, `vno summarize` |
 | [Troubleshooting](docs/troubleshooting.md) | When whisper, ffmpeg, volumes or the browser misbehave |
 | [Architecture](docs/architecture.md) | Source layout, the local HTTP API, working on the code |
 

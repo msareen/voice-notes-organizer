@@ -70,9 +70,12 @@ exists.
   requests, so seeking works and nothing is copied anywhere. With the scrub
   focused, `←` / `→` seek five seconds, `Home` / `End` jump to either end, and
   `Space` plays or pauses.
-- **Transcript** — a timed `.vtt` follows along as it plays: the current line
-  is highlighted and scrolled into view, and clicking any line jumps playback
-  to that timestamp. A plain `.txt` is shown as a block, without highlighting.
+- **Transcript / Summary tabs** — a **Transcript** tab (the timed `.vtt`,
+  current line highlighted and scrolled into view as it plays, click any line
+  to jump playback there; a plain `.txt` is shown as a block, without
+  highlighting) and, unless hidden in Settings, a **Summary** tab next to it
+  rendering the recording's `.summary.txt` as markdown. See
+  [Summarization](summarization.md).
 
 ### Per-take actions
 
@@ -80,6 +83,7 @@ exists.
 | --- | --- |
 | **Open file location** | Opens the file's containing folder in Explorer / Finder |
 | **Transcribe** / **Re-transcribe** | Opens the transcribe dialog for just this take |
+| **Summarize** / **Re-summarize** | Summarizes the transcript with llama.cpp — optional, hidden if the Summary tab is disabled in Settings; see [Summarization](summarization.md) |
 | **Edit transcript** | Opens the in-page editor (below) |
 | **Delete** | Deletes the audio *and* its transcript sidecars, after a confirmation |
 
@@ -201,6 +205,16 @@ installed, and only turns it on or off: *installing* one is
 an installer. Until you've run it, the dialog says so. A transcribe job logs
 which device it used.
 
+**Summarization** is its own full-width section, always present. A **Show the
+Summary tab in the deck** toggle
+([`summaryEnabled`](configuration.md#summaryenabled)) turns the whole feature's
+UI on or off — hides the tab and the Summarize button without touching any
+summary already on disk. Once llama.cpp has at least one model, two more
+fields appear: [`summaryModel`](configuration.md#summarymodel) (a dropdown
+over whatever's in your models folder) and an **Override prompt** field
+([`summaryPrompt`](configuration.md#summaryprompt)). Before that, the section
+just points at `vno setup --llama`. See [Summarization](summarization.md).
+
 Deletes made from this page — both the per-take **Delete** and **Cleanup** —
 are recorded, so importing again won't copy those recordings back off the
 device. Clearing that record is a CLI job: `vno cleanup ledger`.
@@ -299,12 +313,12 @@ it once.
 These endpoints delete files and launch programs, so access is narrow by
 design:
 
-- The server binds to **`127.0.0.1`** on a **fixed default port (8477)** —
-  never an external interface. If that port is busy, `vno v` checks whether
-  it's a `vno v` instance already running and opens a tab to it instead of
-  picking a different port (bookmarked URLs and an installed PWA shortcut
-  depend on the port staying put); `-p/--port 0` asks for a random free port
-  instead.
+- The server binds to **`127.0.0.1`** on a **fixed port** ([`port`](configuration.md#port),
+  `9477` by default) — never an external interface. If that port is busy,
+  `vno v` checks whether it's a `vno v` instance already running and opens a
+  tab to it instead of picking a different port (bookmarked URLs and an
+  installed PWA shortcut depend on the port staying put); `-p/--port 0` asks
+  for a random free port instead.
 - Every request needs a **session token**, persisted in
   `~/.vno/session-token` and reused across runs (not regenerated per launch —
   what lets a bookmark or an installed PWA keep working), inlined into the

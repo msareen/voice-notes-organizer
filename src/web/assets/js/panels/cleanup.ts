@@ -21,6 +21,7 @@ export function openCleanup(): void {
     message: "Scans for recordings shorter than the threshold - usually accidental button presses. " +
       "Deleting removes the audio and its transcript.",
     confirmLabel: "Scan",
+    busyLabel: "Scanning…",
     build: function (host) {
       var field = document.createElement("div");
       field.className = "field";
@@ -98,6 +99,7 @@ function showCleanupResults(res: ScanResult, wantOriginals: boolean): void {
     title: "Delete files",
     message: parts.join(" and ") + ". This can't be undone.",
     confirmLabel: "Delete",
+    busyLabel: "Deleting…",
     danger: true,
     build: function (host) { picks = pickList(host, items); },
     onConfirm: function () {

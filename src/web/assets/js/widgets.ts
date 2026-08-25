@@ -45,6 +45,13 @@ export interface ModalSpec {
   /** Fires for every way out that isn't a completed confirm. */
   onCancel?: () => void;
   confirmLabel?: string;
+  /**
+   * Replaces the confirm button's label while its promise is pending - a
+   * quiet "this is taking a moment" instead of a spinner, for confirms that
+   * can run a beat or two (a filesystem scan, say). Reverts to confirmLabel
+   * whether the promise resolves or rejects.
+   */
+  busyLabel?: string;
   danger?: boolean;
   panel?: boolean;
   wide?: boolean;
@@ -87,15 +94,18 @@ export function modal(spec: ModalSpec): ModalHandle {
   var confirm: HTMLButtonElement | null = null;
   var confirmed = false;
   if (spec.onConfirm) {
-    confirm = button(spec.confirmLabel || "OK", spec.danger ? "danger" : "primary", function () {
+    var confirmLabel = spec.confirmLabel || "OK";
+    confirm = button(confirmLabel, spec.danger ? "danger" : "primary", function () {
       confirm!.disabled = true;
       cancel.disabled = true;
+      if (spec.busyLabel) confirm!.textContent = spec.busyLabel;
       // new Promise() so a synchronous throw inside onConfirm is caught too.
       new Promise(function (resolve) { resolve(spec.onConfirm!()); })
         .then(function () { confirmed = true; close(); })
         .catch(function (err) {
           confirm!.disabled = false;
           cancel.disabled = false;
+          confirm!.textContent = confirmLabel;
           fail(err);
         });
     });

@@ -13,7 +13,9 @@ interface IconSpec {
 
 var ICONS: Record<string, IconSpec> = {
   play: { fill: true, d: ["M8 5.2v13.6L19 12z"] },
-  pause: { fill: true, d: ["M8 5h3.2v14H8z", "M12.8 5H16v14h-3.2z"] }
+  pause: { fill: true, d: ["M8 5h3.2v14H8z", "M12.8 5H16v14h-3.2z"] },
+  "chevron-up": { fill: false, d: ["M6 15l6-6 6 6"] },
+  "chevron-down": { fill: false, d: ["M6 9l6 6 6-6"] }
 };
 
 export function icon(name: string, size?: number): SVGSVGElement {

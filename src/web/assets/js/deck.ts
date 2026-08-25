@@ -27,6 +27,30 @@ interface DeckMedia extends HTMLMediaElement {
   _retick?: (cues: Cue[] | null | undefined) => void;
 }
 
+/* ---- Video pane size/visibility persists across visits, same pattern as
+   list.ts's folder-collapse state. ---- */
+var VIDEO_H_KEY = "vno-video-h";
+var VIDEO_COLLAPSED_KEY = "vno-video-collapsed";
+var VIDEO_MIN_H = 120;
+var VIDEO_MAX_H = 800;
+
+function getVideoHeight(): number | null {
+  try {
+    var raw = localStorage.getItem(VIDEO_H_KEY);
+    var n = raw ? parseInt(raw, 10) : NaN;
+    return isFinite(n) && n > 0 ? n : null;
+  } catch (e) { return null; }
+}
+function saveVideoHeight(px: number): void {
+  try { localStorage.setItem(VIDEO_H_KEY, String(Math.round(px))); } catch (e) {}
+}
+function getVideoCollapsed(): boolean {
+  try { return localStorage.getItem(VIDEO_COLLAPSED_KEY) === "1"; } catch (e) { return false; }
+}
+function saveVideoCollapsed(collapsed: boolean): void {
+  try { localStorage.setItem(VIDEO_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch (e) {}
+}
+
 /** One run of transcript text the filter term can be re-marked into. */
 interface HighlightTarget {
   el: HTMLElement;
@@ -145,11 +169,79 @@ function buildTransport(note: Note, host: HTMLElement): DeckMedia {
   // fullscreen native player, which would bypass this transport entirely.
   if (video) (audio as unknown as HTMLVideoElement).playsInline = true;
 
+  var toggleVideoBtn: HTMLButtonElement | null = null;
   if (video) {
     var frame = document.createElement("div");
     frame.className = "video-frame";
     frame.appendChild(audio);
+
+    // Dragging this strip (or scrolling the wheel over it) resizes the frame;
+    // it sits on the boundary between the video and the transport below.
+    var handle = document.createElement("div");
+    handle.className = "video-resize-handle";
+    handle.setAttribute("aria-hidden", "true");
+    frame.appendChild(handle);
+
     host.appendChild(frame);
+
+    function setFrameHeight(px: number) {
+      var v = audio as unknown as HTMLVideoElement;
+      v.style.height = px + "px";
+      v.style.maxHeight = "none";
+    }
+    var savedH = getVideoHeight();
+    if (savedH) setFrameHeight(savedH);
+
+    var resizing = false;
+    var startY = 0;
+    var startH = 0;
+    handle.addEventListener("pointerdown", function (e) {
+      resizing = true;
+      startY = e.clientY;
+      startH = audio.getBoundingClientRect().height;
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener("pointermove", function (e) {
+      if (!resizing) return;
+      var next = Math.max(VIDEO_MIN_H, Math.min(VIDEO_MAX_H, startH + (e.clientY - startY)));
+      setFrameHeight(next);
+    });
+    function endResize(e: PointerEvent) {
+      if (!resizing) return;
+      resizing = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+      saveVideoHeight((audio as unknown as HTMLVideoElement).getBoundingClientRect().height);
+    }
+    handle.addEventListener("pointerup", endResize);
+    handle.addEventListener("pointercancel", endResize);
+    // Scrolling up on the boundary shrinks the pane; scrolling down grows it.
+    handle.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var cur = audio.getBoundingClientRect().height;
+      var next = Math.max(VIDEO_MIN_H, Math.min(VIDEO_MAX_H, cur - e.deltaY));
+      setFrameHeight(next);
+      saveVideoHeight(next);
+    }, { passive: false });
+
+    // Collapsing hides the frame but leaves the <video> in the DOM and
+    // playing, so playback continues as audio-only.
+    toggleVideoBtn = document.createElement("button");
+    toggleVideoBtn.type = "button";
+    toggleVideoBtn.className = "video-toggle";
+    function applyCollapsed(collapsed: boolean) {
+      frame.classList.toggle("collapsed", collapsed);
+      toggleVideoBtn!.textContent = "";
+      toggleVideoBtn!.appendChild(icon(collapsed ? "chevron-down" : "chevron-up", 14));
+      toggleVideoBtn!.appendChild(document.createTextNode(collapsed ? " Show video" : " Hide video"));
+      toggleVideoBtn!.setAttribute("aria-label", collapsed ? "Show video" : "Hide video");
+    }
+    applyCollapsed(getVideoCollapsed());
+    toggleVideoBtn.addEventListener("click", function () {
+      var next = !frame.classList.contains("collapsed");
+      applyCollapsed(next);
+      saveVideoCollapsed(next);
+    });
   }
 
   var wrap = document.createElement("div");
@@ -212,6 +304,7 @@ function buildTransport(note: Note, host: HTMLElement): DeckMedia {
     rateBtn.textContent = RATES[rateIdx] + "×";
   }, "Playback speed");
   keys.appendChild(rateBtn);
+  if (toggleVideoBtn) keys.appendChild(toggleVideoBtn);
   wrap.appendChild(keys);
 
   // Video already lives in its own frame above the transport (appended

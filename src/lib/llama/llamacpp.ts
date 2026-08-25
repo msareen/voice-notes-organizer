@@ -1,17 +1,28 @@
 import path from "node:path";
 import fs from "fs-extra";
 import { which, runStep } from "../setup.ts";
-import { HOMEBREW_URL } from "../webSources.ts";
+import { HOMEBREW_URL } from "../webSources/whisperModels.ts";
+import { llamaModelCatalog, llamaModelSources } from "../webSources/llamaModels.ts";
 import {
   isWindows,
   isMac,
+  errorMessage,
+  downloadFile,
+  sha256File,
   resolveInstallRoot as resolveEngineInstallRoot,
   installPaths,
   bothInstallRoots as bothEngineInstallRoots,
   isManagedModel as isEngineManagedModel,
   removeEngineModel,
 } from "../engineInstall.ts";
-import type { InstallMode, EngineRoot, ModelRemoval } from "../engineInstall.ts";
+import type {
+  InstallMode,
+  EngineRoot,
+  ModelRemoval,
+  DownloadProgressCallback,
+  ChecksumMismatchHandler,
+} from "../engineInstall.ts";
+import type { LlamaModelSource } from "../webSources/interfaces.ts";
 import type { Config } from "../../types.ts";
 
 /**
@@ -23,8 +34,10 @@ import type { Config } from "../../types.ts";
  * binary - PATH, or a manual override in `config.llamaCliPath` for when a
  * fresh `winget install` isn't visible on PATH in the same shell session -
  * and (2) knowing which folder(s) to look in for `.gguf` model files the
- * user places there themselves. No download, no curated model catalog, no
- * checksum verification, no install manifest.
+ * user places there themselves - vno can also download one of a curated
+ * catalog (see webSources/llamaModels.ts:llamaModelCatalog and downloadModel below), each
+ * with an optional SHA-256 checked once right after the download. No install
+ * manifest either way.
  */
 
 // Only the models/ folder concept is reused from engineInstall.ts (shared
@@ -63,6 +76,100 @@ export async function resolveModelsDir(): Promise<string> {
   const { modelsDir } = installPaths(resolveInstallRoot("local"));
   await fs.ensureDir(modelsDir);
   return modelsDir;
+}
+
+export type { LlamaModelSource };
+export { llamaModelCatalog };
+
+interface DownloadLlamaModelOptions {
+  mode?: InstallMode;
+  onProgress?: DownloadProgressCallback | null;
+  onLog?: (line: string) => void;
+  /**
+   * Asked only if the catalog entry carries a `sha256` and the download
+   * doesn't match it - see ChecksumMismatchHandler's doc comment. Omitted
+   * entirely, a mismatch is logged and the file is kept rather than silently
+   * deleted.
+   */
+  onChecksumMismatch?: ChecksumMismatchHandler;
+}
+
+/**
+ * Downloads one of the curated `llamaModelCatalog()` entries into the given
+ * install root's models/ directory - the guided counterpart to dropping a
+ * `.gguf` in by hand. A file that fails validation once is deleted and
+ * re-fetched exactly once, mirroring whisper.cpp's downloadModel. When the
+ * catalog entry carries a `sha256`, it's verified once here, right after the
+ * download - never on every later `listModels()` scan, which would mean
+ * re-hashing a multi-gigabyte file on every startup.
+ */
+export async function downloadModel(
+  alias: string,
+  { mode = "local", onProgress = null, onLog = () => {}, onChecksumMismatch }: DownloadLlamaModelOptions = {}
+): Promise<string> {
+  const entry = llamaModelCatalog().find((m) => m.alias === alias);
+  if (!entry) throw new Error(`"${alias}" isn't one of vno's curated summarization models.`);
+
+  const existing = await resolveModel(entry.filename);
+  if (existing) return existing;
+
+  const root = resolveInstallRoot(mode);
+  const { modelsDir } = installPaths(root);
+  await fs.ensureDir(modelsDir);
+  const destPath = path.join(modelsDir, entry.filename);
+  const sources = llamaModelSources(entry.repo);
+  const failures: string[] = [];
+
+  for (const source of sources) {
+    const url = `${source.base}/${entry.filename}`;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      onLog(`Downloading ${entry.filename}${attempt > 1 ? " (retry)" : ""} from ${source.label}...`);
+      try {
+        await downloadFile(url, destPath, { onProgress });
+      } catch (err) {
+        // See whisper.cpp's downloadModel for why this moves to the next
+        // mirror rather than retrying the same request, and leaves the
+        // partial file for the next mirror to resume.
+        failures.push(`${source.label}: ${errorMessage(err)}`);
+        break;
+      }
+
+      const result = await validateModelFile(destPath);
+      if (!result.valid) {
+        onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
+        await fs.remove(destPath);
+        await fs.remove(`${destPath}.part`).catch(() => {});
+        if (attempt === 2) failures.push(`${source.label}: failed validation twice (${result.reason})`);
+        continue;
+      }
+
+      if (entry.sha256) {
+        const actual = await sha256File(destPath);
+        if (actual.toLowerCase() !== entry.sha256.toLowerCase()) {
+          onLog(`Checksum mismatch for ${entry.filename} (expected ${entry.sha256}, got ${actual}).`);
+          const shouldDelete = onChecksumMismatch
+            ? await onChecksumMismatch({ filename: entry.filename, expected: entry.sha256, actual })
+            : false;
+          if (shouldDelete) {
+            await fs.remove(destPath);
+            await fs.remove(`${destPath}.part`).catch(() => {});
+            if (attempt === 2) failures.push(`${source.label}: checksum mismatch (deleted)`);
+            continue;
+          }
+          onLog("Keeping the downloaded file despite the checksum mismatch.");
+        }
+      }
+
+      return destPath;
+    }
+  }
+
+  throw new Error(
+    `Could not download ${entry.filename} from any source.\n` +
+      failures.map((f) => `  - ${f}`).join("\n") +
+      `\nTry again later, or set VNO_MODEL_BASE to a mirror you can reach.`
+  );
 }
 
 /** Whether a model file sits inside one of vno's own local/global models/ folders. */

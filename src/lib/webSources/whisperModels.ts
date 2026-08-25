@@ -1,9 +1,10 @@
 /**
- * Every static internet location vno's dependency-acquisition code pulls
- * from - the whisper.cpp binary (GitHub Releases) and its models (Hugging
+ * Every static internet location whisper.cpp's install/model-download code
+ * pulls from: the binary (GitHub Releases) and the ggml models (Hugging
  * Face). Kept in one file so a mirror change, a moved repo, or a new
  * fallback host has exactly one place to look.
  */
+import type { ModelSource, WhisperModelSource } from "./interfaces.ts";
 
 export const WHISPERCPP_VERSION = "v1.9.2";
 export const WHISPERCPP_REPO = "ggml-org/whisper.cpp";
@@ -11,6 +12,8 @@ export const WHISPERCPP_REPO = "ggml-org/whisper.cpp";
 const GITHUB_BASE = "https://github.com";
 const GITHUB_API_BASE = "https://api.github.com";
 
+// Homebrew's own URL, not whisper.cpp-specific - llama.cpp's mac install
+// (lib/llama/llamacpp.ts) points here too when `brew` itself is missing.
 export const HOMEBREW_URL = "https://brew.sh";
 
 /** Human-facing link to the release page, e.g. for error messages. */
@@ -45,11 +48,6 @@ export function whispercppCloneUrl(): string {
 // org, but the *models* still live under `ggerganov` on Hugging Face
 // (huggingface.co/ggml-org/whisper.cpp 401s). Don't "fix" this to match
 // WHISPERCPP_REPO above.
-export interface ModelSource {
-  label: string;
-  base: string;
-}
-
 const HUGGINGFACE_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 const HF_MIRROR_BASE = "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main";
 
@@ -70,5 +68,47 @@ export function modelSources(): ModelSource[] {
   return MODEL_SOURCES;
 }
 
-// llama.cpp (optional summarization engine) is installed via `brew`/`winget`
-// now - see lib/llama/llamacpp.ts - so it has no release/model URLs of its own here.
+// The whisper.cpp models themselves - every ggml-*.bin whispercpp.ts knows
+// how to fetch. `modelSources()` above supplies the base URL(s); this just
+// says which files exist and what they should look like.
+const WHISPER_MODEL_CATALOG: WhisperModelSource[] = [
+  {
+    stem: "tiny",
+    approxBytes: 77_700_000,
+    sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+  },
+  {
+    stem: "base",
+    approxBytes: 148_000_000,
+    sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+  },
+  {
+    stem: "small",
+    approxBytes: 488_000_000,
+    sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+  },
+  {
+    stem: "medium",
+    approxBytes: 1_530_000_000,
+    sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+  },
+  {
+    stem: "large-v3",
+    aliases: ["large"],
+    approxBytes: 3_100_000_000,
+    sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+  },
+  {
+    stem: "large-v3-turbo",
+    aliases: ["turbo"],
+    approxBytes: 1_620_000_000,
+    sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+  },
+];
+
+export function whisperModelCatalog(): WhisperModelSource[] {
+  return WHISPER_MODEL_CATALOG;
+}
+
+/** The stems `vno setup` fetches unless told otherwise - see whispercpp.ts:DEFAULT_MODELS. */
+export const WHISPER_DEFAULT_MODELS = ["small", "turbo"];

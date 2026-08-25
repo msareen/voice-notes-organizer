@@ -37,6 +37,8 @@ import {
   installPaths as llamaInstallPaths,
   bothInstallRoots as bothLlamaInstallRoots,
   resolveModel as resolveLlamaModel,
+  downloadModel as downloadLlamaModel,
+  llamaModelCatalog,
   listModels as listLlamaModels,
   isManagedModel as isManagedLlamaModel,
   removeModel as removeLlamaModel,
@@ -45,12 +47,14 @@ import { accelState } from "../lib/whisper/whisper.ts";
 import { llamaAccelState } from "../lib/llama/llama.ts";
 import { loadConfig, saveConfig } from "../lib/config.ts";
 import { protocolStatus, registerProtocol } from "../lib/protocol.ts";
-import { prompt, CANCELLED } from "./prompt.ts";
+import { prompt, CANCELLED, Separator } from "./prompt.ts";
 import type { DependencyName, InstallPlan, PlanResult } from "../lib/setup.ts";
 import type { AccelRecord, InstallMode } from "../lib/whisper/whispercpp.ts";
 import type { ProtocolStatus } from "../lib/protocol.ts";
 import type { AccelBackend, Config } from "../types.ts";
 import type { DownloadProgress } from "../lib/whisper/whispercpp.ts";
+import type { ChecksumMismatch } from "../lib/engineInstall.ts";
+import type { LlamaModelSource } from "../lib/llama/llamacpp.ts";
 
 /** The two things vno can't transcribe without, in install order. */
 const REQUIRED: DependencyName[] = ["ffmpeg", "whisper"];
@@ -433,29 +437,72 @@ async function setLlamaAccel(mode: "metal" | "ask"): Promise<void> {
 
 /**
  * Lets the user pick a summarization model right after installing the
- * binary - a curated alias, a `.gguf` they already have, or skip. Nothing
- * downloads without this explicit choice; reachable again any time via
- * `vno setup --llama` even once the binary is already installed, so skipping
- * here isn't a dead end.
+ * binary - one of a curated set of small "edge" instruct models vno can
+ * download itself, a `.gguf` they already have, or skip entirely. Always
+ * offered, even when models are already installed - summarization isn't
+ * limited to one model, and picking an already-installed one is a harmless
+ * no-op (`downloadModel` resolves it and returns without re-fetching).
+ * Reachable again any time via `vno setup --llama` even once the binary is
+ * already installed, so skipping here isn't a dead end.
  */
 async function runLlamaModelStep(): Promise<void> {
   const existing = (await listLlamaModels()).filter((m) => m.valid);
   if (existing.length > 0) {
     console.log(chalk.dim(`\nFound ${existing.length} model(s) already: ${existing.map((m) => m.filename).join(", ")}`));
+  }
+
+  if (!process.stdin.isTTY) {
+    if (existing.length === 0) console.log(chalk.dim("\nNo terminal to ask which summarization model to use - skipping."));
     console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
     return;
   }
 
-  if (!process.stdin.isTTY) {
-    console.log(chalk.dim("\nNo terminal to ask where to put summarization models - skipping."));
+  const catalog = llamaModelCatalog();
+  const installedFilenames = new Set(existing.map((m) => m.filename.toLowerCase()));
+  const pickAnswer = await prompt([
+    {
+      type: "list",
+      name: "alias",
+      message:
+        existing.length > 0
+          ? "Download another summarization model, or keep what you have:"
+          : "Pick a summarization model to download - all small enough to run on CPU, faster with GPU acceleration:",
+      choices: [
+        ...groupedModelChoices(catalog, installedFilenames),
+        new Separator(),
+        {
+          name: existing.length > 0 ? "Skip — keep what I have" : "Skip — I'll drop my own .gguf file(s) in myself",
+          value: "skip",
+        },
+      ],
+      default: existing.length > 0 ? "skip" : catalog[0]?.alias,
+    },
+  ]);
+  const alias = pickAnswer === CANCELLED ? "skip" : (pickAnswer.alias as string);
+
+  if (alias === "skip") {
+    if (existing.length === 0) {
+      const root = resolveLlamaInstallRoot("local");
+      const { modelsDir } = llamaInstallPaths(root);
+      await fs.ensureDir(modelsDir);
+      console.log(chalk.green(`\nModels folder: ${modelsDir}`));
+      console.log(
+        chalk.dim(
+          "Drop a .gguf file in there (or set VNO_LLAMA_MODEL_PATH), then run " +
+            "`vno setup --summary-model <filename>` or pick it in Settings."
+        )
+      );
+    } else {
+      console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
+    }
     return;
   }
 
-  const answer = await prompt([
+  const modeAnswer = await prompt([
     {
       type: "list",
       name: "mode",
-      message: "Where should summarization models live? Drop your own .gguf file(s) in afterward - vno never downloads one for you.",
+      message: "Where should it be installed?",
       choices: [
         { name: `Locally, beside this vno install (${resolveLlamaInstallRoot("local")})`, value: "local" },
         { name: `Globally (${resolveLlamaInstallRoot("global")})`, value: "global" },
@@ -463,28 +510,59 @@ async function runLlamaModelStep(): Promise<void> {
       default: "local",
     },
   ]);
-  if (answer === CANCELLED) return;
-
-  const root = resolveLlamaInstallRoot(answer.mode as InstallMode);
+  const mode: InstallMode = modeAnswer === CANCELLED ? "local" : (modeAnswer.mode as InstallMode);
+  const root = resolveLlamaInstallRoot(mode);
   const { modelsDir } = llamaInstallPaths(root);
   await fs.ensureDir(modelsDir);
-  console.log(chalk.green(`\nModels folder: ${modelsDir}`));
-  console.log(
-    chalk.dim(
-      "Drop a .gguf file in there (or set VNO_LLAMA_MODEL_PATH), then run " +
-        "`vno setup --summary-model <filename>` or pick it in Settings."
-    )
-  );
+
+  const entry = catalog.find((m) => m.alias === alias)!;
+  console.log(chalk.dim(`\nDownloading "${entry.label}" (${entry.group}) into ${modelsDir}...`));
+  try {
+    const dest = await downloadLlamaModel(alias, {
+      mode,
+      onLog: (line) => console.log(chalk.dim(`  ${line}`)),
+      onProgress: progressPrinter(),
+      onChecksumMismatch: confirmChecksumMismatch,
+    });
+    console.log(chalk.green(`  ${entry.label} ready: ${dest}`));
+    console.log(chalk.dim("Set the default in Settings or `vno setup --summary-model <filename>`."));
+  } catch (err) {
+    console.log(chalk.red(`\nCouldn't download "${entry.label}": ${errorMessage(err)}`));
+    console.log(chalk.dim(`Drop a .gguf file into ${modelsDir} yourself instead, then run this again.`));
+  }
 }
 
-/** `vno setup --summary-model <name>` - confirms the file is there, never downloads it. */
+/**
+ * `vno setup --summary-model <name>` - downloads it if `name` names one of
+ * the curated catalog entries (alias or filename), otherwise just confirms a
+ * manually-placed file is there.
+ */
 async function ensureLlamaModel(name: string): Promise<void> {
   const existing = await resolveLlamaModel(name);
   if (existing) {
     console.log(chalk.green(`\n"${name}" is available: ${existing}`));
     return;
   }
-  console.log(chalk.red(`\n"${name}" isn't in your models folder yet. Drop it into one of:`));
+
+  const entry = llamaModelCatalog().find(
+    (m) => m.alias === name || m.filename.toLowerCase() === name.toLowerCase()
+  );
+  if (entry) {
+    console.log(chalk.dim(`\nDownloading "${entry.label}" (${entry.group})...`));
+    try {
+      const dest = await downloadLlamaModel(entry.alias, {
+        onLog: (line) => console.log(chalk.dim(`  ${line}`)),
+        onProgress: progressPrinter(),
+        onChecksumMismatch: confirmChecksumMismatch,
+      });
+      console.log(chalk.green(`  ${entry.label} ready: ${dest}`));
+    } catch (err) {
+      console.log(chalk.red(`\nCouldn't download "${entry.label}": ${errorMessage(err)}`));
+    }
+    return;
+  }
+
+  console.log(chalk.red(`\n"${name}" isn't in your models folder, and isn't one of vno's curated models. Drop it into one of:`));
   for (const root of bothLlamaInstallRoots()) {
     console.log(chalk.dim(`  ${llamaInstallPaths(root).modelsDir}`));
   }
@@ -497,6 +575,68 @@ function platformInstallDescription(): string {
   if (platform === "win32")
     return "Downloads a prebuilt release zip - CUDA-matched to this machine's driver if it has an NVIDIA GPU, BLAS-accelerated CPU otherwise.";
   return "Downloads a prebuilt CPU binary, or builds from source with CUDA support if this machine has an NVIDIA GPU (needs cmake, git and a C++ compiler).";
+}
+
+/**
+ * Renders the curated catalog as inquirer choices with a `Separator` heading
+ * before each distinct `group` (the catalog is already grouped in tier
+ * order, so this just watches for the value changing rather than sorting).
+ */
+function groupedModelChoices(
+  catalog: LlamaModelSource[],
+  installedFilenames: Set<string>
+): (InstanceType<typeof Separator> | { name: string; value: string })[] {
+  const choices: (InstanceType<typeof Separator> | { name: string; value: string })[] = [];
+  let lastGroup: string | null = null;
+  for (const m of catalog) {
+    if (m.group !== lastGroup) {
+      // A blank line ahead of every heading but the first, so the tiers read
+      // as separate blocks rather than one dense list - Separator(" ") (not
+      // "") renders truly blank instead of falling back to inquirer's
+      // default dashed line.
+      if (lastGroup !== null) choices.push(new Separator(" "));
+      choices.push(new Separator(chalk.bold(`── ${m.group} ──`)));
+      lastGroup = m.group;
+    }
+    choices.push({
+      name:
+        `${m.label} — ~${(m.approxBytes / 1e6).toFixed(0)} MB` +
+        (installedFilenames.has(m.filename.toLowerCase()) ? chalk.dim("  (installed)") : ""),
+      value: m.alias,
+    });
+  }
+  return choices;
+}
+
+/**
+ * Asked by `downloadModel` (whisper.cpp or llama.cpp) only when a *known*
+ * checksum doesn't match what was downloaded - a model with no checksum on
+ * file never reaches this. Defaults to keeping the file when there's no
+ * terminal to ask: a mismatch is as likely to be a stale entry in vno's own
+ * catalog as real corruption, and vno never deletes a multi-gigabyte download
+ * without the user saying so.
+ */
+async function confirmChecksumMismatch({ filename, expected, actual }: ChecksumMismatch): Promise<boolean> {
+  console.log(chalk.yellow(`\nChecksum mismatch for ${filename}:`));
+  console.log(chalk.dim(`  expected ${expected}`));
+  console.log(chalk.dim(`  got      ${actual}`));
+  if (!process.stdin.isTTY) {
+    console.log(chalk.dim("No terminal to confirm - keeping the file. Verify it yourself before trusting it."));
+    return false;
+  }
+  const answer = await prompt([
+    {
+      type: "list",
+      name: "ok",
+      message: "Delete it and try again, or keep it anyway?",
+      choices: [
+        { name: "Keep it — this could just be a stale checksum on vno's end", value: false },
+        { name: "Delete it and retry", value: true },
+      ],
+      default: false,
+    },
+  ]);
+  return answer === CANCELLED ? false : Boolean(answer.ok);
 }
 
 /** A `%` progress line for a download, updated in place. */
@@ -628,20 +768,18 @@ export async function runStatus({ json = false }: { json?: boolean } = {}): Prom
     return status.ready;
   }
 
+  // Grouped by engine, in the order a machine actually needs them: the
+  // shared media tools, then everything whisper.cpp (binary, its models, the
+  // accelerator that speeds them up), then everything llama.cpp (binary,
+  // its models), then the unrelated vno:// browser-launch handler last.
   console.log(chalk.bold(`vno status — ${os.platform()} ${os.arch()}\n`));
   await report();
+  await reportWhisperModels();
   const statusConfig = await loadConfig();
   reportAccel(statusConfig);
+  await reportSummarization(statusConfig);
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
   if (protocol) reportProtocol(protocol);
-  await reportSummarization(statusConfig);
-
-  const modelCount = status.required.models.length;
-  console.log(
-    modelCount
-      ? `  ${chalk.green("✓")} ${"models".padEnd(12)} ${chalk.dim(status.required.models.join(", "))}`
-      : `  ${chalk.red("✗")} ${"models".padEnd(12)} ${chalk.dim("none downloaded — run `vno setup`")}`
-  );
 
   console.log("");
   if (status.ready) {
@@ -711,15 +849,17 @@ export async function runSetup({
 
   // PATH here can be stale if something was installed after this shell opened.
   await refreshPath();
+  // Same engine-grouped order as `vno status`: whisper.cpp (report) and its
+  // accelerator, then llama.cpp, then the unrelated vno:// handler last.
   await report();
 
   const config = await loadConfig();
   reportAccel(config);
+  await reportSummarization(config);
 
   // Windows only for now - see lib/protocol.ts for why macOS/Linux aren't here yet.
   const protocol = os.platform() === "win32" ? await protocolStatus() : null;
   if (protocol) reportProtocol(protocol);
-  await reportSummarization(config);
 
   if (check) {
     // Report-only: never installs or downloads anything.
@@ -839,6 +979,25 @@ function modeForRoot(root: string): InstallMode {
   return root === resolveInstallRoot("global") ? "global" : "local";
 }
 
+// Every status line (report/reportAccel/reportSummarization/reportProtocol,
+// plus the "whisper models" line in runStatus/runSetup below) pads its label
+// to this width, so the value columns land on the same character position
+// regardless of which lines a given machine ends up printing - the longest
+// label, "whisper models", is 14 characters.
+const STATUS_LABEL_WIDTH = 14;
+
+/**
+ * Prints a status line's label alone, then each model indented below it with
+ * its full path - a bare model name doesn't say which of the local/global
+ * install roots (or a `*_MODEL_PATH` override) vno is actually reading from.
+ */
+function printModelList(mark: string, label: string, entries: { name: string; path: string }[]): void {
+  console.log(`  ${mark} ${label.padEnd(STATUS_LABEL_WIDTH)}`);
+  for (const e of entries) {
+    console.log(`      ${chalk.dim(e.name.padEnd(28))} ${chalk.dim(e.path)}`);
+  }
+}
+
 /** Per-command status lines: exactly which binaries were found, and where. */
 async function report(): Promise<void> {
   for (const name of REQUIRED) {
@@ -846,8 +1005,8 @@ async function report(): Promise<void> {
       const status = await checkDependency("whisper");
       console.log(
         status.found
-          ? `  ${chalk.green("✓")} ${"whisper.cpp".padEnd(12)} ${chalk.dim(status.path)}`
-          : `  ${chalk.red("✗")} ${"whisper.cpp".padEnd(12)} ${chalk.dim("not installed on PATH")}`
+          ? `  ${chalk.green("✓")} ${"whisper.cpp".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim(status.path)}`
+          : `  ${chalk.red("✗")} ${"whisper.cpp".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("not installed on PATH")}`
       );
       continue;
     }
@@ -856,10 +1015,24 @@ async function report(): Promise<void> {
       const found = await which(command);
       console.log(
         found
-          ? `  ${chalk.green("✓")} ${command.padEnd(12)} ${chalk.dim(found)}`
-          : `  ${chalk.red("✗")} ${command.padEnd(12)} ${chalk.dim("not found on PATH")}`
+          ? `  ${chalk.green("✓")} ${command.padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim(found)}`
+          : `  ${chalk.red("✗")} ${command.padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("not found on PATH")}`
       );
     }
+  }
+}
+
+/**
+ * Status line(s) for the whisper.cpp models - same shape as
+ * reportSummarization's llama models block, right after `report()`'s
+ * "whisper.cpp" binary line so the whole whisper.cpp group reads together.
+ */
+async function reportWhisperModels(): Promise<void> {
+  const entries = (await listModels()).filter((m) => m.valid);
+  if (entries.length > 0) {
+    printModelList(chalk.green("✓"), "whisper models", entries.map((m) => ({ name: m.stem, path: m.path })));
+  } else {
+    console.log(`  ${chalk.red("✗")} ${"whisper models".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("none downloaded — run `vno setup`")}`);
   }
 }
 
@@ -867,15 +1040,15 @@ async function report(): Promise<void> {
 function reportAccel(config: Config): void {
   const accel = accelState(config);
   if (accel.backend === null) {
-    console.log(`  ${chalk.dim("?")} ${"accel".padEnd(12)} ${chalk.dim("not installed yet — run `vno setup`")}`);
+    console.log(`  ${chalk.dim("?")} ${"accel".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("not installed yet — run `vno setup`")}`);
     return;
   }
   if (accel.backend === "cpu") {
-    console.log(`  ${chalk.dim("-")} ${"accel".padEnd(12)} ${chalk.dim("CPU only — no accelerator build available")}`);
+    console.log(`  ${chalk.dim("-")} ${"accel".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("CPU only — no accelerator build available")}`);
     return;
   }
   const state = accel.use === false ? chalk.dim("off by choice") : chalk.green("in use");
-  console.log(`  ${chalk.green("✓")} ${"accel".padEnd(12)} ${chalk.dim(accel.name || accel.backend)} ${state}`);
+  console.log(`  ${chalk.green("✓")} ${"accel".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim(accel.name || accel.backend)} ${state}`);
 }
 
 /**
@@ -887,28 +1060,33 @@ async function reportSummarization(config: Config): Promise<void> {
   const binary = await resolveLlamaBinary(config);
   if (!binary) {
     console.log(
-      `  ${chalk.dim("?")} ${"summarize".padEnd(12)} ${chalk.dim("optional, not installed — run `vno setup --llama`")}`
+      `  ${chalk.dim("?")} ${"llama.cpp".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("optional, for transcript summarization — run `vno setup --llama`")}`
     );
     return;
   }
+  // Unlike whisper.cpp (a `resolveModel` alias/stem lookup), llama.cpp's
+  // binary path is worth its own line - it's whichever PATH entry or manual
+  // `config.llamaCliPath` override resolveBinary found, which isn't always
+  // obvious the way a vendored whisper-cpp/bin/ path is.
+  console.log(`  ${chalk.green("✓")} ${"llama.cpp".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim(binary)}`);
   const models = (await listLlamaModels()).filter((m) => m.valid);
   if (models.length === 0) {
     console.log(
-      `  ${chalk.dim("?")} ${"summarize".padEnd(12)} ${chalk.dim("llama.cpp installed, no model yet — run `vno setup --llama`")}`
+      `  ${chalk.dim("?")} ${"llama models".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("llama.cpp installed, no model yet — run `vno setup --llama`")}`
     );
     return;
   }
-  console.log(`  ${chalk.green("✓")} ${"summarize".padEnd(12)} ${chalk.dim(models.map((m) => m.filename).join(", "))}`);
+  printModelList(chalk.green("✓"), "llama models", models.map((m) => ({ name: m.filename, path: m.path })));
 }
 
 /** Status line for the `vno://` browser-launch handler, in the same shape as the binary checks above. */
 function reportProtocol(status: ProtocolStatus): void {
   if (!status.registered) {
-    console.log(`  ${chalk.dim("?")} ${"vno://".padEnd(12)} ${chalk.dim("not registered — lets a browser launch `vno v` directly")}`);
+    console.log(`  ${chalk.dim("?")} ${"vno://".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("not registered — lets a browser launch `vno v` directly")}`);
   } else if (!status.upToDate) {
-    console.log(`  ${chalk.yellow("!")} ${"vno://".padEnd(12)} ${chalk.dim("registered, but points at a different vno install")}`);
+    console.log(`  ${chalk.yellow("!")} ${"vno://".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("registered, but points at a different vno install")}`);
   } else {
-    console.log(`  ${chalk.green("✓")} ${"vno://".padEnd(12)} ${chalk.dim("registered")}`);
+    console.log(`  ${chalk.green("✓")} ${"vno://".padEnd(STATUS_LABEL_WIDTH)} ${chalk.dim("registered")}`);
   }
 }
 
@@ -1042,6 +1220,7 @@ async function ensureModels(mode: InstallMode, only: string | null): Promise<voi
         mode,
         onLog: (line) => console.log(chalk.dim(`  ${line}`)),
         onProgress: progressPrinter(),
+        onChecksumMismatch: confirmChecksumMismatch,
       });
       console.log(chalk.green(`  ${name} ready.`));
     } catch (err) {

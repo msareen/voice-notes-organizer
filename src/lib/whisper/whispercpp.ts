@@ -13,7 +13,9 @@ import {
   whispercppReleaseAssetUrl,
   whispercppCloneUrl,
   modelSources,
-} from "../webSources.ts";
+  whisperModelCatalog,
+  WHISPER_DEFAULT_MODELS,
+} from "../webSources/whisperModels.ts";
 import {
   isWindows,
   isMac,
@@ -21,6 +23,7 @@ import {
   findFile,
   probeCommand,
   downloadFile,
+  sha256File,
   extractZip,
   extractTarGz,
   detectAccelCandidate,
@@ -45,6 +48,7 @@ import type {
   DownloadProgress,
   DownloadProgressCallback,
   ModelRemoval,
+  ChecksumMismatchHandler,
 } from "../engineInstall.ts";
 
 /**
@@ -613,31 +617,35 @@ export async function installWhisperCpp({
 // Model resolution & download
 // ---------------------------------------------------------------------------
 
+// Every ggml-*.bin this project knows about now lives in one place -
+// webSources/whisperModels.ts:whisperModelCatalog - shared with llama.cpp's catalog shape.
+// The three tables below are just that catalog reshaped into the lookups the
+// rest of this file wants; nothing here is hand-maintained.
+const WHISPER_CATALOG = whisperModelCatalog();
+
 // Friendly names this project already uses (matching the model picker in
 // cli/transcribe.ts and the web MODELS list), plus their ggml filenames.
 // Anything not in this map falls through to `ggml-<name>.bin` so quantized
 // and less common variants (small.en-q5_1, large-v3-turbo-q8_0, ...) still work.
-const MODEL_ALIASES: Record<string, string> = {
-  tiny: "tiny",
-  base: "base",
-  small: "small",
-  medium: "medium",
-  large: "large-v3",
-  turbo: "large-v3-turbo",
-};
+const MODEL_ALIASES: Record<string, string> = Object.fromEntries(
+  WHISPER_CATALOG.flatMap((m) => (m.aliases || []).map((alias) => [alias, m.stem] as const))
+);
 
 // Approximate sizes for the models this project offers by default, used only
 // as a sanity check (~10% tolerance) against a corrupt or truncated download.
 // Anything outside this table skips the size check but still gets the magic-
 // byte and readability checks.
-const MODEL_SIZES: Record<string, number> = {
-  tiny: 77_700_000,
-  base: 148_000_000,
-  small: 488_000_000,
-  medium: 1_530_000_000,
-  "large-v3": 3_100_000_000,
-  "large-v3-turbo": 1_620_000_000,
-};
+const MODEL_SIZES: Record<string, number> = Object.fromEntries(
+  WHISPER_CATALOG.map((m) => [m.stem, m.approxBytes] as const)
+);
+
+// SHA-256 of each ggml-*.bin - see WhisperModelSource's doc comment in
+// webSources/interfaces.ts for provenance. Checked once, right after download - see
+// downloadModel below. A stem missing here just skips the check, same as a
+// missing MODEL_SIZES entry skips the size check.
+const MODEL_SHA256: Record<string, string> = Object.fromEntries(
+  WHISPER_CATALOG.filter((m) => m.sha256).map((m) => [m.stem, m.sha256 as string] as const)
+);
 
 /**
  * Normalizes anything a caller might pass - a bare alias ("turbo"), a ggml
@@ -750,17 +758,27 @@ interface DownloadModelOptions {
   mode?: InstallMode;
   onProgress?: DownloadProgressCallback | null;
   onLog?: LogCallback;
+  /**
+   * Asked only if MODEL_SHA256 has an entry for this model and the download
+   * doesn't match it - see ChecksumMismatchHandler's doc comment. Omitted
+   * entirely, a mismatch is logged and the file is kept rather than silently
+   * deleted.
+   */
+  onChecksumMismatch?: ChecksumMismatchHandler;
 }
 
 /**
  * Downloads a model that `resolveModel` couldn't find, into the given
  * install root's models/ directory. A file that fails validation once is
  * deleted and re-fetched exactly once rather than reused - an interrupted
- * earlier run must never look like a completed one.
+ * earlier run must never look like a completed one. When MODEL_SHA256 knows
+ * this model's checksum, it's verified once here, right after the download -
+ * never on every later `listModels()`/`resolveModel()` scan, which would mean
+ * re-hashing a multi-gigabyte file on every startup.
  */
 export async function downloadModel(
   name: string,
-  { mode = "local", onProgress = null, onLog = () => {} }: DownloadModelOptions = {}
+  { mode = "local", onProgress = null, onLog = () => {}, onChecksumMismatch }: DownloadModelOptions = {}
 ): Promise<string> {
   const { filename: stem, explicitPath } = normalizeModelName(name);
   if (explicitPath) {
@@ -775,6 +793,7 @@ export async function downloadModel(
   const destPath = path.join(modelsDir, modelFileName(stem));
   const sources = modelSources();
   const failures: string[] = [];
+  const expectedSha256 = MODEL_SHA256[stem];
 
   for (const source of sources) {
     const url = `${source.base}/${modelFileName(stem)}`;
@@ -795,17 +814,35 @@ export async function downloadModel(
       }
 
       const result = await validateModelFile(destPath, stem);
-      if (result.valid) {
-        const manifest = (await readManifest(root)) || {};
-        manifest.models = { ...manifest.models, [stem]: destPath };
-        await writeManifest(root, manifest);
-        return destPath;
+      if (!result.valid) {
+        onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
+        await fs.remove(destPath);
+        await fs.remove(`${destPath}.part`).catch(() => {});
+        if (attempt === 2) failures.push(`${source.label}: failed validation twice (${result.reason})`);
+        continue;
       }
 
-      onLog(`Downloaded file failed validation (${result.reason}); deleting and retrying.`);
-      await fs.remove(destPath);
-      await fs.remove(`${destPath}.part`).catch(() => {});
-      if (attempt === 2) failures.push(`${source.label}: failed validation twice (${result.reason})`);
+      if (expectedSha256) {
+        const actual = await sha256File(destPath);
+        if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
+          onLog(`Checksum mismatch for ${modelFileName(stem)} (expected ${expectedSha256}, got ${actual}).`);
+          const shouldDelete = onChecksumMismatch
+            ? await onChecksumMismatch({ filename: modelFileName(stem), expected: expectedSha256, actual })
+            : false;
+          if (shouldDelete) {
+            await fs.remove(destPath);
+            await fs.remove(`${destPath}.part`).catch(() => {});
+            if (attempt === 2) failures.push(`${source.label}: checksum mismatch (deleted)`);
+            continue;
+          }
+          onLog("Keeping the downloaded file despite the checksum mismatch.");
+        }
+      }
+
+      const manifest = (await readManifest(root)) || {};
+      manifest.models = { ...manifest.models, [stem]: destPath };
+      await writeManifest(root, manifest);
+      return destPath;
     }
   }
 
@@ -817,7 +854,7 @@ export async function downloadModel(
 }
 
 /** The model names this project ensures are present unless told otherwise. */
-export const DEFAULT_MODELS = ["small", "turbo"];
+export const DEFAULT_MODELS = WHISPER_DEFAULT_MODELS;
 
 /** One model file found on disk, wherever it lives. */
 export interface ModelEntry {

@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import fs from "fs-extra";
-import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources.ts";
+import { WHISPERCPP_VERSION, whispercppReleaseTagUrl, whispercppCloneUrl } from "./webSources/whisperModels.ts";
 
 export type DependencyName = "ffmpeg" | "whisper" | "llama";
 

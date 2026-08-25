@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import zlib from "node:zlib";
+import crypto from "node:crypto";
 import fs from "fs-extra";
 import type { AccelBackend } from "../types.ts";
 
@@ -328,6 +329,35 @@ export interface DownloadProgress {
 }
 
 export type DownloadProgressCallback = (progress: DownloadProgress) => void;
+
+/** Lowercase hex SHA-256 of a file's contents, streamed rather than loaded whole. */
+export async function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", reject);
+    hash.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+/** What a checksum mismatch handler is told, to explain the choice to the user. */
+export interface ChecksumMismatch {
+  filename: string;
+  expected: string;
+  actual: string;
+}
+
+/**
+ * Asked only when a *known* checksum doesn't match a freshly downloaded file
+ * - never for a model with no checksum on file, which skips the check
+ * entirely. Return true to delete the file (and retry/try the next mirror),
+ * false to keep it anyway. vno never deletes a download on a checksum
+ * mismatch without this confirmation - see downloadModel in whispercpp.ts and
+ * llamacpp.ts, the only callers.
+ */
+export type ChecksumMismatchHandler = (info: ChecksumMismatch) => Promise<boolean> | boolean;
 
 interface DownloadOptions {
   onProgress?: DownloadProgressCallback | null;

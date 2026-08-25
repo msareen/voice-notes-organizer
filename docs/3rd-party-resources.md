@@ -53,6 +53,13 @@ default set (`small`, `turbo`, or whichever single model `--model` asked for)
 that isn't already there, downloads it straight into the *active* folder's
 `models/`.
 
+**7. llama.cpp, separately and only if asked.** None of the steps above touch
+llama.cpp — summarization is entirely optional, so a plain `vno setup` never
+installs or configures it. That's its own explicit step, `vno setup
+--llama`; see
+[llama.cpp (optional summarization) is managed very differently](#llamacpp-optional-summarization-is-managed-very-differently)
+below.
+
 That's the whole flow — everything after this (running a transcription) just
 reuses steps 1 and 4's lookup, without re-asking anything.
 

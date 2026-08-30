@@ -1,3 +1,4 @@
+import path from "node:path";
 import { accelState, crossLanguageState } from "../../../lib/whisper/whisper.ts";
 import { decodeState, isDecodeMode, sanitizeManualDecode } from "../../../lib/whisper/decodeProfile.ts";
 import { resolveModelsDir as resolveWhisperModelsDir } from "../../../lib/whisper/whispercpp.ts";
@@ -17,6 +18,7 @@ interface SettingsBody {
   transcribeLanguage?: string;
   crossLanguageModel?: string | null;
   crossLanguageMap?: unknown;
+  targetPath?: string;
   summaryModel?: string | null;
   summaryPrompt?: string | null;
   summaryEnabled?: unknown;
@@ -51,6 +53,20 @@ export function createSettingsRoutes(ctx: ServerContext) {
         ...crossLanguageState(config),
         map: normalizeLanguageMap(body.crossLanguageMap),
       };
+    }
+    // Only the saved config changes here - `ctx.target` is baked into this
+    // running server's closures (resolveInside, the note cache, ...) at
+    // startup, so a live move would mean re-scanning and re-wiring all of
+    // that mid-request. Simplest correct thing: persist it and say so: the
+    // new value takes effect next launch, same as "vno setting" already does
+    // from the CLI.
+    let targetChanged = false;
+    if ("targetPath" in body && typeof body.targetPath === "string" && body.targetPath.trim()) {
+      const resolved = path.resolve(body.targetPath.trim());
+      if (resolved !== config.target) {
+        config.target = resolved;
+        targetChanged = true;
+      }
     }
     // Validated against what's actually discovered on disk, not a fixed
     // catalog - a dropped-in .gguf is a legitimate choice too.
@@ -93,6 +109,7 @@ export function createSettingsRoutes(ctx: ServerContext) {
     }
     await ctx.saveConfig();
     ctx.log("Settings updated from the browser.");
+    if (targetChanged) ctx.log(`Target folder set to ${config.target} - restart vno to pick it up.`);
     return ctx.sendJson(200, { config: (await ctx.stateResponse()).config });
   }
 

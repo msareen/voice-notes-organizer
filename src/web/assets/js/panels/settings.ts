@@ -26,6 +26,7 @@ interface SettingsPatch {
   transcribeLanguage: string;
   crossLanguageModel: string | null;
   crossLanguageMap: Record<string, string>;
+  targetPath: string;
   openWhenDone: boolean;
   rememberDeletions: boolean;
   useGpu?: boolean;
@@ -71,6 +72,7 @@ export function openSettings(): void {
     openSel: HTMLSelectElement,
     rememberSel: HTMLSelectElement,
     gpuSel: HTMLSelectElement | null;
+  var targetInput: HTMLInputElement;
   var crossModelSel: HTMLSelectElement,
     crossFromSel: HTMLSelectElement,
     crossToSel: HTMLSelectElement,
@@ -167,13 +169,23 @@ export function openSettings(): void {
       var pl = document.createElement("label");
       pl.textContent = "Target folder";
       var pathHelp = helpToggle("Every import — a detected volume or a source folder below — copies into here. " +
-        "Change it with \"vno setting\" — moving it needs a re-scan.");
+        "This only moves where new files land; it doesn't move anything already in the old folder. " +
+        "Takes effect the next time vno is opened.");
       pl.appendChild(pathHelp.button);
       pathField.appendChild(pl);
-      var pv = document.createElement("div");
-      pv.className = "path";
-      pv.textContent = CONFIG.target;
-      pathField.appendChild(pv);
+      var pathRow = document.createElement("div");
+      pathRow.className = "source-row";
+      targetInput = document.createElement("input");
+      targetInput.type = "text";
+      targetInput.value = CONFIG.target;
+      targetInput.className = "source-path-input";
+      pathRow.appendChild(targetInput);
+      pathRow.appendChild(button("Browse…", "", function () {
+        browseFsFolders(targetInput.value.trim() || null, function (chosen) {
+          targetInput.value = chosen;
+        });
+      }, "Pick a folder on this computer"));
+      pathField.appendChild(pathRow);
       pathField.appendChild(pathHelp.hint);
       importCol.appendChild(pathField);
 
@@ -582,6 +594,7 @@ export function openSettings(): void {
         transcribeLanguage: languageSel.value,
       crossLanguageModel: crossModelSel.value || null,
       crossLanguageMap: crossMap,
+        targetPath: targetInput.value.trim(),
         openWhenDone: openSel.value === "true",
         rememberDeletions: rememberSel.value === "true",
         summaryEnabled: summaryEnabledSel.value === "true"

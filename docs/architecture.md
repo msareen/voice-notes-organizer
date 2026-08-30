@@ -24,7 +24,7 @@ src/
   lib/               domain logic and OS access, shared by the CLI and the UI
     config.ts  engineInstall.ts  setup.ts  open.ts  protocol.ts
     sessionToken.ts
-    whisper/           whisper.ts  whispercpp.ts
+    whisper/           whisper.ts  whispercpp.ts  decodeProfile.ts  detect-hallucination.ts
     llama/             llama.ts  llamacpp.ts
     webSources/        interfaces.ts  whisperModels.ts  llamaModels.ts
     notes/             notes.ts  notesCache.ts  vtt.ts  ledger.ts
@@ -67,7 +67,9 @@ so anything there is safe to reuse from either side.
 | `lib/config.ts` | Load / save `~/.vno/config.json`, defaults, corrupt-file recovery |
 | `lib/import/volumes.ts` | Per-OS removable-volume detection |
 | `lib/import/sync.ts` | Audio file discovery, the flat copy, self-healing old nested imports — reports progress rather than printing it, so the terminal and the page can each render it their own way |
-| `lib/whisper/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers) |
+| `lib/whisper/whisper.ts` | Resolving the installed whisper.cpp binary/model and running a transcription (ffmpeg pre-conversion to WAV, spawning the binary, accel-state helpers, and the adaptive retry ladder) |
+| `lib/whisper/decodeProfile.ts` | Decode settings → whisper.cpp flags, and the escalation ladder the adaptive mode climbs. `resolveDecodePlan` is the `resolveLanguagePlan` of decoding: one place every caller reads the rule from |
+| `lib/whisper/detect-hallucination.ts` | Whether a transcript looks fabricated, from cue text and timings alone (repeats, uniform timestamps, low lexical diversity, impossible speech rate). No whisper.cpp flags, no confidence scores — see the invariant in AGENTS.md for why not |
 | `lib/whisper/whispercpp.ts` | Installing whisper.cpp itself: `vno-install.json`, per-platform binary acquisition (Homebrew, GitHub release zip, `cmake` source build), model resolution/download/checksum-verified validation |
 | `lib/llama/llama.ts` | Resolving the installed llama.cpp binary/model and running a summarization (no ffmpeg step — text in, text out). Optional; see [summarization.md](summarization.md) |
 | `lib/llama/llamacpp.ts` | Finding the llama.cpp binary (PATH, or a manual `config.llamaCliPath` override); downloading a model from vno's curated catalog (`webSources/llamaModels.ts`), or just discovering any `.gguf` you drop in yourself, under a local/global `models/` folder. The binary itself is installed by `brew`/`winget`, not vno |

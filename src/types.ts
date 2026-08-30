@@ -63,6 +63,80 @@ export interface CrossLanguage {
   map: Record<string, string>;
 }
 
+/**
+ * How hard vno works to get a clean transcript out of whisper.cpp.
+ *
+ * whisper (the model, not the binary) is prone to repetition loops and
+ * phantom text over silence, and it's markedly worse on some
+ * platform/backend combinations than others - the same recording can be
+ * clean on a CUDA box and a wall of repeated sentences on Metal. There is no
+ * single flag that fixes it, so this is a mode switch over three strategies:
+ *
+ * - "auto"     - one pass on whisper.cpp's own defaults. What vno has always
+ *                done, kept as the always-available fallback.
+ * - "adaptive" - the same first pass, then read the transcript back and look
+ *                for loop signatures (lib/whisper/detect-hallucination.ts); only if
+ *                one trips does it retry on progressively more conservative
+ *                settings (lib/whisper/decodeProfile.ts's LADDER). A clean
+ *                file costs exactly what "auto" costs.
+ * - "manual"   - one pass with the flags below, no detection and no retry.
+ *                For pinning down which single flag your machine needs.
+ */
+export interface DecodeSettings {
+  mode: DecodeMode;
+  /** Only consulted when `mode` is "manual" - the other modes ignore it entirely. */
+  manual: ManualDecode;
+}
+
+export type DecodeMode = "auto" | "adaptive" | "manual";
+
+/**
+ * Hand-set whisper.cpp decode flags, and the vocabulary the adaptive ladder's
+ * rungs are written in too - so every rung is reproducible by hand here,
+ * which is what makes "manual" a debugging tool rather than a parallel
+ * universe.
+ *
+ * `null` on a numeric field means "don't pass the flag at all" rather than
+ * some remembered default. That's deliberate: whisper.cpp reads `-bs`/`-bo`'s
+ * defaults out of `whisper_full_default_params()`, and those have changed
+ * between releases, so writing today's values into config would silently pin
+ * them across an upgrade. It also means an untouched block behaves exactly
+ * like "auto", which is the right place to start tuning from.
+ */
+export interface ManualDecode {
+  /** `--vad` - Silero speech detection, so silence never reaches the decoder. */
+  vad: boolean;
+  /** `-vt` - how confident the VAD must be to call something speech. */
+  vadThreshold: number | null;
+  /**
+   * Whether each 30s window is decoded knowing what the previous one said
+   * (whisper.cpp's `-mc`, faster-whisper's `condition_on_previous_text`).
+   * `false` emits `-mc 0` and is the single biggest anti-loop lever there is:
+   * a loop that starts in one window can't propagate into the next.
+   */
+  carryContext: boolean | null;
+  /** `-et` - entropy above which a window is retried at a higher temperature. */
+  entropyThold: number | null;
+  /** `-lpt` - average log-probability below which a window is retried. */
+  logprobThold: number | null;
+  /** `-nth` - no-speech probability above which a window is dropped. */
+  noSpeechThold: number | null;
+  /** `-bs` - beam search width. */
+  beamSize: number | null;
+  /** `-bo` - candidates kept per window. */
+  bestOf: number | null;
+  /** `-tpi` - temperature step for the fallback ladder; 0 emits `-nf` (no fallback). */
+  temperatureInc: number | null;
+  /**
+   * `-fa`/`-nfa`. whisper.cpp v1.9.x enables flash attention by default, and
+   * its Metal kernel is the usual suspect behind Mac-only garbage output -
+   * `false` turns it off, costing throughput and nothing else.
+   */
+  flashAttn: boolean | null;
+  /** `-sns` - suppress non-speech tokens, which is where phantom text starts. */
+  suppressNst: boolean;
+}
+
 export interface Config {
   target: string;
   sources: Source[];
@@ -73,6 +147,8 @@ export interface Config {
   /** ISO-639-1 code, or "auto" to detect per file. */
   transcribeLanguage: string;
   crossLanguage: CrossLanguage;
+  /** How hard to work for a clean transcript - see DecodeSettings. */
+  decode: DecodeSettings;
   rememberDeletions: boolean;
   openWhenDone: boolean;
   /** Port the viewer serves on. See cli/visualize.ts:DEFAULT_PORT for why it's fixed rather than picked per run. */
@@ -266,6 +342,7 @@ export interface StateConfig {
   defaultModel: string;
   transcribeLanguage: string;
   crossLanguage: CrossLanguage;
+  decode: DecodeSettings;
   summaryModel: string | null;
   summaryPrompt: string | null;
   summaryEnabled: boolean;

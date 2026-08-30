@@ -197,6 +197,64 @@ Accelerator run failed: ggml_cuda_init: no CUDA-capable device is detected
 Falling back to the CPU for the rest of this run.
 ```
 
+## When whisper invents text
+
+whisper doesn't fail loudly. When it goes wrong it produces fluent, confident,
+entirely fabricated text — most often one sentence repeated across a stretch of
+silence. The process exits successfully, the `.vtt` is well-formed, and nothing
+warns you except reading it.
+
+It's also uneven across machines. The same recording can be clean on a
+Windows/CUDA box and a wall of repeats on Apple Silicon, so "it worked on my
+other computer" tells you nothing about the file.
+
+vno checks for this by default. [`decode.mode`](configuration.md#decode) picks
+one of three strategies:
+
+| Mode | What happens |
+| --- | --- |
+| `adaptive` *(default)* | Transcribes exactly as `auto` would, reads the `.vtt` back, and only if it finds a loop signature retries on progressively safer settings |
+| `auto` | One pass on whisper.cpp's defaults. Never retried |
+| `manual` | One pass on flags you set yourself. No checking, no retry |
+
+**`adaptive` is free on a clean recording** — its first attempt *is* `auto`, so
+nothing extra runs unless something actually looks wrong. When something does,
+the run says so as it goes:
+
+```
+  flagged 42.0-91.5s: repeated x9: "Please subscribe to the channel"
+Transcript looks hallucinated - retrying with "anti-loop"...
+"anti-loop" came back clean.
+Settled on "anti-loop".
+```
+
+The ladder is, in order: stop carrying decoded text between 30-second windows
+and tighten the fallback thresholds; then also disable flash attention; then
+fall back to `large-v3` — skipped if it isn't downloaded, or if it's already
+the model you're using. A retry is kept only if it looks
+*better* than what came before, so escalating can't cost you a transcript you'd
+have accepted. If none of them help, you keep the best attempt and the log says
+plainly that it still looks wrong rather than pretending otherwise.
+
+**Genuine repetition isn't punished.** "Thank you", "yeah", "mm-hmm" and the
+like are things people really do say over and over, and nothing in a transcript
+distinguishes that from a stuck decoder — so those phrases are held to a much
+higher bar (ten in a row, not three) before they count as a loop, and the
+timing- and diversity-based checks skip that kind of chatter entirely.
+
+**To investigate one recording**, `--decode` overrides the mode for a single run
+without changing any setting:
+
+```bash
+vno t note.m4a --decode auto      # the plain one-pass behaviour, as a control
+vno t note.m4a --decode manual    # your own flags, from `vno setting`
+```
+
+`manual` mode exposes the individual whisper.cpp flags — see
+[`decode.manual`](configuration.md#decode) for the full table and
+[Troubleshooting](troubleshooting.md#the-transcript-repeats-the-same-sentence-over-and-over)
+for which to try first.
+
 ## Transcribe vs. translate
 
 | | Task | Result |

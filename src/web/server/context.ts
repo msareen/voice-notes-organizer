@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { saveConfig, configFilePath } from "../../lib/config.ts";
 import { buildNotes, TRANSCRIPT_EXTS, SUMMARY_EXT } from "../../lib/notes/notes.ts";
 import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper/whisper.ts";
+import { decodeState } from "../../lib/whisper/decodeProfile.ts";
 import { resolveModel } from "../../lib/whisper/whispercpp.ts";
 import { isLlamaInstalled, DEFAULT_SUMMARY_PROMPT } from "../../lib/llama/llama.ts";
 import { listModels as listLlamaModels } from "../../lib/llama/llamacpp.ts";
@@ -192,6 +193,10 @@ export async function createContext({
         // helper the transcribe path uses, so the dialog and the job can't
         // disagree about what an older config means.
         crossLanguage: crossLanguageState(currentConfig),
+        // How hard to work for a clean transcript, through the same defaulting
+        // helper the transcribe path uses - so the dialog and the job can't
+        // disagree about what an older config means.
+        decode: decodeState(currentConfig),
         openWhenDone: currentConfig.openWhenDone !== false,
         rememberDeletions: currentConfig.rememberDeletions !== false,
         theme: themeOf(currentConfig),

@@ -4,10 +4,14 @@ import path from "node:path";
 import chalk from "chalk";
 import fs from "fs-extra";
 import { which } from "../setup.ts";
-import { resolveBinary, resolveModel } from "./whispercpp.ts";
+import { resolveBinary, resolveModel, resolveVadModel } from "./whispercpp.ts";
 import { normalizeLanguageMap } from "../shared/languages.ts";
 import { repairSamsungM4A } from "../import/special-case-handling.ts";
-import type { AccelBackend, AccelState, Config, CrossLanguage } from "../../types.ts";
+import { parseCues, serializeCues } from "../notes/vtt.ts";
+import { decodeArgs, neutralKnobs, LADDER } from "./decodeProfile.ts";
+import { detectBadSpans, flaggedSeconds } from "./detect-hallucination.ts";
+import type { DecodePlan } from "./decodeProfile.ts";
+import type { AccelBackend, AccelState, Config, CrossLanguage, Cue } from "../../types.ts";
 
 /** Receives whisper.cpp's output line by line. */
 export type OutputCallback = (line: string) => void;
@@ -33,6 +37,8 @@ export interface TranscribeOptions {
   onOutput?: OutputCallback | null;
   language?: string;
   crossLanguage?: CrossLanguage | null;
+  /** Which decode strategy to run - see lib/whisper/decodeProfile.ts. Omitted = "auto". */
+  decode?: DecodePlan | null;
 }
 
 /**
@@ -56,6 +62,12 @@ export interface TranscribeOptions {
  * answer is rewritten through `map` before the real run. Ignored unless
  * `language` is "auto" - a pinned language is the more specific instruction.
  *
+ * `decode` picks how hard to work for a clean transcript: "auto" is one pass
+ * on whisper.cpp's defaults, "manual" is one pass on the caller's flags, and
+ * "adaptive" starts as "auto" then re-reads the transcript and retries on
+ * more conservative settings if it looks hallucinated. See
+ * lib/whisper/decodeProfile.ts; omitting it means "auto".
+ *
  * `onOutput` receives whisper.cpp's output line by line; the viewer uses it
  * to stream progress into the browser. Without it, output goes to the
  * terminal.
@@ -70,6 +82,7 @@ export async function transcribeFile(
     onOutput = null,
     language = "auto",
     crossLanguage = null,
+    decode = null,
   }: TranscribeOptions = {}
 ): Promise<void> {
   const startedAt = Date.now();
@@ -115,17 +128,32 @@ export async function transcribeFile(
         threads: threads || Math.max(1, os.cpus().length - 1),
         onOutput,
       });
-      announce("Transcribing with whisper.cpp...", onOutput);
-      whisperOutput = await runWhisperCpp(binary!.path, {
+      const plan = decode || { mode: "auto" as const, knobs: neutralKnobs() };
+      const job = {
         wavPath,
         modelPath: modelPath!,
         translate,
         device,
         threads: threads || Math.max(1, os.cpus().length - 1),
-        outputPrefix,
-        onOutput,
         language: spokenLanguage,
-      });
+        onOutput,
+      };
+
+      announce("Transcribing with whisper.cpp...", onOutput);
+      if (plan.mode === "adaptive") {
+        // Writes `transcript` itself, from the best rung's cues - so the
+        // freshness check below still applies unchanged.
+        whisperOutput = await climbLadder(binary!.path, job, { transcript });
+      } else {
+        // "auto" and "manual" are one pass straight to the final path, the
+        // way vno has always done it - no parse, no rewrite, whisper.cpp's
+        // own VTT verbatim.
+        whisperOutput = await runWhisperCpp(binary!.path, {
+          ...job,
+          outputPrefix,
+          extraArgs: decodeArgs(plan.knobs, await resolveVadModel()),
+        });
+      }
     } finally {
       await fs.remove(wavPath).catch(() => {});
     }
@@ -160,6 +188,150 @@ export async function transcribeFile(
     if (!repaired) throw err;
     announce("Retrying transcription with the repaired recording...", onOutput);
     await attempt(repaired);
+  }
+}
+
+/** Everything a single whisper.cpp pass needs except where to write it. */
+interface LadderJob {
+  wavPath: string;
+  modelPath: string;
+  translate: boolean;
+  device: string;
+  threads: number;
+  language: string;
+  onOutput: OutputCallback | null;
+}
+
+/**
+ * The adaptive mode: transcribe, read the result back, and only if it looks
+ * hallucinated try again on more conservative settings.
+ *
+ * The first pass is deliberately identical to what "auto" would have done, so
+ * a recording that transcribes cleanly - which is nearly all of them - costs
+ * exactly what it always did. Only a file that actually trips a detector in
+ * detect-hallucination.ts pays for a retry.
+ *
+ * Every pass writes to a temp prefix and is parsed back with `parseCues`;
+ * the winner is written to the real path here with `serializeCues`. That's
+ * the one behavioural difference from the other two modes - the VTT is
+ * vno's rendering of whisper.cpp's cues rather than whisper.cpp's own file -
+ * and it's unavoidable: picking between four candidate transcripts means
+ * holding them somewhere other than the destination.
+ *
+ * A rung's output only replaces the incumbent if it flags *strictly less*
+ * than what's already in hand. A more conservative decode can be worse as
+ * easily as better, and escalating must never cost the user a transcript
+ * they'd have been happy with.
+ *
+ * Returns the winning pass's whisper.cpp output, for the caller's failure
+ * diagnostics.
+ */
+async function climbLadder(
+  binaryPath: string,
+  job: LadderJob,
+  { transcript }: { transcript: string }
+): Promise<string> {
+  const { onOutput } = job;
+  const vadModelPath = await resolveVadModel();
+  const tempPrefixes: string[] = [];
+
+  // Each pass gets its own prefix: whisper.cpp overwrites `<prefix>.vtt`, and
+  // we need the previous best still readable while the next rung runs.
+  const nextPrefix = (name: string) =>
+    path.join(os.tmpdir(), `vno-decode-${process.pid}-${Date.now()}-${name}`);
+
+  async function pass(name: string, extraArgs: string[], modelPath: string): Promise<{ cues: Cue[]; output: string }> {
+    const prefix = nextPrefix(name);
+    tempPrefixes.push(prefix);
+    const output = await runWhisperCpp(binaryPath, { ...job, modelPath, outputPrefix: prefix, extraArgs });
+    const content = await fs.readFile(`${prefix}.vtt`, "utf8").catch(() => "");
+    return { cues: parseCues(content), output };
+  }
+
+  try {
+    let best = await pass("L0", [], job.modelPath);
+    let bestName = "default settings";
+    let flagged = detectBadSpans(best.cues);
+    // Counted rather than derived from LADDER.length: a rung whose model isn't
+    // installed, or that would re-run the model we're already on, is skipped
+    // without a pass, and reporting it as an attempt would overstate the work.
+    let attempts = 1;
+
+    // Nothing came back at all. That's the silent-recording / mangled-input
+    // case, which the caller already handles (including the Samsung repair
+    // retry) - and no amount of decode tuning invents speech that isn't
+    // there. Hand it back untouched rather than burning three more passes.
+    if (best.cues.length === 0) return best.output;
+
+    for (const rung of LADDER) {
+      if (flagged.length === 0) break;
+
+      for (const span of flagged) {
+        announce(`  flagged ${span.start.toFixed(1)}-${span.end.toFixed(1)}s: ${span.reason}`, onOutput);
+      }
+
+      let rungModelPath = job.modelPath;
+      if (rung.model) {
+        // Never start a multi-gigabyte download inside a transcription job -
+        // the user asked for a transcript, not an install.
+        const resolved = await resolveModel(rung.model);
+        if (!resolved) {
+          announce(
+            `Skipping the "${rung.name}" retry - it needs the ${rung.model} model. ` +
+              `Run \`vno setup --model ${rung.model}\` to make it available.`,
+            onOutput
+          );
+          continue;
+        }
+        // Already running the model this rung would switch to - which is the
+        // normal case for someone whose default is large-v3 rather than turbo.
+        // The rung's whole point is the change of model, so with the same
+        // weights and the same flags as the previous rung it would spend a
+        // full pass reproducing a transcript we already have.
+        if (path.resolve(resolved) === path.resolve(job.modelPath)) {
+          announce(`Skipping the "${rung.name}" retry - already running ${rung.model}.`, onOutput);
+          continue;
+        }
+        rungModelPath = resolved;
+      }
+
+      announce(`Transcript looks hallucinated - retrying with "${rung.name}"...`, onOutput);
+      const candidate = await pass(rung.name, decodeArgs(rung.knobs, vadModelPath), rungModelPath);
+      attempts++;
+      const candidateFlagged = detectBadSpans(candidate.cues);
+
+      if (candidate.cues.length > 0 && flaggedSeconds(candidateFlagged) < flaggedSeconds(flagged)) {
+        best = candidate;
+        bestName = rung.name;
+        flagged = candidateFlagged;
+        if (flagged.length === 0) {
+          announce(`"${rung.name}" came back clean.`, onOutput);
+          break;
+        }
+        announce(`"${rung.name}" is better but still flagged - trying the next one.`, onOutput);
+      } else {
+        announce(`"${rung.name}" was no better - keeping the previous transcript.`, onOutput);
+      }
+    }
+
+    if (flagged.length > 0) {
+      announce(
+        `Kept the best of ${attempts} attempt${attempts === 1 ? "" : "s"} (${bestName}), but ` +
+          `${Math.round(flaggedSeconds(flagged))}s still looks hallucinated. ` +
+          "Worth listening back before trusting this one.",
+        onOutput
+      );
+    } else if (bestName !== "default settings") {
+      announce(`Settled on "${bestName}".`, onOutput);
+    }
+
+    await fs.writeFile(transcript, serializeCues(best.cues), "utf8");
+    return best.output;
+  } finally {
+    for (const prefix of tempPrefixes) await fs.remove(`${prefix}.vtt`).catch(() => {});
+    // Unused here, but whisper.cpp writes alongside the prefix for any output
+    // format it was asked for - cheap insurance against a future flag change.
+    for (const prefix of tempPrefixes) await fs.remove(prefix).catch(() => {});
   }
 }
 
@@ -313,11 +485,23 @@ interface RunWhisperArgs {
   outputPrefix: string;
   onOutput: OutputCallback | null;
   language?: string;
+  /** Decode flags from lib/whisper/decodeProfile.ts, appended last. */
+  extraArgs?: string[];
 }
 
 function runWhisperCpp(
   binaryPath: string,
-  { wavPath, modelPath, translate, device, threads, outputPrefix, onOutput, language = "auto" }: RunWhisperArgs
+  {
+    wavPath,
+    modelPath,
+    translate,
+    device,
+    threads,
+    outputPrefix,
+    onOutput,
+    language = "auto",
+    extraArgs = [],
+  }: RunWhisperArgs
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -338,6 +522,9 @@ function runWhisperCpp(
     // is the one runtime lever left, for a user who wants to force the CPU
     // on an accelerator-capable build.
     if (device === "cpu") args.push("-ng");
+    // Last, so a decode profile can override anything above it - whisper.cpp
+    // takes the final occurrence of a repeated flag.
+    args.push(...extraArgs);
 
     const child = spawn(binaryPath, args, { windowsHide: true });
 

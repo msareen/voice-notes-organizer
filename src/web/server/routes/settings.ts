@@ -1,4 +1,5 @@
 import { accelState, crossLanguageState } from "../../../lib/whisper/whisper.ts";
+import { decodeState, isDecodeMode, sanitizeManualDecode } from "../../../lib/whisper/decodeProfile.ts";
 import { resolveModelsDir as resolveWhisperModelsDir } from "../../../lib/whisper/whispercpp.ts";
 import { resolveModelsDir as resolveLlamaModelsDir } from "../../../lib/llama/llamacpp.ts";
 import { sourceDestFolder } from "../../../lib/import/sync.ts";
@@ -23,6 +24,8 @@ interface SettingsBody {
   openWhenDone?: unknown;
   rememberDeletions?: unknown;
   useGpu?: unknown;
+  decodeMode?: unknown;
+  decodeManual?: unknown;
 }
 
 /** POST /api/settings, POST /api/sources, POST /api/sources/explore. */
@@ -68,6 +71,17 @@ export function createSettingsRoutes(ctx: ServerContext) {
     if ("summaryEnabled" in body) config.summaryEnabled = Boolean(body.summaryEnabled);
     if ("theme" in body && (THEME_IDS as readonly string[]).includes(body.theme!)) {
       config.theme = body.theme as ThemeId;
+    }
+    // Split into two scalars for the same reason `crossLanguage` is: the mode
+    // select and the flag rows are separate controls, and a client posting
+    // one must not blank the other. An unrecognised mode is dropped rather
+    // than stored - `decodeState` would silently fall back to "adaptive" on
+    // read anyway, and writing junk into config.json helps nobody.
+    if ("decodeMode" in body && isDecodeMode(body.decodeMode)) {
+      config.decode = { ...decodeState(config), mode: body.decodeMode };
+    }
+    if ("decodeManual" in body) {
+      config.decode = { ...decodeState(config), manual: sanitizeManualDecode(body.decodeManual) };
     }
     if ("openWhenDone" in body) config.openWhenDone = Boolean(body.openWhenDone);
     if ("rememberDeletions" in body) config.rememberDeletions = Boolean(body.rememberDeletions);

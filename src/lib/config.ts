@@ -81,6 +81,36 @@ function defaultConfig(): Config {
     // rewriting the answer. Only consulted when transcribeLanguage is "auto";
     // a pinned language wins, since it's the more specific instruction.
     crossLanguage: { model: null, map: {} },
+    // How hard vno works to get a clean transcript out of whisper.cpp, as one
+    // of "auto" (one pass on whisper.cpp's defaults - what vno always did),
+    // "adaptive" (that same pass, then re-read the transcript and only retry
+    // on more conservative settings if it looks like a repetition loop), or
+    // "manual" (one pass on the flags in `manual` below, no detection).
+    // "adaptive" is the default because its first rung *is* "auto": a clean
+    // recording costs exactly the same, and only a file that actually trips a
+    // loop detector pays for a retry. See types.ts's DecodeSettings for the
+    // whole rationale, and lib/whisper/decodeProfile.ts for the ladder.
+    //
+    // `manual` is ignored unless mode is "manual". `null` on a numeric field
+    // means "don't pass that flag", leaving whisper.cpp's own default in
+    // place - not a copy of today's default, which would pin it across a
+    // whisper.cpp upgrade.
+    decode: {
+      mode: "adaptive",
+      manual: {
+        vad: false,
+        vadThreshold: null,
+        carryContext: null,
+        entropyThold: null,
+        logprobThold: null,
+        noSpeechThold: null,
+        beamSize: null,
+        bestOf: null,
+        temperatureInc: null,
+        flashAttn: null,
+        suppressNst: false,
+      },
+    },
     // Whether recordings deleted through vno (the UI's delete/cleanup, and
     // `vno cleanup`) are remembered in ~/.vno/deleted.json so a later import
     // doesn't copy them back off a device that still has them. Turning this
@@ -160,6 +190,15 @@ export async function loadConfig(): Promise<Config> {
         ...defaults.crossLanguage,
         ...data.crossLanguage,
         map: normalizeLanguageMap(data.crossLanguage?.map),
+      },
+      // Two levels deep, so it needs its own spread rather than riding on the
+      // one above: a config written before `manual` grew a field would
+      // otherwise arrive with that field missing and read as `undefined`,
+      // which decodeArgs can't tell from a deliberate null.
+      decode: {
+        ...defaults.decode,
+        ...data.decode,
+        manual: { ...defaults.decode.manual, ...data.decode?.manual },
       },
     };
     delete merged.gpu;

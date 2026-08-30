@@ -9,6 +9,7 @@ import {
   lastLine,
   resolveLanguagePlan,
 } from "../../../lib/whisper/whisper.ts";
+import { resolveDecodePlan } from "../../../lib/whisper/decodeProfile.ts";
 import { isLanguageChoice } from "../../../lib/shared/languages.ts";
 import { MODELS } from "../constants.ts";
 import type { ServerContext } from "../context.ts";
@@ -44,6 +45,7 @@ export function createWhisperRunner(ctx: ServerContext) {
   return function whisperRunner({ model, translate, language: languageOverride = null }: WhisperRunOptions): WhisperRun {
     let device: string = resolveAccel(ctx.config);
     const { language, crossLanguage } = resolveLanguagePlan(ctx.config, languageOverride);
+    const decode = resolveDecodePlan(ctx.config);
     if (device !== "cpu") {
       const accel = accelState(ctx.config);
       ctx.jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
@@ -52,7 +54,7 @@ export function createWhisperRunner(ctx: ServerContext) {
 
     return async function run(file: string): Promise<void> {
       try {
-        await transcribeFile(file, { model, translate, device, language, crossLanguage, onOutput: (line) => ctx.jobLog(line) });
+        await transcribeFile(file, { model, translate, device, language, crossLanguage, decode, onOutput: (line) => ctx.jobLog(line) });
         return;
       } catch (err) {
         if (device === "cpu" || !isDeviceError(errorMessage(err))) throw err;
@@ -60,7 +62,7 @@ export function createWhisperRunner(ctx: ServerContext) {
         ctx.jobLog("Falling back to the CPU for the rest of this job.");
         device = "cpu";
       }
-      await transcribeFile(file, { model, translate, device: "cpu", language, crossLanguage, onOutput: (line) => ctx.jobLog(line) });
+      await transcribeFile(file, { model, translate, device: "cpu", language, crossLanguage, decode, onOutput: (line) => ctx.jobLog(line) });
     };
   };
 }

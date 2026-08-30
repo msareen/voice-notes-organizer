@@ -831,6 +831,30 @@ button.chip.on { background: var(--accent-soft); border-color: var(--accent-line
    just unused - so this dims rather than hides them. */
 .ext-chips.is-off { opacity: .45; }
 
+/* ---- Manual decode flags (Settings → Transcription quality) ---- */
+/* Only rendered in "manual" mode - the other two modes decide for themselves,
+   so the whole block is toggled with [hidden] rather than dimmed. */
+.decode-manual[hidden] { display: none; }
+/* Auto-fit rather than a fixed count: seven number fields wrap sensibly in a
+   narrow dialog without a media query, and each stays wide enough to read a
+   negative float in.
+
+   `align-items: end` is load-bearing, not a nicety. These labels are uppercase
+   micro-text, so one of them wrapping to two lines is normal at some dialog
+   widths, and grid's default `stretch` then leaves that column's input sitting
+   a line below the rest of the row. Bottom-aligning the fields keeps the inputs
+   on one line whatever the labels do. */
+.decode-numbers {
+  display: grid; gap: 8px 12px; align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.decode-numbers .field { margin: 0; min-width: 0; }
+.decode-numbers input { width: 100%; }
+/* The placeholder is carrying real meaning here - it's whisper.cpp's own
+   default, i.e. what an empty box actually does - so it reads a touch
+   stronger than a normal hint. */
+.decode-numbers input::placeholder { opacity: .6; font-style: italic; }
+
 /* ---- Source folder blocks (Settings → Additional Source Folders) ---- */
 .source-list-head {
   display: flex; align-items: center; justify-content: space-between;

@@ -32,6 +32,15 @@ interface SettingsPatch {
   summaryModel?: string | null;
   summaryPrompt?: string | null;
   summaryEnabled: boolean;
+  decodeMode?: string;
+  decodeManual?: Record<string, unknown>;
+}
+
+/** Every control in the manual-decode block, so onConfirm can read them back. */
+interface DecodeKnobInputs {
+  tri: Record<string, HTMLSelectElement>;
+  bool: Record<string, HTMLSelectElement>;
+  num: Record<string, HTMLInputElement>;
 }
 
 /** One level of the unconfined filesystem browser (GET /api/browse-fs). */
@@ -66,6 +75,8 @@ export function openSettings(): void {
     crossFromSel: HTMLSelectElement,
     crossToSel: HTMLSelectElement,
     crossAddBtn: HTMLButtonElement;
+  var decodeModeSel: HTMLSelectElement;
+  var decodeKnobs: DecodeKnobInputs;
   var summaryEnabledSel: HTMLSelectElement;
   var summaryModelSel: HTMLSelectElement | null;
   var summaryPromptTa: HTMLTextAreaElement | null;
@@ -305,6 +316,125 @@ export function openSettings(): void {
       renderCrossMap();
       syncCrossEnabled();
 
+      // Transcription quality. Full-width because the manual block is a dozen
+      // controls, and they only exist in one of the three modes - "auto" and
+      // "adaptive" decide for themselves (see lib/whisper/decodeProfile.ts), so
+      // showing knobs there would promise a control that isn't wired up.
+      var decodeSection = document.createElement("div");
+      decodeSection.className = "settings-full";
+      host.appendChild(decodeSection);
+
+      var decodeLabelEl = document.createElement("h4");
+      decodeLabelEl.textContent = "Transcription quality";
+      var decodeHelp = helpToggle("whisper invents text sometimes — usually the same sentence over and over across " +
+        "a stretch of silence — and how often depends on the machine: the same recording can be clean on a Windows " +
+        "GPU and a wall of repeats on a Mac. \"Adaptive\" transcribes normally, reads the result back, and only if it " +
+        "looks like a loop does it try again on safer settings, so a clean recording costs exactly what it always did. " +
+        "\"Auto\" is one plain pass with no checking. \"Manual\" is one pass with the flags you set here — for working " +
+        "out which single one your machine needs.");
+      decodeLabelEl.appendChild(decodeHelp.button);
+      decodeSection.appendChild(decodeLabelEl);
+      decodeSection.appendChild(decodeHelp.hint);
+
+      var decodeCfg = CONFIG.decode || { mode: "adaptive", manual: {} as never };
+      decodeModeSel = selectField(decodeSection, "Mode", [
+        { label: "Adaptive — retry on safer settings only if the transcript looks hallucinated", value: "adaptive" },
+        { label: "Auto — one pass on whisper.cpp's defaults, never retried", value: "auto" },
+        { label: "Manual — one pass on the flags below", value: "manual" }
+      ], decodeCfg.mode || "adaptive");
+
+      var manualBox = document.createElement("div");
+      manualBox.className = "decode-manual";
+      decodeSection.appendChild(manualBox);
+
+      var m = decodeCfg.manual || ({} as never);
+      // "" is the third state, not an empty answer: it means "pass no flag and
+      // let whisper.cpp use its own default", which is different from both on
+      // and off. The same convention runs through ManualDecode and the
+      // sanitizer that reads this back.
+      var triValue = function (v: boolean | null | undefined): string {
+        return v === null || v === undefined ? "" : String(v);
+      };
+      decodeKnobs = { tri: {}, bool: {}, num: {} };
+
+      decodeKnobs.tri.carryContext = selectField(manualBox, "Carry context between windows", [
+        { label: "Leave it to whisper.cpp", value: "" },
+        { label: "On — better continuity across 30-second windows", value: "true" },
+        { label: "Off — a repetition loop can't spread past one window", value: "false" }
+      ], triValue(m.carryContext),
+        "whisper decodes 30 seconds at a time, normally letting each window see what the last one said. " +
+        "Turning that off is the single most effective thing against repetition loops: a loop that starts " +
+        "somewhere can no longer feed itself into the next window.");
+
+      decodeKnobs.tri.flashAttn = selectField(manualBox, "Flash attention", [
+        { label: "Leave it to whisper.cpp", value: "" },
+        { label: "On — faster", value: "true" },
+        { label: "Off — slower, but rules out the GPU kernel as the cause", value: "false" }
+      ], triValue(m.flashAttn),
+        "On by default in whisper.cpp. Its Metal implementation is the usual suspect when output is broken " +
+        "on a Mac and fine on the same file elsewhere — turning it off costs speed and nothing else.");
+
+      decodeKnobs.bool.vad = selectField(manualBox, "Speech detection (VAD)", [
+        { label: "Off", value: "false" },
+        { label: "On — drop silence before whisper sees it", value: "true" }
+      ], String(Boolean(m.vad)),
+        "Runs Silero voice-activity detection first, so stretches of silence never reach the decoder. " +
+        "Silence is where invented text comes from. Needs its model — run \"vno setup\" if it isn't installed; " +
+        "until then runs quietly carry on without it.");
+
+      decodeKnobs.bool.suppressNst = selectField(manualBox, "Suppress non-speech tokens", [
+        { label: "Off", value: "false" },
+        { label: "On — fewer [music] / [noise] style inventions", value: "true" }
+      ], String(Boolean(m.suppressNst)));
+
+      var numbers = document.createElement("div");
+      numbers.className = "decode-numbers";
+      manualBox.appendChild(numbers);
+
+      // Placeholder, not value: an empty box means "leave whisper.cpp alone",
+      // and showing its default as a real value would both look like a
+      // setting the user made and freeze that number into config on save.
+      [
+        { key: "entropyThold", label: "Entropy threshold", hint: "2.40", step: "0.1" },
+        { key: "logprobThold", label: "Log-prob threshold", hint: "-1.00", step: "0.1" },
+        { key: "noSpeechThold", label: "No-speech threshold", hint: "0.60", step: "0.05" },
+        // "VAD threshold" rather than spelling it out: the select above already
+        // says "Speech detection (VAD)", and the long form is the one label here
+        // wide enough to wrap in a five-column row.
+        { key: "vadThreshold", label: "VAD threshold", hint: "0.50", step: "0.05" },
+        { key: "temperatureInc", label: "Temperature step", hint: "0.20", step: "0.1" },
+        // Last, and in this order: they're a pair, so keeping them adjacent
+        // means a row break lands before them rather than between them.
+        { key: "beamSize", label: "Beam size", hint: "default", step: "1" },
+        { key: "bestOf", label: "Best-of", hint: "default", step: "1" }
+      ].forEach(function (spec) {
+        var field = document.createElement("div");
+        field.className = "field";
+        var label = document.createElement("label");
+        label.textContent = spec.label;
+        field.appendChild(label);
+        var input = document.createElement("input");
+        input.type = "number";
+        input.step = spec.step;
+        input.placeholder = spec.hint;
+        var current = (m as unknown as Record<string, number | null>)[spec.key];
+        input.value = current === null || current === undefined ? "" : String(current);
+        field.appendChild(input);
+        numbers.appendChild(field);
+        decodeKnobs.num[spec.key] = input;
+      });
+
+      var decodeHint = document.createElement("p");
+      decodeHint.className = "hint";
+      decodeHint.textContent = "Blank means \"don't pass that flag\" — whisper.cpp uses its own default, shown greyed out.";
+      manualBox.appendChild(decodeHint);
+
+      var syncDecodeMode = function () {
+        manualBox.hidden = decodeModeSel.value !== "manual";
+      };
+      decodeModeSel.addEventListener("change", syncDecodeMode);
+      syncDecodeMode();
+
       var sourcesSection = document.createElement("div");
       sourcesSection.className = "settings-full";
       host.appendChild(sourcesSection);
@@ -457,6 +587,24 @@ export function openSettings(): void {
         summaryEnabled: summaryEnabledSel.value === "true"
       };
       if (gpuSel) patch.useGpu = gpuSel.value === "true";
+      // Always sent, in both directions: the mode is what decides whether the
+      // manual block is even read, and a user who tunes flags, switches to
+      // adaptive and switches back should find their flags still there.
+      patch.decodeMode = decodeModeSel.value;
+      patch.decodeManual = (function () {
+        var out: Record<string, unknown> = {};
+        Object.keys(decodeKnobs.tri).forEach(function (k) {
+          out[k] = decodeKnobs.tri[k].value === "" ? null : decodeKnobs.tri[k].value === "true";
+        });
+        Object.keys(decodeKnobs.bool).forEach(function (k) {
+          out[k] = decodeKnobs.bool[k].value === "true";
+        });
+        Object.keys(decodeKnobs.num).forEach(function (k) {
+          var raw = decodeKnobs.num[k].value.trim();
+          out[k] = raw === "" ? null : Number(raw);
+        });
+        return out;
+      })();
       if (summaryModelSel) patch.summaryModel = summaryModelSel.value || null;
       if (summaryPromptTa) patch.summaryPrompt = summaryPromptTa.value.trim() || null;
       var sources = sourceRows

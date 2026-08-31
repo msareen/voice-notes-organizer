@@ -6,6 +6,7 @@ import { saveConfig, configFilePath } from "../../lib/config.ts";
 import { buildNotes, TRANSCRIPT_EXTS, SUMMARY_EXT } from "../../lib/notes/notes.ts";
 import { accelState, resolveAccel, crossLanguageState } from "../../lib/whisper/whisper.ts";
 import { decodeState } from "../../lib/whisper/decodeProfile.ts";
+import { STATUS_PREFIX } from "../../lib/whisper/whisper.ts";
 import { resolveModel } from "../../lib/whisper/whispercpp.ts";
 import { isLlamaInstalled, DEFAULT_SUMMARY_PROMPT } from "../../lib/llama/llama.ts";
 import { listModels as listLlamaModels } from "../../lib/llama/llamacpp.ts";
@@ -61,6 +62,10 @@ export interface ServerContext {
   endJob(error?: unknown): Promise<void>;
   /** Returns a 409 Response when a job is already running, null otherwise. */
   guardJob(): Response | null;
+  /** The abort signal for the running job's spawned processes, or null when nothing is running. */
+  jobSignal(): AbortSignal | null;
+  /** Asks the running job to stop. No-op (returns false) when nothing is running. */
+  cancelJob(): boolean;
   removeRecording(rel: string): Promise<RemovalResult>;
   remember(entries: { rel: string; size: number | null }[], via: string): Promise<number>;
 
@@ -93,6 +98,10 @@ export async function createContext({
   let notes = await buildNotes(target, { onProgress: onScanProgress });
   const currentConfig = config;
   let job: Job | null = null; // at most one long-running job at a time
+  // Aborted by cancelJob(); routes/whisper.ts thread its signal into every
+  // spawned child so cancelling actually kills the in-flight process rather
+  // than just stopping the job loop between files.
+  let jobController: AbortController | null = null;
 
   const clients = new Set<ReadableStreamDefaultController<Uint8Array>>(); // open SSE streams
   const encoder = new TextEncoder();
@@ -228,13 +237,18 @@ export async function createContext({
   /* --------------------------------- jobs -------------------------------- */
 
   function startJob(kind: string, title: string, total: number): Job {
-    job = { id: crypto.randomUUID(), kind, title, total, done: 0, running: true, error: null, lines: [] };
+    job = { id: crypto.randomUUID(), kind, title, total, done: 0, running: true, error: null, lines: [], status: null };
+    jobController = new AbortController();
     broadcast("job", job);
     return job;
   }
 
   function jobLog(line: string): void {
     if (!job) return;
+    // A line marked with STATUS_PREFIX is also the current headline status -
+    // shown in the job strip itself, not just the log panel - so the browser
+    // doesn't need to open the log to see an adaptive-decode retry in progress.
+    if (line.startsWith(STATUS_PREFIX)) job.status = line.slice(STATUS_PREFIX.length);
     job.lines.push(line);
     if (job.lines.length > 200) job.lines.shift();
     broadcast("job", job);
@@ -251,6 +265,7 @@ export async function createContext({
     if (!job) return;
     job.running = false;
     job.error = error ? String((error as Error)?.message || error) : null;
+    jobController = null;
     broadcast("job", job);
     await refreshNotes();
   }
@@ -258,6 +273,18 @@ export async function createContext({
   function guardJob(): Response | null {
     if (job && job.running) return sendJson(409, { error: `Busy: ${job.title}` });
     return null;
+  }
+
+  function jobSignal(): AbortSignal | null {
+    return jobController ? jobController.signal : null;
+  }
+
+  function cancelJob(): boolean {
+    if (!job || !job.running || !jobController) return false;
+    jobController.abort();
+    job.status = "Cancelling...";
+    broadcast("job", job);
+    return true;
   }
 
   /* ------------------------- shared file mutation ------------------------ */
@@ -342,6 +369,8 @@ export async function createContext({
     jobProgress,
     endJob,
     guardJob,
+    jobSignal,
+    cancelJob,
     removeRecording,
     remember,
     stop: notAttached("stop"),

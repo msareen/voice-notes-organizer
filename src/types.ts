@@ -327,6 +327,8 @@ export interface Job {
   running: boolean;
   error: string | null;
   lines: string[];
+  /** Short "what's happening right now" line - e.g. an adaptive-decode retry in progress. Cleared on a fresh job. */
+  status: string | null;
 }
 
 /**

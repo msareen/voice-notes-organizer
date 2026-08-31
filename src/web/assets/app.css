@@ -740,12 +740,14 @@ mark.hit {
 
 /* ---- Job strip: live progress for import / transcribe / cleanup ---- */
 .jobstrip {
-  flex: none; display: none; align-items: center; gap: 12px;
+  flex: none; display: none; flex-direction: column; gap: 5px;
   padding: 9px clamp(14px, 3vw, 28px); background: var(--surface-2);
   border-bottom: 1px solid var(--line);
   font-family: var(--mono); font-size: .72rem; color: var(--dim);
 }
 .jobstrip.on { display: flex; }
+.jobstrip-row { display: flex; align-items: center; gap: 12px; }
+.jobstrip-row[hidden] { display: none; }
 .jobstrip .jt { flex: 0 1 auto; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar {
   flex: 1 1 auto; min-width: 90px; height: 6px; border-radius: 99px;
@@ -753,6 +755,15 @@ mark.hit {
 }
 .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
 .jobstrip .pct { flex: none; color: var(--accent); font-variant-numeric: tabular-nums; }
+.jobstrip-row .btn.icon[hidden] { display: none; }
+/* Sub-status row: prose about what the job is doing right now (e.g. an
+   adaptive-decode retry), not a progress figure - deliberately no number.
+   Hidden outright (not just emptied) when there's nothing to say, so a plain
+   run that never escalates doesn't leave a dead strip of blank space. */
+.jobstrip-status {
+  flex: 1 1 auto; color: var(--dim); font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .logbox {
   position: fixed; right: 16px; bottom: 16px; width: min(560px, 92vw);
   max-height: 44vh; z-index: 25; display: flex; flex-direction: column;

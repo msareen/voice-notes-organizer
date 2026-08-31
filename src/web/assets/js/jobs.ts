@@ -15,6 +15,9 @@ var jobstrip = document.getElementById("jobstrip")!;
 var jobTitle = document.getElementById("jobTitle")!;
 var jobBar = document.getElementById("jobBar")!;
 var jobPct = document.getElementById("jobPct")!;
+var jobStatus = document.getElementById("jobStatus")!;
+var jobstripSub = document.getElementById("jobstripSub")!;
+var btnCancelJob = document.getElementById("btnCancelJob") as HTMLButtonElement;
 var opButtons = ["btnImport", "btnTranscribe", "btnCleanup"].map(function (id) {
   return document.getElementById(id) as HTMLButtonElement;
 });
@@ -30,6 +33,15 @@ function renderJob(j: Job | null) {
   var pct = j.total ? Math.min(100, Math.round((j.done / j.total) * 100)) : 0;
   jobBar.style.width = pct + "%";
   jobPct.textContent = j.running ? pct + "%" : (j.error ? "failed" : "done");
+  // No number here on purpose: a sub-status (like an adaptive-decode retry)
+  // is prose, not a count - there's no "n of m" to show alongside it. The row
+  // itself only appears once there's something to say, so a plain first pass
+  // (nothing flagged, nothing to retry) doesn't leave a dead strip of blank
+  // space under the progress bar.
+  jobStatus.textContent = j.status || "";
+  jobstripSub.hidden = !j.status;
+  btnCancelJob.hidden = !j.running;
+  btnCancelJob.disabled = false;
   opButtons.forEach(function (b) { b.disabled = !!j.running; });
   if (logBox) renderLog();
   clearTimeout(hideTimer);
@@ -40,6 +52,14 @@ function renderJob(j: Job | null) {
     }, 10000);
   }
 }
+
+btnCancelJob.addEventListener("click", function () {
+  btnCancelJob.disabled = true;
+  api("/api/job/cancel", { method: "POST" }).catch(function (err) {
+    btnCancelJob.disabled = false;
+    fail(err);
+  });
+});
 
 function renderLog() {
   if (!logBox) return;

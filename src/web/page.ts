@@ -28,6 +28,7 @@ const ICONS: Record<string, string> = {
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   quit: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><path d="M12 2v10"/>',
+  cancel: '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6"/><path d="M9 9l6 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>',
 };
@@ -84,10 +85,16 @@ export function renderPage({ rootLabel, token, theme = "tape" }: PageOptions): s
     </div>
   </header>
   <div class="jobstrip" id="jobstrip">
-    <span class="jt" id="jobTitle"></span>
-    <span class="bar"><i id="jobBar"></i></span>
-    <span class="pct" id="jobPct"></span>
-    <button class="btn" id="btnLog">Log</button>
+    <div class="jobstrip-row">
+      <span class="jt" id="jobTitle"></span>
+      <span class="bar"><i id="jobBar"></i></span>
+      <span class="pct" id="jobPct"></span>
+      <button class="btn" id="btnLog">Log</button>
+      <button class="btn icon danger" id="btnCancelJob" title="Cancel the running job" aria-label="Cancel job">${icon("cancel")}</button>
+    </div>
+    <div class="jobstrip-row jobstrip-sub" id="jobstripSub" hidden>
+      <span class="jobstrip-status" id="jobStatus"></span>
+    </div>
   </div>
   <div class="app">
     <aside class="sidebar">

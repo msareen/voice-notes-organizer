@@ -17,6 +17,27 @@ import type { AccelBackend, AccelState, Config, CrossLanguage, Cue } from "../..
 export type OutputCallback = (line: string) => void;
 
 /**
+ * Marks a line passed to `onOutput` as the job's current headline status -
+ * e.g. "adaptive decode is retrying with a more conservative pass" - rather
+ * than just one more line in the scrollback. context.ts:jobLog looks for this
+ * prefix and mirrors the (stripped) line onto `job.status`, which the job
+ * strip renders without the browser having to open the log panel.
+ */
+export const STATUS_PREFIX = "▸ ";
+
+/** Thrown when a caller's AbortSignal fires mid-run; never a real transcription failure. */
+export class TranscriptionCancelled extends Error {
+  constructor() {
+    super("Cancelled");
+    this.name = "TranscriptionCancelled";
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | null | undefined): void {
+  if (signal?.aborted) throw new TranscriptionCancelled();
+}
+
+/**
  * Whether whisper.cpp is callable. Resolved by checking the vendored
  * whisper-cpp/bin/ (both install roots) and PATH under any of its binary
  * names, never by running it - a directory scan is instant, unlike the old
@@ -39,6 +60,8 @@ export interface TranscribeOptions {
   crossLanguage?: CrossLanguage | null;
   /** Which decode strategy to run - see lib/whisper/decodeProfile.ts. Omitted = "auto". */
   decode?: DecodePlan | null;
+  /** Aborting this kills the in-flight ffmpeg/whisper.cpp child and rejects with TranscriptionCancelled. */
+  signal?: AbortSignal | null;
 }
 
 /**
@@ -83,6 +106,7 @@ export async function transcribeFile(
     language = "auto",
     crossLanguage = null,
     decode = null,
+    signal = null,
   }: TranscribeOptions = {}
 ): Promise<void> {
   const startedAt = Date.now();
@@ -115,8 +139,9 @@ export async function transcribeFile(
     const wavPath = path.join(os.tmpdir(), `vno-whisper-${process.pid}-${Date.now()}.wav`);
     let whisperOutput = "";
     try {
+      throwIfAborted(signal);
       announce("Converting to WAV...", onOutput);
-      await convertToWav(ffmpeg!, inputPath, wavPath);
+      await convertToWav(ffmpeg!, inputPath, wavPath, signal);
       // Runs against the WAV we just made, so guiding the language costs a
       // model load and one 30s encoder window - not a second conversion.
       const spokenLanguage = await guideLanguage({
@@ -127,6 +152,7 @@ export async function transcribeFile(
         device,
         threads: threads || Math.max(1, os.cpus().length - 1),
         onOutput,
+        signal,
       });
       const plan = decode || { mode: "auto" as const, knobs: neutralKnobs() };
       const job = {
@@ -137,6 +163,7 @@ export async function transcribeFile(
         threads: threads || Math.max(1, os.cpus().length - 1),
         language: spokenLanguage,
         onOutput,
+        signal,
       };
 
       announce("Transcribing with whisper.cpp...", onOutput);
@@ -177,6 +204,8 @@ export async function transcribeFile(
   try {
     await attempt(filePath);
   } catch (err) {
+    // A cancellation is never worth a repair-and-retry - the user asked to stop.
+    if (err instanceof TranscriptionCancelled) throw err;
     // Only worth the extra decode/rebuild pass for that one known Samsung
     // shape; any other failure (corrupt audio, unsupported format, a real
     // silent recording, etc.) just propagates as before.
@@ -200,6 +229,7 @@ interface LadderJob {
   threads: number;
   language: string;
   onOutput: OutputCallback | null;
+  signal?: AbortSignal | null;
 }
 
 /**
@@ -231,7 +261,7 @@ async function climbLadder(
   job: LadderJob,
   { transcript }: { transcript: string }
 ): Promise<string> {
-  const { onOutput } = job;
+  const { onOutput, signal } = job;
   const vadModelPath = await resolveVadModel();
   const tempPrefixes: string[] = [];
 
@@ -241,9 +271,10 @@ async function climbLadder(
     path.join(os.tmpdir(), `vno-decode-${process.pid}-${Date.now()}-${name}`);
 
   async function pass(name: string, extraArgs: string[], modelPath: string): Promise<{ cues: Cue[]; output: string }> {
+    throwIfAborted(signal);
     const prefix = nextPrefix(name);
     tempPrefixes.push(prefix);
-    const output = await runWhisperCpp(binaryPath, { ...job, modelPath, outputPrefix: prefix, extraArgs });
+    const output = await runWhisperCpp(binaryPath, { ...job, modelPath, outputPrefix: prefix, extraArgs, signal });
     const content = await fs.readFile(`${prefix}.vtt`, "utf8").catch(() => "");
     return { cues: parseCues(content), output };
   }
@@ -266,6 +297,10 @@ async function climbLadder(
     for (const rung of LADDER) {
       if (flagged.length === 0) break;
 
+      status(
+        `Gaps found (${flagged.length}) - attempting the "${rung.name}" pass...`,
+        onOutput
+      );
       for (const span of flagged) {
         announce(`  flagged ${span.start.toFixed(1)}-${span.end.toFixed(1)}s: ${span.reason}`, onOutput);
       }
@@ -295,7 +330,6 @@ async function climbLadder(
         rungModelPath = resolved;
       }
 
-      announce(`Transcript looks hallucinated - retrying with "${rung.name}"...`, onOutput);
       const candidate = await pass(rung.name, decodeArgs(rung.knobs, vadModelPath), rungModelPath);
       attempts++;
       const candidateFlagged = detectBadSpans(candidate.cues);
@@ -305,24 +339,24 @@ async function climbLadder(
         bestName = rung.name;
         flagged = candidateFlagged;
         if (flagged.length === 0) {
-          announce(`"${rung.name}" came back clean.`, onOutput);
+          status(`"${rung.name}" came back clean.`, onOutput);
           break;
         }
-        announce(`"${rung.name}" is better but still flagged - trying the next one.`, onOutput);
+        status(`"${rung.name}" is better but still flagged - trying the next one...`, onOutput);
       } else {
-        announce(`"${rung.name}" was no better - keeping the previous transcript.`, onOutput);
+        status(`"${rung.name}" was no better - keeping the previous transcript.`, onOutput);
       }
     }
 
     if (flagged.length > 0) {
-      announce(
+      status(
         `Kept the best of ${attempts} attempt${attempts === 1 ? "" : "s"} (${bestName}), but ` +
           `${Math.round(flaggedSeconds(flagged))}s still looks hallucinated. ` +
           "Worth listening back before trusting this one.",
         onOutput
       );
     } else if (bestName !== "default settings") {
-      announce(`Settled on "${bestName}".`, onOutput);
+      status(`Settled on "${bestName}".`, onOutput);
     }
 
     await fs.writeFile(transcript, serializeCues(best.cues), "utf8");
@@ -343,6 +377,7 @@ interface GuideLanguageArgs {
   device: string;
   threads: number;
   onOutput: OutputCallback | null;
+  signal?: AbortSignal | null;
 }
 
 /**
@@ -367,6 +402,7 @@ async function guideLanguage({
   device,
   threads,
   onOutput,
+  signal,
 }: GuideLanguageArgs): Promise<string> {
   const { model, map } = crossLanguageState({ crossLanguage });
   if (language !== "auto" || !model) return language;
@@ -380,8 +416,9 @@ async function guideLanguage({
   let detected: string | null = null;
   try {
     announce(`Detecting the language with "${model}"...`, onOutput);
-    detected = await detectLanguage(binaryPath, { wavPath, modelPath, device, threads });
+    detected = await detectLanguage(binaryPath, { wavPath, modelPath, device, threads, signal });
   } catch (err) {
+    if (err instanceof TranscriptionCancelled) throw err;
     announce(`Language detection failed (${lastLine(errorMessage(err))}). Detecting as usual instead.`, onOutput);
     return "auto";
   }
@@ -405,6 +442,32 @@ interface DetectLanguageArgs {
   modelPath: string;
   device: string;
   threads: number;
+  signal?: AbortSignal | null;
+}
+
+/**
+ * Wires an AbortSignal to a spawned child: firing it kills the child and
+ * rejects the caller's promise with TranscriptionCancelled instead of
+ * whatever exit-code error the kill would otherwise produce. Every spawn in
+ * this file goes through it so cancelling a job actually stops the running
+ * ffmpeg/whisper.cpp process rather than just the job loop between files.
+ */
+function killOnAbort(
+  child: ReturnType<typeof spawn>,
+  signal: AbortSignal | null | undefined,
+  reject: (err: Error) => void
+): () => void {
+  if (!signal) return () => {};
+  const onAbort = () => {
+    child.kill();
+    reject(new TranscriptionCancelled());
+  };
+  if (signal.aborted) {
+    onAbort();
+    return () => {};
+  }
+  signal.addEventListener("abort", onAbort);
+  return () => signal.removeEventListener("abort", onAbort);
 }
 
 /**
@@ -415,13 +478,14 @@ interface DetectLanguageArgs {
  */
 function detectLanguage(
   binaryPath: string,
-  { wavPath, modelPath, device, threads }: DetectLanguageArgs
+  { wavPath, modelPath, device, threads, signal }: DetectLanguageArgs
 ): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const args = ["-m", modelPath, "-f", wavPath, "-l", "auto", "-dl", "-t", String(threads)];
     if (device === "cpu") args.push("-ng");
 
     const child = spawn(binaryPath, args, { windowsHide: true });
+    const cleanup = killOnAbort(child, signal, reject);
     let combined = "";
     // Not streamed to onOutput: this pass prints its own model/backend banner,
     // and repeating that before every file would bury the actual progress.
@@ -430,8 +494,12 @@ function detectLanguage(
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
-    child.on("error", reject);
+    child.on("error", (err) => {
+      cleanup();
+      reject(err);
+    });
     child.on("close", (code) => {
+      cleanup();
       if (code !== 0) {
         reject(new Error(lastLines(combined, 4)));
         return;
@@ -453,18 +521,28 @@ function announce(message: string, onOutput: OutputCallback | null): void {
   else console.log(chalk.dim(message));
 }
 
+/** Like `announce`, but also marks the line as the job's current headline status - see STATUS_PREFIX. */
+function status(message: string, onOutput: OutputCallback | null): void {
+  announce(STATUS_PREFIX + message, onOutput);
+}
+
 /** Decodes any input format into the 16kHz mono s16 WAV whisper.cpp requires. */
-function convertToWav(ffmpeg: string, inputPath: string, wavPath: string): Promise<void> {
+function convertToWav(ffmpeg: string, inputPath: string, wavPath: string, signal?: AbortSignal | null): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       ffmpeg,
       ["-y", "-i", inputPath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wavPath],
       { windowsHide: true }
     );
+    const cleanup = killOnAbort(child, signal, reject);
     let stderr = "";
     child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    child.on("error", reject);
+    child.on("error", (err) => {
+      cleanup();
+      reject(err);
+    });
     child.on("close", (code) => {
+      cleanup();
       if (code !== 0) reject(new Error(`ffmpeg couldn't decode ${path.basename(inputPath)}:\n${lastLines(stderr)}`));
       else resolve();
     });
@@ -487,6 +565,7 @@ interface RunWhisperArgs {
   language?: string;
   /** Decode flags from lib/whisper/decodeProfile.ts, appended last. */
   extraArgs?: string[];
+  signal?: AbortSignal | null;
 }
 
 function runWhisperCpp(
@@ -501,6 +580,7 @@ function runWhisperCpp(
     onOutput,
     language = "auto",
     extraArgs = [],
+    signal,
   }: RunWhisperArgs
 ): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -527,6 +607,7 @@ function runWhisperCpp(
     args.push(...extraArgs);
 
     const child = spawn(binaryPath, args, { windowsHide: true });
+    const cleanup = killOnAbort(child, signal, reject);
 
     // Both streams are kept (not just stderr) so a clean exit that still
     // wrote no transcript - whisper.cpp does this for a silent/near-empty
@@ -549,8 +630,12 @@ function runWhisperCpp(
       if (onOutput) emitLines(text, onOutput);
       else process.stdout.write(chalk.dim(text));
     });
-    child.on("error", reject);
+    child.on("error", (err) => {
+      cleanup();
+      reject(err);
+    });
     child.on("close", (code) => {
+      cleanup();
       if (code !== 0) {
         reject(new Error(stderr ? lastLines(stderr) : `whisper.cpp exited with code ${code}`));
         return;

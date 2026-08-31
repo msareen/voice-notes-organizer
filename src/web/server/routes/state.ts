@@ -18,5 +18,12 @@ export function createStateRoutes(ctx: ServerContext) {
     return new Response(null, { status: 204 });
   }
 
-  return { state, ping, bye };
+  /** POST /api/job/cancel - kills whatever the running job's current spawn is. */
+  function cancelJob(): Response {
+    const cancelled = ctx.cancelJob();
+    if (!cancelled) return ctx.sendJson(409, { error: "No job is running" });
+    return new Response(null, { status: 204 });
+  }
+
+  return { state, ping, bye, cancelJob };
 }

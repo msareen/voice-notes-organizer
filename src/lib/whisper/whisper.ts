@@ -33,6 +33,21 @@ export class TranscriptionCancelled extends Error {
   }
 }
 
+/**
+ * Thrown by convertToWav when ffmpeg's own input listing shows no audio
+ * stream at all - a screen recording with the mic muted/not granted, for
+ * instance. Distinct from a genuine decode failure: there's no "-l"/model
+ * combination that will ever produce speech from a file that never had
+ * audio, so transcribeFile treats this as "nothing to transcribe" rather
+ * than an error worth surfacing as a failure.
+ */
+export class NoAudioTrackError extends Error {
+  constructor(fileName: string) {
+    super(`${fileName} has no audio track`);
+    this.name = "NoAudioTrackError";
+  }
+}
+
 function throwIfAborted(signal: AbortSignal | null | undefined): void {
   if (signal?.aborted) throw new TranscriptionCancelled();
 }
@@ -206,6 +221,19 @@ export async function transcribeFile(
   } catch (err) {
     // A cancellation is never worth a repair-and-retry - the user asked to stop.
     if (err instanceof TranscriptionCancelled) throw err;
+    // No audio track at all (e.g. a screen recording with a muted/absent
+    // mic): there's nothing whisper.cpp could ever transcribe here, so
+    // write a transcript that says so instead of failing the job the way a
+    // genuine decode error would.
+    if (err instanceof NoAudioTrackError) {
+      status("No audio detected in this recording.", onOutput);
+      await fs.writeFile(
+        transcript,
+        serializeCues([{ start: 0, end: 1, text: "[No audio detected in this recording]" }]),
+        "utf8"
+      );
+      return;
+    }
     // Only worth the extra decode/rebuild pass for that one known Samsung
     // shape; any other failure (corrupt audio, unsupported format, a real
     // silent recording, etc.) just propagates as before.
@@ -543,8 +571,18 @@ function convertToWav(ffmpeg: string, inputPath: string, wavPath: string, signal
     });
     child.on("close", (code) => {
       cleanup();
-      if (code !== 0) reject(new Error(`ffmpeg couldn't decode ${path.basename(inputPath)}:\n${lastLines(stderr)}`));
-      else resolve();
+      if (code !== 0) {
+        // ffmpeg lists every input stream before it starts converting, so
+        // "no Audio: stream in the input listing" is a reliable signal that
+        // this file never had audio to decode - not just that this
+        // particular attempt failed. Checked ahead of the input's own
+        // "Stream #0:0" marker so we don't false-positive on an unrelated
+        // "Audio:" mention later in the log (e.g. an output-side error).
+        const inputSection = stderr.split(/^Output #0/m)[0];
+        const hasAudioStream = /Stream #\d+:\d+(?:\[[^\]]*\])?(?:\([^)]*\))?:\s*Audio:/.test(inputSection);
+        if (!hasAudioStream) reject(new NoAudioTrackError(path.basename(inputPath)));
+        else reject(new Error(`ffmpeg couldn't decode ${path.basename(inputPath)}:\n${lastLines(stderr)}`));
+      } else resolve();
     });
   });
 }

@@ -15,6 +15,8 @@ import {
   modelSources,
   whisperModelCatalog,
   WHISPER_DEFAULT_MODELS,
+  vadModelSources,
+  WHISPER_VAD_MODEL,
 } from "../webSources/whisperModels.ts";
 import {
   isWindows,
@@ -955,4 +957,90 @@ export async function findStalePythonCache(): Promise<StalePythonCache> {
     totalBytes += stats.size;
   }
   return { dir, files: entries, totalBytes };
+}
+
+// ---------------------------------------------------------------------------
+// The Silero VAD model
+// ---------------------------------------------------------------------------
+//
+// Kept apart from the transcription models above rather than folded into the
+// catalog, because almost nothing about it is the same: a different Hugging
+// Face repo, under a megabyte instead of gigabytes, no aliases, and it's an
+// optional extra that a failed download must never turn into a failed
+// transcription. `vno setup` fetches it silently; every read path degrades to
+// "no VAD" when it isn't there.
+
+const vadFileName = () => `ggml-${WHISPER_VAD_MODEL.stem}.bin`;
+
+/**
+ * The VAD model's path, or null if it isn't installed. Never downloads -
+ * that's `downloadVadModel`'s job, and this one is called on the
+ * transcription hot path where a network fetch would be a surprise.
+ */
+export async function resolveVadModel(): Promise<string | null> {
+  const envOverride = process.env.WHISPER_VAD_MODEL_PATH;
+  const candidates: string[] = [];
+  if (envOverride) {
+    const stats = await fs.stat(envOverride).catch(() => null);
+    candidates.push(stats?.isDirectory() ? path.join(envOverride, vadFileName()) : envOverride);
+  }
+  for (const root of bothInstallRoots()) {
+    candidates.push(path.join(installPaths(root).modelsDir, vadFileName()));
+  }
+  for (const candidate of candidates) {
+    const stats = await fs.stat(candidate).catch(() => null);
+    // Only a size sanity check, not validateModelFile: the VAD model is a raw
+    // ggml tensor dump without the GGML/GGUF magic the transcription models
+    // carry, so the magic-byte test would reject a perfectly good file.
+    if (stats?.isFile() && Math.abs(stats.size - WHISPER_VAD_MODEL.approxBytes) / WHISPER_VAD_MODEL.approxBytes < 0.1) {
+      return path.resolve(candidate);
+    }
+  }
+  return null;
+}
+
+/**
+ * Downloads the VAD model if it isn't already there, returning its path - or
+ * null if it couldn't be fetched. Deliberately doesn't throw: this is called
+ * from `vno setup`, where a blocked mirror should cost the user the optional
+ * VAD pre-filter and not the whole install.
+ */
+export async function downloadVadModel({
+  mode = "local",
+  onProgress = null,
+  onLog = () => {},
+}: {
+  mode?: InstallMode;
+  onProgress?: DownloadProgressCallback | null;
+  onLog?: (message: string) => void;
+} = {}): Promise<string | null> {
+  const existing = await resolveVadModel();
+  if (existing) return existing;
+
+  const { modelsDir } = installPaths(resolveInstallRoot(mode));
+  const destPath = path.join(modelsDir, vadFileName());
+  await fs.ensureDir(modelsDir);
+
+  for (const source of vadModelSources()) {
+    const url = `${source.base}/${vadFileName()}`;
+    onLog(`Downloading ${vadFileName()} from ${source.label}...`);
+    try {
+      await downloadFile(url, destPath, { onProgress });
+    } catch (err) {
+      onLog(`  ${errorMessage(err)}`);
+      continue;
+    }
+    const actual = await sha256File(destPath);
+    if (actual.toLowerCase() !== WHISPER_VAD_MODEL.sha256!.toLowerCase()) {
+      onLog(`  Checksum mismatch for ${vadFileName()}; discarding.`);
+      await fs.remove(destPath).catch(() => {});
+      await fs.remove(`${destPath}.part`).catch(() => {});
+      continue;
+    }
+    return destPath;
+  }
+
+  onLog(`Could not download ${vadFileName()}. Transcription works without it; the adaptive`);
+  onLog("mode just won't be able to pre-filter silence. Re-run `vno setup` to try again.");
+  return null;
 }

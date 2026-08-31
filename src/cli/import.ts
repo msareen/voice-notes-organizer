@@ -5,6 +5,7 @@ import { loadConfig, saveConfig } from "../lib/config.ts";
 import { detectVolumes } from "../lib/import/volumes.ts";
 import { syncVolume } from "../lib/import/sync.ts";
 import { resolveAccel, accelState, resolveLanguagePlan } from "../lib/whisper/whisper.ts";
+import { resolveDecodePlan } from "../lib/whisper/decodeProfile.ts";
 import { runVisualize } from "./visualize.ts";
 import { prompt, promptStrict, CANCELLED, PromptCancelled } from "./prompt.ts";
 import { ensureDependencies } from "./setup.ts";
@@ -157,6 +158,7 @@ async function maybeAutoTranslate(imported: string[], config: Config): Promise<b
     model,
     translate: true,
     device,
+    decode: resolveDecodePlan(config),
     ...resolveLanguagePlan(config),
   });
   console.log(chalk.bold(`\nDone. Translated ${done}/${imported.length} imported note(s).`));

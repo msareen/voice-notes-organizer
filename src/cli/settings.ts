@@ -7,13 +7,19 @@ import { THEMES, themeOf } from "../lib/shared/themes.ts";
 import { ledgerSummary, clearLedger } from "../lib/notes/ledger.ts";
 import { checkDependencies } from "../lib/setup.ts";
 import { accelState, crossLanguageState } from "../lib/whisper/whisper.ts";
+import { decodeState, decodeArgs, neutralKnobs } from "../lib/whisper/decodeProfile.ts";
 import { WHISPER_LANGUAGES, languageLabel } from "../lib/shared/languages.ts";
-import { resolveModel } from "../lib/whisper/whispercpp.ts";
+import { resolveModel, resolveVadModel } from "../lib/whisper/whispercpp.ts";
 import { listModels as listLlamaModels } from "../lib/llama/llamacpp.ts";
 import { prompt, CANCELLED } from "./prompt.ts";
 import { runSetup } from "./setup.ts";
 import { DEFAULT_PORT } from "./visualize.ts";
-import type { Config, Source } from "../types.ts";
+import type { Config, ManualDecode, Source } from "../types.ts";
+
+/** The `ManualDecode` fields that take a number, for the shared prompt row below. */
+type NumericKnob = {
+  [K in keyof ManualDecode]: ManualDecode[K] extends number | null ? K : never;
+}[keyof ManualDecode];
 
 const MODELS = ["turbo", "tiny", "base", "small", "medium", "large"];
 // "auto" lets whisper.cpp detect per file; a pinned code fixes languages its
@@ -41,6 +47,226 @@ function crossLanguageLabel(config: Config): string {
 }
 
 const onOffLabel = (value: boolean) => (value ? chalk.green("on") : chalk.red("off"));
+
+/** One-line summary of the decode block for the main menu. */
+function decodeLabel(config: Config): string {
+  const { mode, manual } = decodeState(config);
+  if (mode !== "manual") return mode === "adaptive" ? chalk.green("adaptive") : chalk.dim("auto");
+  const count = decodeArgs(manual, "/vad").length;
+  return count === 0 ? chalk.yellow("manual, nothing set") : chalk.yellow("manual");
+}
+
+/**
+ * How hard vno works for a clean transcript. The mode is the master switch,
+ * and the flags below it only exist in "manual" - the other two modes decide
+ * for themselves (see lib/whisper/decodeProfile.ts), so showing knobs there
+ * would promise a control that isn't wired to anything.
+ *
+ * Mirrors manageCrossLanguage: a sub-loop that redraws after every change and
+ * saves as it goes.
+ */
+async function manageDecode(config: Config): Promise<void> {
+  // Every numeric flag, so the rows below are one table rather than ten
+  // near-identical prompt blocks. `hint` is what whisper.cpp does if we say
+  // nothing - shown as the default so the user can see what they're moving
+  // away from without us storing it (see ManualDecode on why).
+  const NUMBERS: { key: NumericKnob; label: string; hint: string; blurb: string }[] = [
+    { key: "entropyThold", label: "Entropy threshold", hint: "2.40", blurb: "lower retries a garbled window sooner" },
+    { key: "logprobThold", label: "Log-prob threshold", hint: "-1.00", blurb: "higher retries a low-confidence window sooner" },
+    { key: "noSpeechThold", label: "No-speech threshold", hint: "0.60", blurb: "lower drops more near-silence" },
+    { key: "beamSize", label: "Beam size", hint: "whisper.cpp's", blurb: "wider search, slower" },
+    { key: "bestOf", label: "Best-of", hint: "whisper.cpp's", blurb: "more candidates per window, slower" },
+    { key: "temperatureInc", label: "Temperature step", hint: "0.20", blurb: "0 disables the fallback ladder entirely" },
+    { key: "vadThreshold", label: "Speech-detection threshold", hint: "0.50", blurb: "higher is stricter about what counts as speech" },
+  ];
+
+  while (true) {
+    const { mode, manual } = decodeState(config);
+    const num = (key: NumericKnob) => (manual[key] == null ? chalk.dim("default") : String(manual[key]));
+    const tri = (value: boolean | null, on: string, off: string) =>
+      value === null ? chalk.dim("default") : value ? on : off;
+
+    const vadModel = await resolveVadModel();
+    if (mode === "manual" && manual.vad && !vadModel) {
+      console.log(
+        chalk.yellow("\nSpeech detection is on, but its model isn't installed - run `vno setup`.\nRuns fall back to no VAD until then.")
+      );
+    }
+
+    const answer = await prompt([
+      {
+        type: "list",
+        name: "action",
+        message: "Transcription quality (Esc to go back)",
+        pageSize: 18,
+        choices: [
+          { name: `Mode  ${chalk.dim("[")}${decodeLabel(config)}${chalk.dim("]")}`, value: "mode" },
+          ...(mode === "manual"
+            ? [
+                new inquirer.Separator(),
+                {
+                  name: `Carry context between windows  ${chalk.dim("[")}${tri(manual.carryContext, chalk.green("on"), chalk.red("off"))}${chalk.dim("]")}`,
+                  value: "carryContext",
+                },
+                {
+                  name: `Speech detection (VAD)  ${chalk.dim("[")}${onOffLabel(manual.vad)}${chalk.dim("]")}`,
+                  value: "vad",
+                },
+                {
+                  name: `Flash attention  ${chalk.dim("[")}${tri(manual.flashAttn, chalk.green("on"), chalk.red("off"))}${chalk.dim("]")}`,
+                  value: "flashAttn",
+                },
+                {
+                  name: `Suppress non-speech tokens  ${chalk.dim("[")}${onOffLabel(manual.suppressNst)}${chalk.dim("]")}`,
+                  value: "suppressNst",
+                },
+                new inquirer.Separator(),
+                ...NUMBERS.map((n) => ({
+                  name: `${n.label}  ${chalk.dim("[")}${num(n.key)}${chalk.dim("]")}`,
+                  value: `num:${n.key}`,
+                })),
+                new inquirer.Separator(),
+                { name: chalk.dim("Reset every flag to whisper.cpp's defaults"), value: "reset" },
+              ]
+            : []),
+          new inquirer.Separator(),
+          { name: "Done", value: "done" },
+        ],
+      },
+    ]);
+
+    if (answer === CANCELLED || answer.action === "done") return;
+
+    if (answer.action === "mode") {
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message: "How hard should vno work for a clean transcript?",
+          default: mode,
+          choices: [
+            {
+              name: `Adaptive  ${chalk.dim("- one normal pass, then retry on safer settings only if it looks hallucinated")}`,
+              value: "adaptive",
+            },
+            { name: `Auto  ${chalk.dim("- one pass on whisper.cpp's defaults, never retried")}`, value: "auto" },
+            { name: `Manual  ${chalk.dim("- one pass on the flags you set below")}`, value: "manual" },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.decode = { ...decodeState(config), mode: res.value };
+        await saveConfig(config);
+        if (res.value === "adaptive") {
+          console.log(
+            chalk.dim("A clean recording costs exactly what \"auto\" costs - only a file that\nactually trips a loop detector pays for a retry.")
+          );
+        }
+      }
+      continue;
+    }
+
+    if (answer.action === "reset") {
+      config.decode = { ...decodeState(config), manual: neutralKnobs() };
+      await saveConfig(config);
+      console.log(chalk.dim("Every flag is back to whisper.cpp's own default."));
+      continue;
+    }
+
+    if (answer.action === "carryContext" || answer.action === "flashAttn") {
+      const key = answer.action as "carryContext" | "flashAttn";
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message:
+            key === "carryContext"
+              ? "Let each 30s window see what the previous one transcribed?"
+              : "Use flash attention?",
+          default: manual[key],
+          choices: [
+            { name: `Leave it to whisper.cpp  ${chalk.dim("(default)")}`, value: null },
+            {
+              name:
+                key === "carryContext"
+                  ? `On  ${chalk.dim("- better continuity across windows")}`
+                  : `On  ${chalk.dim("- faster")}`,
+              value: true,
+            },
+            {
+              name:
+                key === "carryContext"
+                  ? `Off  ${chalk.dim("- a repetition loop can't spread past one window; the anti-loop lever")}`
+                  : `Off  ${chalk.dim("- slower, but rules out the Metal/CUDA kernel as the cause of bad output")}`,
+              value: false,
+            },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.decode = { ...decodeState(config), manual: { ...manual, [key]: res.value } };
+        await saveConfig(config);
+      }
+      continue;
+    }
+
+    if (answer.action === "vad" || answer.action === "suppressNst") {
+      const key = answer.action as "vad" | "suppressNst";
+      const res = await prompt([
+        {
+          type: "list",
+          name: "value",
+          message:
+            key === "vad"
+              ? "Filter silence out before whisper.cpp sees it?"
+              : "Suppress non-speech tokens?",
+          default: manual[key],
+          choices: [
+            {
+              name:
+                key === "vad"
+                  ? `On  ${chalk.dim("- silence is where phantom text comes from")}`
+                  : `On  ${chalk.dim("- fewer [music]/[noise] style inventions")}`,
+              value: true,
+            },
+            { name: `Off  ${chalk.dim("(default)")}`, value: false },
+          ],
+        },
+      ]);
+      if (res !== CANCELLED) {
+        config.decode = { ...decodeState(config), manual: { ...manual, [key]: res.value } };
+        await saveConfig(config);
+      }
+      continue;
+    }
+
+    if (typeof answer.action === "string" && answer.action.startsWith("num:")) {
+      const key = answer.action.slice(4) as NumericKnob;
+      const meta = NUMBERS.find((n) => n.key === key)!;
+      const res = await prompt([
+        {
+          type: "input",
+          name: "value",
+          message: `${meta.label} - ${meta.blurb}. Blank leaves ${meta.hint === "whisper.cpp's" ? "whisper.cpp's default" : `it at ${meta.hint}`}`,
+          default: manual[key] == null ? "" : String(manual[key]),
+          validate: (input: string) => {
+            const raw = input.trim();
+            if (!raw) return true;
+            return Number.isFinite(Number(raw)) ? true : "Enter a number, or leave it blank for the default.";
+          },
+        },
+      ]);
+      if (res !== CANCELLED) {
+        const raw = String(res.value).trim();
+        config.decode = {
+          ...decodeState(config),
+          manual: { ...manual, [key]: raw === "" ? null : Number(raw) },
+        };
+        await saveConfig(config);
+      }
+    }
+  }
+}
 
 /**
  * Accelerator state as one bracketed phrase. The backend is fixed by
@@ -459,6 +685,7 @@ export async function runSettings(): Promise<void> {
           { name: `Default whisper model   ${chalk.dim(`[${config.defaultModel || "turbo"}]`)}`, value: "model" },
           { name: `Transcription language  ${chalk.dim(`[${config.transcribeLanguage || "auto"}]`)}`, value: "language" },
           { name: `Cross-language detection  ${chalk.dim("[")}${crossLanguageLabel(config)}${chalk.dim("]")}`, value: "crossLanguage" },
+          { name: `Transcription quality   ${chalk.dim("[")}${decodeLabel(config)}${chalk.dim("]")}`, value: "decode" },
           { name: `GPU acceleration        ${chalk.dim("[")}${gpuLabel(config)}${chalk.dim("]")}`, value: "gpu" },
           ...(llamaModels.length > 0
             ? [{ name: `Summarization model     ${chalk.dim(`[${config.summaryModel || "none"}]`)}`, value: "summaryModel" }]
@@ -699,6 +926,8 @@ export async function runSettings(): Promise<void> {
       }
     } else if (answer.action === "crossLanguage") {
       await manageCrossLanguage(config);
+    } else if (answer.action === "decode") {
+      await manageDecode(config);
     } else if (answer.action === "sources") {
       await manageSources(config);
     } else if (answer.action === "resetLedger") {

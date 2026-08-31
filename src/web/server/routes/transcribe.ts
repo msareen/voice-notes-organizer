@@ -8,7 +8,9 @@ import {
   isDeviceError,
   lastLine,
   resolveLanguagePlan,
+  TranscriptionCancelled,
 } from "../../../lib/whisper/whisper.ts";
+import { resolveDecodePlan } from "../../../lib/whisper/decodeProfile.ts";
 import { isLanguageChoice } from "../../../lib/shared/languages.ts";
 import { MODELS } from "../constants.ts";
 import type { ServerContext } from "../context.ts";
@@ -44,6 +46,8 @@ export function createWhisperRunner(ctx: ServerContext) {
   return function whisperRunner({ model, translate, language: languageOverride = null }: WhisperRunOptions): WhisperRun {
     let device: string = resolveAccel(ctx.config);
     const { language, crossLanguage } = resolveLanguagePlan(ctx.config, languageOverride);
+    const decode = resolveDecodePlan(ctx.config);
+    const signal = ctx.jobSignal();
     if (device !== "cpu") {
       const accel = accelState(ctx.config);
       ctx.jobLog(`Using accelerated transcription${accel.name ? ` (${accel.name})` : ""}.`);
@@ -52,15 +56,16 @@ export function createWhisperRunner(ctx: ServerContext) {
 
     return async function run(file: string): Promise<void> {
       try {
-        await transcribeFile(file, { model, translate, device, language, crossLanguage, onOutput: (line) => ctx.jobLog(line) });
+        await transcribeFile(file, { model, translate, device, language, crossLanguage, decode, signal, onOutput: (line) => ctx.jobLog(line) });
         return;
       } catch (err) {
+        if (err instanceof TranscriptionCancelled) throw err;
         if (device === "cpu" || !isDeviceError(errorMessage(err))) throw err;
         ctx.jobLog(`Accelerator run failed: ${lastLine(errorMessage(err))}`);
         ctx.jobLog("Falling back to the CPU for the rest of this job.");
         device = "cpu";
       }
-      await transcribeFile(file, { model, translate, device: "cpu", language, crossLanguage, onOutput: (line) => ctx.jobLog(line) });
+      await transcribeFile(file, { model, translate, device: "cpu", language, crossLanguage, decode, signal, onOutput: (line) => ctx.jobLog(line) });
     };
   };
 }
@@ -102,6 +107,7 @@ export function createTranscribeRoutes(ctx: ServerContext) {
       const verb = translate ? "Translating" : "Transcribing";
       const runWhisper = whisperRunner({ model, translate, language });
       let done = 0;
+      let cancelled = false;
       for (const rel of rels) {
         const full = ctx.resolveInside(rel);
         ctx.jobProgress(done, `${verb} ${path.basename(rel)} (${done + 1}/${rels.length})`);
@@ -114,12 +120,20 @@ export function createTranscribeRoutes(ctx: ServerContext) {
           ctx.jobLog(`Saved ${savedTo}`);
           console.log(chalk.green(`Saved -> ${savedTo}`));
         } catch (err) {
+          if (err instanceof TranscriptionCancelled) {
+            cancelled = true;
+            ctx.jobLog(`Cancelled while transcribing ${rel}.`);
+            console.log(chalk.yellow(`Cancelled while transcribing ${rel}.`));
+            break;
+          }
           ctx.jobLog(`FAILED ${rel}: ${errorMessage(err)}`);
           console.log(chalk.red(`Failed to transcribe ${rel}: ${errorMessage(err)}`));
         }
         ctx.jobProgress(done);
       }
-      const summary = `${translate ? "Translated" : "Transcribed"} ${done}/${rels.length} file(s)`;
+      const summary = cancelled
+        ? `Cancelled - ${translate ? "translated" : "transcribed"} ${done}/${rels.length} file(s)`
+        : `${translate ? "Translated" : "Transcribed"} ${done}/${rels.length} file(s)`;
       ctx.jobProgress(done, summary);
       console.log(chalk.cyan(summary));
       await ctx.endJob(null);

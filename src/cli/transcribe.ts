@@ -12,6 +12,7 @@ import {
   lastLine,
   resolveLanguagePlan,
 } from "../lib/whisper/whisper.ts";
+import { resolveDecodePlan } from "../lib/whisper/decodeProfile.ts";
 import { resolveModel } from "../lib/whisper/whispercpp.ts";
 import { ensureDependencies } from "./setup.ts";
 import { getDurationSeconds, formatDuration, recordedDate, formatDate } from "../lib/import/media.ts";
@@ -19,6 +20,7 @@ import { prompt, CANCELLED } from "./prompt.ts";
 import { runVisualize } from "./visualize.ts";
 import { createProgressBar, locationOf } from "./progress.ts";
 import "./searchableCheckbox.ts";
+import type { DecodePlan } from "../lib/whisper/decodeProfile.ts";
 import type { Config, CrossLanguage } from "../types.ts";
 
 function transcriptPathFor(audioPath: string): string {
@@ -35,6 +37,8 @@ export interface TranscribeManyOptions {
   device?: string;
   language?: string;
   crossLanguage?: CrossLanguage | null;
+  /** Which decode strategy to run - see lib/whisper/decodeProfile.ts. */
+  decode?: DecodePlan | null;
   /** Move every progress line to stderr, so stdout stays clean for `-o -`. */
   toStderr?: boolean;
 }
@@ -53,6 +57,7 @@ export async function transcribeMany(
     device = "cpu",
     language = "auto",
     crossLanguage = null,
+    decode = null,
     toStderr = false,
   }: TranscribeManyOptions = {}
 ): Promise<number> {
@@ -72,7 +77,7 @@ export async function transcribeMany(
   for (const f of files) {
     log(chalk.cyan(`\n[${done + 1}/${files.length}] ${gerund} ${path.basename(f)}...`));
     try {
-      await transcribeFile(f, { model, translate, device: current, language, crossLanguage, onOutput });
+      await transcribeFile(f, { model, translate, device: current, language, crossLanguage, decode, onOutput });
       log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
       continue;
@@ -92,7 +97,7 @@ export async function transcribeMany(
     }
 
     try {
-      await transcribeFile(f, { model, translate, device: "cpu", language, crossLanguage, onOutput });
+      await transcribeFile(f, { model, translate, device: "cpu", language, crossLanguage, decode, onOutput });
       log(chalk.green(`Saved -> ${transcriptPathFor(f)}`));
       done++;
     } catch (err) {
@@ -107,6 +112,8 @@ interface DirectOptions {
   output?: string;
   model?: string;
   translate: boolean;
+  /** `--decode`, a one-run override of the configured mode. */
+  decode?: string;
   config: Config;
 }
 
@@ -116,7 +123,7 @@ interface DirectOptions {
  * `config.defaultModel` (or `-m`) and lets `ensureDependencies` handle the
  * "not set up yet" case exactly like every other command does.
  */
-async function runTranscribeDirect({ file, output, model, translate, config }: DirectOptions): Promise<boolean> {
+async function runTranscribeDirect({ file, output, model, translate, decode, config }: DirectOptions): Promise<boolean> {
   // `-o -` means "write the transcript to stdout", so the whole run has to
   // keep stdout clean for it. Everything else - our progress lines and
   // whisper.cpp's several KB of timings - moves to stderr for the duration.
@@ -145,6 +152,7 @@ async function runTranscribeDirect({ file, output, model, translate, config }: D
     translate,
     device,
     toStderr: toStdout,
+    decode: resolveDecodePlan(config, decode),
     ...resolveLanguagePlan(config),
   });
   if (done === 0) return false;
@@ -219,6 +227,8 @@ export interface RunTranscribeOptions {
   directFile?: boolean;
   filter?: string;
   translate?: boolean;
+  /** `--decode <mode>`: overrides the configured decode mode for this run only. */
+  decode?: string;
   output?: string;
   open?: boolean;
 }
@@ -233,13 +243,14 @@ export async function runTranscribe({
   directFile = false,
   filter,
   translate = false,
+  decode,
   output,
   open,
 }: RunTranscribeOptions = {}): Promise<boolean | void> {
   const config = await loadConfig();
 
   if (directFile) {
-    return runTranscribeDirect({ file: String(file), output, model, translate, config });
+    return runTranscribeDirect({ file: String(file), output, model, translate, decode, config });
   }
 
   if (!(await fs.pathExists(config.target))) {
@@ -424,6 +435,7 @@ export async function runTranscribe({
     model: chosenModel,
     translate,
     device,
+    decode: resolveDecodePlan(config, decode),
     ...resolveLanguagePlan(config),
   });
 

@@ -173,6 +173,23 @@ A few things worth knowing up front:
   This form is built to script: it exits non-zero if the transcription fails,
   and with `-o -` the transcript is the only thing on stdout, so
   `vno t clip.mp4 -o - 2>/dev/null | your-tool` pipes cleanly.
+- **It notices when whisper goes off the rails.** whisper sometimes invents
+  text — usually one sentence looping across a stretch of silence — and it's
+  much worse on some machines than others; the same recording can be clean on
+  a Windows GPU and a wall of repeats on a Mac. By default vno transcribes
+  normally, reads the result back, and only if it spots a loop does it try
+  again on safer settings, so a clean recording costs exactly what it always
+  did. Phrases people genuinely repeat ("thank you", "yeah", "mm-hmm") are held
+  to a much higher bar before they count as a loop.
+
+  ```bash
+  vno t note.m4a --decode auto      # one plain pass, no checking - the control
+  vno t note.m4a --decode manual    # one pass with your own flags from `vno setting`
+  ```
+
+  Settings → **Transcription quality** switches the default between the three,
+  and `manual` exposes the individual whisper.cpp knobs for pinning down which
+  one your machine needs.
 - **Video recordings are first-class.** Import, transcribe, cleanup and the UI
   all recognize `.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm` and `.avi` alongside
   audio. The playback deck shows the video itself above the same transport and

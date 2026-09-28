@@ -141,6 +141,48 @@ renamed one and not the other, rename it back — or rename both to match.
 
 Also check the sidecar is beside the audio, not in a subfolder.
 
+## The transcript repeats the same sentence over and over
+
+This is whisper hallucinating, not vno losing the audio. The model can fall
+into a loop — most often across a stretch of silence — and produce fluent,
+confident, entirely invented text. It exits successfully and the `.vtt` is
+well-formed, so nothing warns you except reading it.
+
+It is much worse on some machines than others. The same recording can be clean
+on a Windows/CUDA box and a wall of repeats on Apple Silicon, so "it works on
+my other computer" doesn't mean the file is fine.
+
+**vno checks for this by default.** [`decode.mode`](configuration.md#decode) is
+`"adaptive"`, which transcribes normally, reads the result back, and retries on
+safer settings if it spots a loop. If you're seeing repeats anyway:
+
+- **Check which mode you're on** — `vno setting` → *Transcription quality*. If
+  it's `auto`, nothing is checking; switch it to `adaptive`.
+- **Watch the run.** Adaptive prints what it flagged and which retry it settled
+  on. If it says the result *still* looks hallucinated after every rung, the
+  ladder couldn't fix it and the steps below are worth trying by hand.
+- **Find the one flag your machine needs.** Switch to `manual` and try these,
+  one at a time:
+  - **Carry context between windows → Off.** The biggest single lever. A loop
+    that starts in one 30-second window can no longer feed itself into the next.
+  - **Flash attention → Off.** On by default in whisper.cpp, and its Metal
+    implementation is the usual suspect for output that's broken only on a Mac.
+    Costs speed and nothing else.
+  - **Speech detection (VAD) → On.** Keeps silence away from the decoder, which
+    is where invented text comes from. Needs `vno setup` to have fetched its
+    model.
+- **Try a different model.** `vno t <file> -m large-v3` — `large-v3-turbo` is a
+  distillation with a much smaller decoder, and escaping a loop is exactly the
+  kind of thing that gets distilled away.
+- **Compare against the old behaviour** with `vno t <file> --decode auto`, which
+  is one plain pass with no checking, to confirm what's actually changing.
+
+A genuinely repetitive recording — someone really did say the same thing six
+times — can't be fixed by any of this, and vno will tell you it kept the best
+attempt rather than pretending it succeeded. Phrases people repeat normally
+("thank you", "yeah", "mm-hmm") are held to a much higher bar before they count
+as a loop, so an ordinary end-of-call goodbye won't trigger any of this.
+
 ## The browser page won't open, or says "Invalid session token"
 
 The session token (inlined into the page URL) is persisted in

@@ -740,12 +740,14 @@ mark.hit {
 
 /* ---- Job strip: live progress for import / transcribe / cleanup ---- */
 .jobstrip {
-  flex: none; display: none; align-items: center; gap: 12px;
+  flex: none; display: none; flex-direction: column; gap: 5px;
   padding: 9px clamp(14px, 3vw, 28px); background: var(--surface-2);
   border-bottom: 1px solid var(--line);
   font-family: var(--mono); font-size: .72rem; color: var(--dim);
 }
 .jobstrip.on { display: flex; }
+.jobstrip-row { display: flex; align-items: center; gap: 12px; }
+.jobstrip-row[hidden] { display: none; }
 .jobstrip .jt { flex: 0 1 auto; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar {
   flex: 1 1 auto; min-width: 90px; height: 6px; border-radius: 99px;
@@ -753,6 +755,15 @@ mark.hit {
 }
 .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
 .jobstrip .pct { flex: none; color: var(--accent); font-variant-numeric: tabular-nums; }
+.jobstrip-row .btn.icon[hidden] { display: none; }
+/* Sub-status row: prose about what the job is doing right now (e.g. an
+   adaptive-decode retry), not a progress figure - deliberately no number.
+   Hidden outright (not just emptied) when there's nothing to say, so a plain
+   run that never escalates doesn't leave a dead strip of blank space. */
+.jobstrip-status {
+  flex: 1 1 auto; color: var(--dim); font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .logbox {
   position: fixed; right: 16px; bottom: 16px; width: min(560px, 92vw);
   max-height: 44vh; z-index: 25; display: flex; flex-direction: column;
@@ -830,6 +841,30 @@ button.chip.on { background: var(--accent-soft); border-color: var(--accent-line
 /* The rewrites stay readable while the model is off - they're still saved,
    just unused - so this dims rather than hides them. */
 .ext-chips.is-off { opacity: .45; }
+
+/* ---- Manual decode flags (Settings → Transcription quality) ---- */
+/* Only rendered in "manual" mode - the other two modes decide for themselves,
+   so the whole block is toggled with [hidden] rather than dimmed. */
+.decode-manual[hidden] { display: none; }
+/* Auto-fit rather than a fixed count: seven number fields wrap sensibly in a
+   narrow dialog without a media query, and each stays wide enough to read a
+   negative float in.
+
+   `align-items: end` is load-bearing, not a nicety. These labels are uppercase
+   micro-text, so one of them wrapping to two lines is normal at some dialog
+   widths, and grid's default `stretch` then leaves that column's input sitting
+   a line below the rest of the row. Bottom-aligning the fields keeps the inputs
+   on one line whatever the labels do. */
+.decode-numbers {
+  display: grid; gap: 8px 12px; align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.decode-numbers .field { margin: 0; min-width: 0; }
+.decode-numbers input { width: 100%; }
+/* The placeholder is carrying real meaning here - it's whisper.cpp's own
+   default, i.e. what an empty box actually does - so it reads a touch
+   stronger than a normal hint. */
+.decode-numbers input::placeholder { opacity: .6; font-style: italic; }
 
 /* ---- Source folder blocks (Settings → Additional Source Folders) ---- */
 .source-list-head {

@@ -1,4 +1,6 @@
+import path from "node:path";
 import { accelState, crossLanguageState } from "../../../lib/whisper/whisper.ts";
+import { decodeState, isDecodeMode, sanitizeManualDecode } from "../../../lib/whisper/decodeProfile.ts";
 import { resolveModelsDir as resolveWhisperModelsDir } from "../../../lib/whisper/whispercpp.ts";
 import { resolveModelsDir as resolveLlamaModelsDir } from "../../../lib/llama/llamacpp.ts";
 import { sourceDestFolder } from "../../../lib/import/sync.ts";
@@ -16,6 +18,7 @@ interface SettingsBody {
   transcribeLanguage?: string;
   crossLanguageModel?: string | null;
   crossLanguageMap?: unknown;
+  targetPath?: string;
   summaryModel?: string | null;
   summaryPrompt?: string | null;
   summaryEnabled?: unknown;
@@ -23,6 +26,8 @@ interface SettingsBody {
   openWhenDone?: unknown;
   rememberDeletions?: unknown;
   useGpu?: unknown;
+  decodeMode?: unknown;
+  decodeManual?: unknown;
 }
 
 /** POST /api/settings, POST /api/sources, POST /api/sources/explore. */
@@ -49,6 +54,20 @@ export function createSettingsRoutes(ctx: ServerContext) {
         map: normalizeLanguageMap(body.crossLanguageMap),
       };
     }
+    // Only the saved config changes here - `ctx.target` is baked into this
+    // running server's closures (resolveInside, the note cache, ...) at
+    // startup, so a live move would mean re-scanning and re-wiring all of
+    // that mid-request. Simplest correct thing: persist it and say so: the
+    // new value takes effect next launch, same as "vno setting" already does
+    // from the CLI.
+    let targetChanged = false;
+    if ("targetPath" in body && typeof body.targetPath === "string" && body.targetPath.trim()) {
+      const resolved = path.resolve(body.targetPath.trim());
+      if (resolved !== config.target) {
+        config.target = resolved;
+        targetChanged = true;
+      }
+    }
     // Validated against what's actually discovered on disk, not a fixed
     // catalog - a dropped-in .gguf is a legitimate choice too.
     if ("summaryModel" in body) {
@@ -69,6 +88,17 @@ export function createSettingsRoutes(ctx: ServerContext) {
     if ("theme" in body && (THEME_IDS as readonly string[]).includes(body.theme!)) {
       config.theme = body.theme as ThemeId;
     }
+    // Split into two scalars for the same reason `crossLanguage` is: the mode
+    // select and the flag rows are separate controls, and a client posting
+    // one must not blank the other. An unrecognised mode is dropped rather
+    // than stored - `decodeState` would silently fall back to "adaptive" on
+    // read anyway, and writing junk into config.json helps nobody.
+    if ("decodeMode" in body && isDecodeMode(body.decodeMode)) {
+      config.decode = { ...decodeState(config), mode: body.decodeMode };
+    }
+    if ("decodeManual" in body) {
+      config.decode = { ...decodeState(config), manual: sanitizeManualDecode(body.decodeManual) };
+    }
     if ("openWhenDone" in body) config.openWhenDone = Boolean(body.openWhenDone);
     if ("rememberDeletions" in body) config.rememberDeletions = Boolean(body.rememberDeletions);
     // `useGpu` and not the whole accel block: the installed backend is
@@ -79,6 +109,7 @@ export function createSettingsRoutes(ctx: ServerContext) {
     }
     await ctx.saveConfig();
     ctx.log("Settings updated from the browser.");
+    if (targetChanged) ctx.log(`Target folder set to ${config.target} - restart vno to pick it up.`);
     return ctx.sendJson(200, { config: (await ctx.stateResponse()).config });
   }
 

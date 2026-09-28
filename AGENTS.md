@@ -63,10 +63,16 @@ when done.
 | `-f, --file [name]` | Transcribe one named file directly. **Bare `-f`** instead opens the picker over *every* file, including already-transcribed ones |
 | `-s, --filter <text>` | Pre-filter the picker by name or recorded date |
 | `--translate` | whisper.cpp's translate task (any language → English) instead of verbatim |
+| `--decode <mode>` | `auto`, `adaptive` or `manual` for this run only, overriding `config.decode.mode` |
 | `-o, --output <path>` | With a positional `[file]` only: write the transcript here instead of next to the source |
 
 `vno transcribe` is terminal-only and never launches the browser UI. Use `vno v`
 explicitly to open the viewer after transcription.
+
+**`--decode` is the A/B switch for a recording that came out wrong.** `--decode
+auto` is vno's pre-ladder behaviour, so it's the control to compare against;
+`--decode manual` runs your own flags from `vno setting`. See *Transcription
+quality* below for what the three modes actually do.
 
 ### `vno cleanup`
 Scans for recordings shorter than the threshold and deletes them plus their
@@ -108,8 +114,8 @@ thing over `/api/reveal`.
 
 ### `vno setting` (`settings`)
 Interactive wizard: auto-translate, default model, target folder, open-when-done,
-remember-deletions, plus resets for remembered volumes and the deletion ledger.
-Esc exits.
+remember-deletions, transcription quality, plus resets for remembered volumes and
+the deletion ledger. Esc exits.
 
 ### `vno setup` (`doctor`)
 Reports whether `ffmpeg`/`ffprobe` are on PATH and whisper.cpp is installed
@@ -285,6 +291,54 @@ before changing the API surface.
   which `transcribe`, `cleanup`'s duration scan and import's auto-translate all
   call before starting work. The browser can't install anything, so the page
   reports and points at `vno setup`.
+- **Transcription quality is three modes, and "adaptive" is the default
+  because its first pass is identical to "auto".** whisper invents text —
+  usually one sentence looped across silence — and how often depends on the
+  machine: the same recording can be clean on CUDA and a wall of repeats on
+  Metal. `config.decode.mode` picks the strategy (`lib/whisper/decodeProfile.ts`):
+  `auto` is one pass on whisper.cpp's defaults (vno's behaviour before this
+  existed); `manual` is one pass on `config.decode.manual`; `adaptive` runs
+  `auto`, parses the `.vtt` back, and only escalates if
+  `lib/whisper/detect-hallucination.ts` finds a loop signature. A clean file
+  therefore costs exactly what it always did, which is the whole reason
+  `adaptive` is safe as a default.
+  - **whisper.cpp has no repetition penalty and no no-repeat-ngram-size.** The
+    flags every other whisper front-end reaches for simply aren't in the CLI,
+    so the anti-loop rungs are built from what is: `-mc 0` (stop carrying
+    decoded text between 30s windows, so a loop can't propagate — the
+    load-bearing one), a tighter `-et`, `-sns`, and `-nfa`. Don't go looking
+    for `--repetition-penalty`; it isn't there.
+  - **`-nfa` is a rung because flash attention defaults to *on* in v1.9.x and
+    its Metal kernel is the usual suspect for Mac-only garbage.** Turning it
+    off costs throughput and nothing else.
+  - **`null` in `config.decode.manual` means "pass no flag", not "pass the
+    default".** `-bs`/`-bo` read their defaults from
+    `whisper_full_default_params()` and those have moved between whisper.cpp
+    releases, so storing today's numbers would silently pin them across an
+    upgrade. It also makes an untouched `manual` block behave exactly like
+    `auto`.
+  - **Detection reads text and timings only, never confidence.** `avg_logprob`
+    and `no_speech_prob` are the obvious signals and the wrong ones —
+    fabricated text is produced *confidently*. The four detectors are shape
+    tests over the `.vtt` we already write, so they need no extra whisper.cpp
+    flags and no second output format.
+  - **Phrases people genuinely repeat get a threshold of 10, not an
+    exemption.** "Thank you." looped over silence is whisper's most famous
+    hallucination *and* what the end of a real call sounds like; nothing in
+    the transcript separates them. So `COMMON_PHRASES` raises the bar for
+    those instead of ignoring them, and the uniform-timestamp and
+    low-diversity detectors skip common-phrase chatter entirely — otherwise a
+    conversation full of "yeah"/"mm-hmm" flags on timings alone. Adding a
+    phrase to that list makes vno *more* forgiving; adding a long one would
+    blind the loop detector, which is why `isCommonPhrase` caps entries at
+    four words.
+  - **Only `adaptive` rewrites the `.vtt` itself.** It runs each pass to a temp
+    `-of` prefix and writes the winner with `serializeCues`, because choosing
+    between candidate transcripts means holding them somewhere other than the
+    destination. `auto` and `manual` still let whisper.cpp write the final file
+    directly. A rung replaces the incumbent only if it flags *strictly fewer*
+    seconds, so escalating can never cost a transcript the user would have
+    accepted.
 - **The accelerator backend is fixed at install time, not probed at
   runtime.** Unlike the old Python/PyTorch path (which needed a slow torch
   probe to answer "is CUDA usable?" because a CPU-only torch wheel was a

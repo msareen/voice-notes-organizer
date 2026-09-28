@@ -88,7 +88,7 @@ export async function summarizeText(
       threads: threads || Math.max(1, os.cpus().length - 1),
       onOutput,
     });
-    const summary = stripFooter(stripEcho(raw, instruction + body)).trim();
+    const summary = stripThinking(stripFooter(stripEcho(raw, instruction + body))).trim();
     if (!summary) {
       throw new Error(`llama.cpp produced no summary text - last output:\n${lastLines(raw, 8)}`);
     }
@@ -217,6 +217,23 @@ function stripEcho(output: string, prompt: string): string {
 function stripFooter(output: string): string {
   const idx = output.indexOf("[ Prompt:");
   return idx === -1 ? output : output.slice(0, idx);
+}
+
+/**
+ * `--reasoning-budget 0` only works when the model's chat template checks
+ * that flag - a template that doesn't still wraps its full chain-of-thought
+ * in <think>...</think> (or <thinking>...</thinking>) before the actual
+ * answer. That reasoning is never meant to land in a saved summary, so drop
+ * every such block wholesale. An unclosed tag (budget cut generation off
+ * mid-thought, so </think> never came) means there's no real answer left
+ * either - drop everything from the opening tag to the end rather than
+ * returning half a chain-of-thought as the "summary".
+ */
+function stripThinking(output: string): string {
+  let text = output.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "");
+  const openIdx = text.search(/<think(?:ing)?>/i);
+  if (openIdx !== -1) text = text.slice(0, openIdx);
+  return text;
 }
 
 function emitLines(chunk: string, onOutput: OutputCallback): void {

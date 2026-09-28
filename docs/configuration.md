@@ -49,6 +49,8 @@ time.
 | `autoTranslate` | ✅ | ✅ | ✅ |
 | `defaultModel` | ✅ | ✅ | ✅ |
 | `transcribeLanguage` | ✅ | ✅ | ✅ |
+| `crossLanguage` | ✅ | ✅ | ✅ |
+| `decode` | ✅ | ✅ | ✅ |
 | `openWhenDone` | ✅ | ✅ | ✅ |
 | `rememberDeletions` | ✅ | ✅ | ✅ |
 | `port` | ✅ | — (see below) | ✅ |
@@ -219,6 +221,90 @@ Only consulted when `transcribeLanguage` is `"auto"`. Editable from
 of which set `transcribeLanguage` back to `"auto"` when you pick a model.
 See [Transcription](transcription.md#or-guide-the-detection) for why this
 exists and what the alternative costs.
+
+## `decode`
+
+How hard vno works to get a clean transcript out of whisper.cpp.
+
+```json
+"decode": {
+  "mode": "adaptive",
+  "manual": {
+    "vad": false,
+    "vadThreshold": null,
+    "carryContext": null,
+    "entropyThold": null,
+    "logprobThold": null,
+    "noSpeechThold": null,
+    "beamSize": null,
+    "bestOf": null,
+    "temperatureInc": null,
+    "flashAttn": null,
+    "suppressNst": false
+  }
+}
+```
+
+whisper invents text sometimes — most often one sentence repeated across a
+stretch of silence — and how often it does depends on the machine: the same
+recording can come out clean on a Windows GPU and as a wall of repeats on a
+Mac. There is no single flag that fixes it, so this is a choice between three
+strategies.
+
+**`mode`** is the master switch.
+
+| Mode | What it does |
+| --- | --- |
+| `"adaptive"` *(default)* | Transcribes exactly as `auto` would, reads the `.vtt` back, and only if it finds a loop signature does it retry on progressively safer settings |
+| `"auto"` | One pass on whisper.cpp's own defaults. Never retried. What vno did before this setting existed |
+| `"manual"` | One pass on the flags in `manual` below. No checking, no retry |
+
+`adaptive` is the default because its first attempt *is* `auto` — a recording
+that transcribes cleanly costs exactly what it always did, and only a file
+that actually trips a detector pays for a retry. Its ladder is, in order:
+drop cross-window context and tighten the fallback thresholds; then also
+disable flash attention; then fall back to `large-v3` (skipped, with a note in
+the log, if that model isn't downloaded — a transcription run will never start
+a 3.1 GB fetch — or if it's the model you were already using, since the point
+of that rung is the change of model). A retry replaces the
+previous attempt only if it looks *better*, so escalating can't cost you a
+transcript you'd have been happy with. If nothing helps, you keep the best of
+the attempts and the log says plainly that it still looks wrong.
+
+**`manual`** is ignored unless `mode` is `"manual"`. Every rung of the
+adaptive ladder is expressible here, which is the point: it's for finding out
+which single flag your machine needs.
+
+| Key | whisper.cpp flag | What it's for |
+| --- | --- | --- |
+| `carryContext` | `-mc 0` when `false` | Whether each 30-second window is decoded knowing what the last one said. Turning it **off** is the single most effective thing against repetition loops — a loop can no longer feed itself into the next window |
+| `flashAttn` | `-fa` / `-nfa` | On by default in whisper.cpp. Its Metal implementation is the usual suspect when output is broken on a Mac and fine on the same file elsewhere; turning it off costs speed and nothing else |
+| `vad` | `--vad` | Run Silero voice-activity detection first, so silence never reaches the decoder. Silence is where invented text comes from |
+| `vadThreshold` | `-vt` | How confident the detector must be to call something speech |
+| `entropyThold` | `-et` | Entropy above which a window is retried at a higher temperature. Lower retries sooner |
+| `logprobThold` | `-lpt` | Average log-probability below which a window is retried |
+| `noSpeechThold` | `-nth` | No-speech probability above which a window is dropped |
+| `beamSize` / `bestOf` | `-bs` / `-bo` | Search width and candidates per window. Wider is slower |
+| `temperatureInc` | `-tpi`, or `-nf` when `0` | Temperature step for the fallback ladder; `0` disables fallback entirely |
+| `suppressNst` | `-sns` | Suppress non-speech tokens, which is where `[music]`-style inventions start |
+
+**`null` means "pass no flag at all"** — whisper.cpp uses its own default,
+which is not the same as vno remembering that default. That matters because
+`-bs`/`-bo` read their defaults from the library and those have changed
+between whisper.cpp releases; storing today's numbers would quietly pin them
+across an upgrade. It also means a `manual` block you haven't touched behaves
+exactly like `auto`, which is the right place to start tuning from. `vad` and
+`suppressNst` are plain on/off, since "don't pass the flag" and "off" are the
+same thing for those.
+
+Speech detection needs a small extra model (`ggml-silero-v5.1.2.bin`, under a
+megabyte), which `vno setup` fetches alongside the transcription models. If
+it's missing, `--vad` is quietly dropped rather than failing the run.
+
+Editable from `vno setting` → *Transcription quality* and the UI's Settings
+dialog, which show the individual flags only in `manual` mode. `vno t <file>
+--decode <mode>` overrides `mode` for a single run without changing anything
+here — the fastest way to compare a suspect recording against `auto`.
 
 ## `accel`
 

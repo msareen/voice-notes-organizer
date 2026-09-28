@@ -20,6 +20,7 @@ import {
   readManifest,
   resolveModel,
   downloadModel,
+  downloadVadModel,
   listModels,
   findStalePythonCache,
   isManagedModel,
@@ -1226,6 +1227,16 @@ async function ensureModels(mode: InstallMode, only: string | null): Promise<voi
     } catch (err) {
       console.log(chalk.red(`  Couldn't download "${name}": ${errorMessage(err)}`));
     }
+  }
+
+  // The Silero VAD model the adaptive decode mode uses to keep silence away
+  // from the decoder. Under a megabyte, so unlike the transcription models
+  // above there's nothing to weigh up and no picker - it's just fetched.
+  // `downloadVadModel` never throws: it's an optional extra, and a blocked
+  // mirror must cost the user the pre-filter rather than the whole install.
+  if (!only) {
+    const vad = await downloadVadModel({ mode, onLog: (line) => console.log(chalk.dim(`  ${line}`)) });
+    if (vad) console.log(chalk.dim("Speech detection (VAD) model ready."));
   }
 }
 

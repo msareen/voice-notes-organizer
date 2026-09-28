@@ -8,6 +8,7 @@ import { syncVolume, MEDIA_EXTENSIONS, resolveFlatDest } from "../../../lib/impo
 import { refreshNote } from "../../../lib/notes/notes.ts";
 import { loadDeletionMatcher } from "../../../lib/notes/ledger.ts";
 import { createWhisperRunner } from "./transcribe.ts";
+import { TranscriptionCancelled } from "../../../lib/whisper/whisper.ts";
 import type { ServerContext } from "../context.ts";
 import type { KnownMount, ProgressReport, SyncSource } from "../../../types.ts";
 
@@ -256,6 +257,10 @@ export function createImportRoutes(ctx: ServerContext) {
               await runWhisper(file);
               ctx.jobLog(`Saved ${rel.replace(/\.[^.]+$/, ".vtt")}`);
             } catch (err) {
+              if (err instanceof TranscriptionCancelled) {
+                ctx.jobLog(`Cancelled while translating ${rel}.`);
+                break;
+              }
               ctx.jobLog(`FAILED ${rel}: ${errorMessage(err)}`);
             }
             t++;

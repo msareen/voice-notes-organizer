@@ -110,5 +110,34 @@ export function whisperModelCatalog(): WhisperModelSource[] {
   return WHISPER_MODEL_CATALOG;
 }
 
+// The Silero VAD model whisper.cpp's `--vad` needs, used by the adaptive
+// decode ladder (lib/whisper/decodeProfile.ts) to keep silence away from the
+// decoder, which is where phantom text comes from.
+//
+// Note the different Hugging Face repo: the VAD models live under
+// `ggml-org/whisper-vad`, not the `ggerganov/whisper.cpp` repo the transcription
+// models come from, so this can't ride on `modelSources()` above. That's
+// whisper.cpp's own split too - it ships models/download-vad-model.sh
+// separately from download-ggml-model.sh for exactly this reason.
+const WHISPER_VAD_BASE = "https://huggingface.co/ggml-org/whisper-vad/resolve/main";
+
+/** Where the VAD model comes from, honouring the same VNO_MODEL_BASE override. */
+export function vadModelSources(): ModelSource[] {
+  const override = process.env.VNO_MODEL_BASE?.trim();
+  if (override) return [{ label: override, base: override.replace(/\/+$/, "") }];
+  return [{ label: "Hugging Face", base: WHISPER_VAD_BASE }];
+}
+
+/**
+ * The VAD model vno installs. Under a megabyte, so `vno setup` just fetches
+ * it rather than asking - unlike the transcription models, where the smallest
+ * is 77MB and the largest 3.1GB.
+ */
+export const WHISPER_VAD_MODEL: WhisperModelSource = {
+  stem: "silero-v5.1.2",
+  approxBytes: 885_098,
+  sha256: "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+};
+
 /** The stems `vno setup` fetches unless told otherwise - see whispercpp.ts:DEFAULT_MODELS. */
 export const WHISPER_DEFAULT_MODELS = ["small", "turbo"];

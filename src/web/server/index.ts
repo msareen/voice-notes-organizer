@@ -177,6 +177,7 @@ export async function startServer({
       "/api/state": { GET: withAuth(() => stateRoutes.state()) },
       "/api/ping": { POST: withAuth(() => stateRoutes.ping()) },
       "/api/bye": { POST: withAuth((req, body) => stateRoutes.bye(body)) },
+      "/api/job/cancel": { POST: withAuth(() => stateRoutes.cancelJob()) },
 
       "/api/settings": { POST: withAuth((req, body) => settingsRoutes.settings(body)) },
       "/api/sources": { POST: withAuth((req, body) => settingsRoutes.sources(body)) },

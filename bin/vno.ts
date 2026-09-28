@@ -122,6 +122,10 @@ program
   )
   .option("--translate", "translate to English (whisper translate task) instead of verbatim transcription")
   .option(
+    "--decode <mode>",
+    "how hard to work for a clean transcript for this run only: auto, adaptive or manual (default: your `vno setting` choice)"
+  )
+  .option(
     "-o, --output <path>",
     "write the transcript to this path instead of next to the source file, or \"-\" for stdout (only with a direct file argument)"
   )
@@ -144,6 +148,7 @@ program
         ["vno t interview.mp3 -o -", "write it to stdout, for piping"],
         ["vno t interview.mp3 -m small", "use a different model for this run"],
         ["vno t --translate", "translate to English instead of verbatim"],
+        ["vno t interview.mp3 --decode auto", "one plain pass, no loop detection or retries"],
         ["vno t -s \"Feb 2023\"", "pre-filter the picker by name or date"],
         ["vno t -f", "pick from every file, including already-done ones"],
       ]) +
@@ -164,6 +169,7 @@ program
       directFile: Boolean(file),
       filter: opts.filter,
       translate: Boolean(opts.translate),
+      decode: opts.decode,
       output: opts.output,
       open: opts.open,
     });

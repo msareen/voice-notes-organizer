@@ -120,6 +120,7 @@ picker.
 | `-f, --file [name]` | Transcribe one specific file without the picker — full path, path relative to the target, bare filename (with or without extension), or a unique substring. **Passing `-f` with no value** switches the picker into re-transcribe mode |
 | `-s, --filter <text>` | Pre-seed the picker's live filter |
 | `--translate` | Produce an English translation (whisper.cpp's translate task) instead of a verbatim transcript |
+| `--decode <mode>` | `auto`, `adaptive` or `manual` for this run only, overriding [`decode.mode`](configuration.md#decode). `--decode auto` is vno's plain one-pass behaviour, so it's the control to compare a bad transcript against |
 | `-o, --output <path>` | Write the transcript to this path instead of next to the source file, or `-` for stdout. Only meaningful with a direct `[file]` argument (see below) |
 | `--no-open` | Don't launch the browser UI when the run finishes |
 
